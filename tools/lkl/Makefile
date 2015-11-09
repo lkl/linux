@@ -7,7 +7,8 @@ LD=$(CROSS_COMPILE)ld
 else
 # Use gcc for consistency with the rest of the Linux build.
 CC=gcc
-CFLAGS += -O2 -fno-omit-frame-pointer -Wall -Wextra
+CFLAGS += -O2 -fno-omit-frame-pointer -Wall -Wextra \
+	  -Wno-missing-field-initializers -Wno-unused-parameter -Werror
 endif
 
 OUTPUT_FORMAT=$(shell $(LD) -r -print-output-format)
