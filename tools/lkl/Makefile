@@ -4,6 +4,10 @@ ifdef CROSS_COMPILE
 CC=$(CROSS_COMPILE)gcc
 AR=$(CROSS_COMPILE)ar
 LD=$(CROSS_COMPILE)ld
+else
+# Use gcc for consistency with the rest of the Linux build.
+CC=gcc
+CFLAGS += -O2 -fno-omit-frame-pointer -Wall -Wextra
 endif
 
 lib_source = $(filter-out %-host.c,$(wildcard lib/*.c))
