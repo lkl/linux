@@ -60,6 +60,7 @@ fs2tar: LDFLAGS += -larchive
 lklfuse: LDFLAGS += -lfuse
 ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64-freebsd))
 cptofs: LDFLAGS += -largp
+fs2tar: LDFLAGS += -largp
 endif
 cpfromfs: cptofs
 	if ! [ -e $@ ]; then ln -s $< $@; fi
