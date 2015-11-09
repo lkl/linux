@@ -32,7 +32,7 @@ config ARCH_DMA_ADDR_T_64BIT
        def_bool 64BIT
 
 config 64BIT
-       def_bool n
+       def_bool y
 
 config BIG_ENDIAN
        def_bool n
