@@ -133,8 +133,8 @@ static int lklfuse_readlink(const char *path, char *buf, size_t len)
 	if (ret < 0)
 		return ret;
 
-	if (ret == len)
-		ret  = len - 1;
+	if ((size_t)ret == len)
+		ret = len - 1;
 
 	buf[ret] = 0;
 
@@ -220,7 +220,7 @@ static int lklfuse_read(const char *path, char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
 	long ret;
-	int orig_size = size;
+	ssize_t orig_size = size;
 
 	do {
 		ret = lkl_sys_pread64(fi->fh, buf, size, offset);
@@ -231,7 +231,7 @@ static int lklfuse_read(const char *path, char *buf, size_t size, off_t offset,
 		buf += ret;
 	} while (size > 0);
 
-	return ret < 0 ? ret : orig_size - size;
+	return ret < 0 ? ret : orig_size - (ssize_t)size;
 
 }
 
@@ -239,7 +239,7 @@ static int lklfuse_write(const char *path, const char *buf, size_t size,
 		       off_t offset, struct fuse_file_info *fi)
 {
 	long ret;
-	int orig_size = size;
+	ssize_t orig_size = size;
 
 	do {
 		ret = lkl_sys_pwrite64(fi->fh, buf, size, offset);
@@ -250,7 +250,7 @@ static int lklfuse_write(const char *path, const char *buf, size_t size,
 		buf += ret;
 	} while (size > 0);
 
-	return ret < 0 ? ret : orig_size - size;
+	return ret < 0 ? ret : orig_size - (ssize_t)size;
 }
 
 
@@ -271,7 +271,8 @@ static int lklfuse_statfs(const char *path, struct statvfs *stat)
 	stat->f_files = lkl_statfs.f_files;
 	stat->f_ffree = lkl_statfs.f_ffree;
 	stat->f_favail = stat->f_ffree;
-	stat->f_fsid = *(unsigned long *)&lkl_statfs.f_fsid.val[0];
+	stat->f_fsid = ((uint64_t)lkl_statfs.f_fsid.val[1] << 32) |
+	    lkl_statfs.f_fsid.val[0];
 	stat->f_flag = lkl_statfs.f_flags;
 	stat->f_namemax = lkl_statfs.f_namelen;
 
