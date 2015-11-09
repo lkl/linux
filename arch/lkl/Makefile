@@ -28,7 +28,7 @@ lkl.o: vmlinux
 	$(OBJCOPY) $(foreach sym,$(LKL_ENTRY_POINTS),-G$(prefix)$(sym)) vmlinux lkl.o
 
 install: lkl.o __headers
-	@echo "  INSTALL\t$(INSTALL_PATH)/lib/lkl.o"
+	@echo -e "  INSTALL\t$(INSTALL_PATH)/lib/lkl.o"
 	@cp lkl.o $(INSTALL_PATH)/lib/
 	@arch/lkl/scripts/headers_install.py \
 		$(subst -j,-j$(NPROC),$(findstring -j,$(MAKEFLAGS))) \
