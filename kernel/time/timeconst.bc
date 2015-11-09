@@ -102,8 +102,7 @@ define timeconst(hz) {
 
 		print "#endif /* KERNEL_TIMECONST_H */\n"
 	}
-	halt
 }
 
-hz = read();
-timeconst(hz)
+hz = 250;
+dont_print_me = timeconst(hz)

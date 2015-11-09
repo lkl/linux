@@ -152,7 +152,7 @@ config NO_HZ_FULL_SYSIDLE
 config NO_HZ_FULL_SYSIDLE_SMALL
 	int "Number of CPUs above which large-system approach is used"
 	depends on NO_HZ_FULL_SYSIDLE
-	range 1 NR_CPUS
+	range 1 8
 	default 8
 	help
 	 The full-system idle detection mechanism takes a lazy approach

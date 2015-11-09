@@ -69,7 +69,7 @@ long lkl_mount_dev(unsigned int disk_id, const char *fs_type, int flags,
 	unsigned int dev;
 	int err;
 
-	if (mnt_str_len < sizeof("/mnt/xxxxxxxx"))
+	if (mnt_str_len < (int)sizeof(dev_str[0]))
 		return -LKL_ENOMEM;
 
 	dev = get_virtio_blkdev(disk_id);
