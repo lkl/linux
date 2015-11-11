@@ -1,6 +1,7 @@
 include arch/lkl/auto.conf
 
 KBUILD_CFLAGS += -fno-builtin
+KBUILD_CFLAGS += -D__arch_um__
 
 ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64 elf64-x86-64-freebsd))
 KBUILD_CFLAGS += -fPIC
