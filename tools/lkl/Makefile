@@ -44,9 +44,15 @@ $(objs): lib/lkl.o
 $(execs): lib/liblkl.a
 
 clean:
-	-rm -rf include/lkl/ lib/liblkl.a $(lib_objs) $(objs) $(execs)
+	-rm -rf include/lkl/ lib/liblkl.a $(lib_objs) $(objs) $(execs) \
+	$(nuse_objs) lib/liblkl-nuse.so
 
 fs2tar: LDFLAGS += -larchive
 lklfuse: LDFLAGS += -lfuse
 cpfromfs: cptofs
 	if ! [ -e $@ ]; then ln -s $< $@; fi
+
+test:
+	$(MAKE) -C tests
+
+.NOTPARALLEL : lib/lkl.o
