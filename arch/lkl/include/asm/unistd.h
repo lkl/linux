@@ -9,84 +9,193 @@
  * of system calls where we have two version to keep the same APi across 32 and
  * 64 bit hosts.
  */
-#define __NR_restart_syscall 0
-#define __NR_exit 0
-#define __NR_fork 0
-#define __NR_execve 0
-#define __NR_ptrace 0
-#define __NR_alarm 0
-#define __NR_pause 0
-#define __NR_kill 0
-#define __NR_brk 0
-#define __NR_uselib 0
-#define __NR_swapon 0
-#define __NR_mmap 0
-#define __NR_munmap 0
-#define __NR_swapoff 0
-#define __NR_clone 0
-#define __NR_mprotect 0
-#define __NR_init_module 0
-#define __NR_quotactl 0
-#define __NR_msync 0
-#define __NR_mlock 0
-#define __NR_munlock 0
-#define __NR_mlockall 0
-#define __NR_munlockall 0
-#define __NR_mremap 0
-#define __NR_rt_sigreturn 0
-#define __NR_rt_sigaction 0
-#define __NR_rt_sigprocmask 0
-#define __NR_rt_sigpending 0
-#define __NR_rt_sigtimedwait 0
-#define __NR_rt_sigqueueinfo 0
-#define __NR_rt_sigsuspend 0
-#define __NR_sigaltstack 0
-#define __NR_vfork 0
-#define __NR_mincore 0
-#define __NR_madvise 0
-#define __NR_getdents 0 /* we use the 64 bit counter part instead */
-#define __NR_tkill 0
-#define __NR_exit_group 0
-#define __NR_remap_file_pages 0
-#define __NR_statfs 0 /* we use the 64 bit counter part instead */
-#define __NR_fstatfs 0 /* we use the 64 bit counter part instead */
-#define __NR_fstat 0 /* we use the 64 bit counter part instead */
-#define __NR_fadvise64_64 0
-#define __NR_mbind 0
-#define __NR_get_mempolicy 0
-#define __NR_set_mempolicy 0
-#define __NR_mq_open 0
-#define __NR_mq_unlink 0
-#define __NR_mq_timedsend 0
-#define __NR_mq_timedreceive 0
-#define __NR_mq_0
-#define __NR_mq_getsetattr 0
-#define __NR_kexec_load 0
-#define __NR_migrate_pages 0
-#define __NR_unshare 0
-#define __NR_set_robust_list 0
-#define __NR_get_robust_list 0
-#define __NR_sync_file_range 0
-#define __NR_vmsplice 0
-#define __NR_move_pages 0
-#define __NR_mq_notify 0
-#define __NR_umount2 0
-#define __NR_delete_module 0
-#define __NR_signalfd4 0
-#define __NR_preadv 0 /* we use the 64 bit counter part instead */
-#define __NR_pwritev 0 /* we use the 64 bit counter part instead */
-#define __NR_rt_tgsigqueueinfo 0
-#define __NR_perf_event_open 0
-#define __NR_setns 0
-#define __NR_process_vm_readv 0
-#define __NR_process_vm_writev 0
-#define __NR_kcmp 0
-#define __NR_finit_module 0
-#define __NR_seccomp 0
-#define __NR_memfd_create 0
-#define __NR_bpf 0
-#define __NR_execveat 0
-#define __NR_lseek 0 /* we use the 64 bit counter part instead */
+/* note(hajime): we may automate this to follow when new syscalls are added */
+#define __IGNORE_restart_syscall
+#define __IGNORE_exit
+#define __IGNORE_execve
+#define __IGNORE_lseek
+#define __IGNORE_setuid
+#define __IGNORE_ptrace
+#define __IGNORE_kill
+#define __IGNORE_dup
+#define __IGNORE_times
+#define __IGNORE_brk
+#define __IGNORE_setgid
+#define __IGNORE_geteuid
+#define __IGNORE_getegid
+#define __IGNORE_acct
+#define __IGNORE_umount2
+#define __IGNORE_setpgid
+#define __IGNORE_getppid
+#define __IGNORE_setsid
+#define __IGNORE_setreuid
+#define __IGNORE_setregid
+#define __IGNORE_sethostname
+#define __IGNORE_setrlimit
+#define __IGNORE_getrlimit
+#define __IGNORE_getrusage
+#define __IGNORE_gettimeofday
+#define __IGNORE_settimeofday
+#define __IGNORE_getgroups
+#define __IGNORE_setgroups
+#define __IGNORE_mmap
+#define __IGNORE_munmap
+#define __IGNORE_ftruncate
+#define __IGNORE_fchmod
+#define __IGNORE_fchown
+#define __IGNORE_getpriority
+#define __IGNORE_setpriority
+#define __IGNORE_statfs
+#define __IGNORE_fstatfs
+#define __IGNORE_syslog
+#define __IGNORE_setitimer
+#define __IGNORE_getitimer
+#define __IGNORE_fstat
+#define __IGNORE_vhangup
+#define __IGNORE_wait4
+#define __IGNORE_sysinfo
+#define __IGNORE_clone
+#define __IGNORE_setdomainname
+#define __IGNORE_adjtimex
+#define __IGNORE_init_module
+#define __IGNORE_delete_module
+#define __IGNORE_quotactl
+#define __IGNORE_getpgid
+#define __IGNORE_fchdir
+#define __IGNORE_personality
+#define __IGNORE_setfsuid
+#define __IGNORE_setfsgid
+#define __IGNORE_pwritev
+#define __IGNORE_readv
+#define __IGNORE_getsid
+#define __IGNORE_sched_setparam
+#define __IGNORE_sched_getparam
+#define __IGNORE_sched_setscheduler
+#define __IGNORE_sched_getscheduler
+#define __IGNORE_sched_yield
+#define __IGNORE_sched_get_priority_max
+#define __IGNORE_sched_get_priority_min
+#define __IGNORE_sched_rr_get_interval
+#define __IGNORE_mremap
+#define __IGNORE_setresuid
+#define __IGNORE_getresuid
+#define __IGNORE_nfsservctl
+#define __IGNORE_setresgid
+#define __IGNORE_getresgid
+#define __IGNORE_prctl
+#define __IGNORE_rt_sigreturn
+#define __IGNORE_rt_sigaction
+#define __IGNORE_rt_sigprocmask
+#define __IGNORE_rt_sigpending
+#define __IGNORE_rt_sigtimedwait
+#define __IGNORE_rt_sigqueueinfo
+#define __IGNORE_rt_sigsuspend
+#define __IGNORE_capget
+#define __IGNORE_capset
+#define __IGNORE_sigaltstack
+#define __IGNORE_sendfile
+#define __IGNORE_pivot_root
+#define __IGNORE_gettid
+#define __IGNORE_readahead
+#define __IGNORE_lremovexattr
+#define __IGNORE_fremovexattr
+#define __IGNORE_tkill
+#define __IGNORE_futex
+#define __IGNORE_sched_setaffinity
+#define __IGNORE_sched_getaffinity
+#define __IGNORE_io_setup
+#define __IGNORE_io_destroy
+#define __IGNORE_io_getevents
+#define __IGNORE_io_submit
+#define __IGNORE_io_cancel
+#define __IGNORE_fadvise64
+#define __IGNORE_exit_group
+#define __IGNORE_lookup_dcookie
+#define __IGNORE_set_tid_address
+#define __IGNORE_timer_create
+#define __IGNORE_timer_settime
+#define __IGNORE_timer_gettime
+#define __IGNORE_timer_getoverrun
+#define __IGNORE_timer_delete
+#define __IGNORE_clock_settime
+#define __IGNORE_clock_gettime
+#define __IGNORE_clock_getres
+#define __IGNORE_clock_nanosleep
+#define __IGNORE_tgkill
+#define __IGNORE_mq_open
+#define __IGNORE_mq_unlink
+#define __IGNORE_mq_timedsend
+#define __IGNORE_mq_timedreceive
+#define __IGNORE_mq_notify
+#define __IGNORE_mq_getsetattr
+#define __IGNORE_kexec_load
+#define __IGNORE_waitid
+#define __IGNORE_add_key
+#define __IGNORE_request_key
+#define __IGNORE_keyctl
+#define __IGNORE_ioprio_set
+#define __IGNORE_ioprio_get
+#define __IGNORE_inotify_add_watch
+#define __IGNORE_inotify_rm_watch
+#define __IGNORE_openat
+#define __IGNORE_mkdirat
+#define __IGNORE_mknodat
+#define __IGNORE_fchownat
+#define __IGNORE_unlinkat
+#define __IGNORE_linkat
+#define __IGNORE_symlinkat
+#define __IGNORE_readlinkat
+#define __IGNORE_fchmodat
+#define __IGNORE_faccessat
+#define __IGNORE_pselect6
+#define __IGNORE_ppoll
+#define __IGNORE_unshare
+#define __IGNORE_set_robust_list
+#define __IGNORE_get_robust_list
+#define __IGNORE_splice
+#define __IGNORE_sync_file_range
+#define __IGNORE_tee
+#define __IGNORE_vmsplice
+#define __IGNORE_getcpu
+#define __IGNORE_epoll_pwait
+#define __IGNORE_timerfd_create
+#define __IGNORE_timerfd_settime
+#define __IGNORE_timerfd_gettime
+#define __IGNORE_signalfd4
+#define __IGNORE_eventfd2
+#define __IGNORE_epoll_create1
+#define __IGNORE_dup3
+#define __IGNORE_pipe2
+#define __IGNORE_inotify_init1
+#define __IGNORE_preadv
+#define __IGNORE_rt_tgsigqueueinfo
+#define __IGNORE_perf_event_open
+#define __IGNORE_recvmmsg
+#define __IGNORE_fanotify_init
+#define __IGNORE_fanotify_mark
+#define __IGNORE_prlimit64
+#define __IGNORE_name_to_handle_at
+#define __IGNORE_open_by_handle_at
+#define __IGNORE_clock_adjtime
+#define __IGNORE_syncfs
+#define __IGNORE_setns
+#define __IGNORE_process_vm_readv
+#define __IGNORE_process_vm_writev
+#define __IGNORE_kcmp
+#define __IGNORE_finit_module
+#define __IGNORE_sched_setattr
+#define __IGNORE_sched_getattr
+#define __IGNORE_renameat2
+#define __IGNORE_seccomp
+#define __IGNORE_getrandom
+#define __IGNORE_memfd_create
+#define __IGNORE_bpf
+#define __IGNORE_execveat
+#define __IGNORE_socketpair
+#define __IGNORE_accept4
+#define __IGNORE_shutdown
+#define __IGNORE_userfaultfd
+#define __IGNORE_membarrier
 
 int run_syscalls(void);
 
