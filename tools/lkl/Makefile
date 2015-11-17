@@ -65,3 +65,6 @@ cpfromfs: cptofs
 
 test:
 	$(MAKE) -C tests
+
+valgrind:
+	$(MAKE) -C tests valgrind
