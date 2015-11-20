@@ -125,7 +125,7 @@ config PNFS_BLOCK
 
 config PNFS_OBJLAYOUT
 	tristate
-	depends on NFS_V4_1 && SCSI_OSD_ULD
+	depends on NFS_V4_1 && SCSI_OSD_ULD && BROKEN
 	default NFS_V4
 
 config PNFS_FLEXFILE_LAYOUT

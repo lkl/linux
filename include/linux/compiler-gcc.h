@@ -70,14 +70,14 @@
  */
 #if !defined(CONFIG_ARCH_SUPPORTS_OPTIMIZED_INLINING) ||		\
     !defined(CONFIG_OPTIMIZE_INLINING) || (__GNUC__ < 4)
-#define inline		inline		__attribute__((always_inline)) notrace
-#define __inline__	__inline__	__attribute__((always_inline)) notrace
+#define inline		inline		__attribute__((always_inline)) notrace __maybe_unused
+#define __inline__	__inline__	__attribute__((always_inline)) notrace __maybe_unused
 #define __inline	__inline	__attribute__((always_inline)) notrace
 #else
 /* A lot of inline functions can cause havoc with function tracing */
-#define inline		inline		notrace
-#define __inline__	__inline__	notrace
-#define __inline	__inline	notrace
+#define inline		inline		notrace __maybe_unused
+#define __inline__	__inline__	notrace __maybe_unused
+#define __inline	__inline	notrace __maybe_unused
 #endif
 
 #define __always_inline	inline __attribute__((always_inline))

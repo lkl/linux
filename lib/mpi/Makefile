@@ -4,6 +4,8 @@
 
 obj-$(CONFIG_MPILIB) = mpi.o
 
+CFLAGS_KERNEL += $(call cc-option,-fheinous-gnu-extensions)
+
 mpi-y = \
 	generic_mpih-lshift.o		\
 	generic_mpih-mul1.o		\

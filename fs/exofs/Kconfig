@@ -1,6 +1,6 @@
 config EXOFS_FS
 	tristate "exofs: OSD based file system support"
-	depends on SCSI_OSD_ULD
+	depends on SCSI_OSD_ULD && BROKEN
 	help
 	  EXOFS is a file system that uses an OSD storage device,
 	  as its backing storage.

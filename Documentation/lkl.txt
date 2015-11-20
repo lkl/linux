@@ -22,16 +22,13 @@ defined by the application or a host library (tools/lkl/lib).
 Building LKL on FreeBSD
 -----------------------
 
-$ pkg install binutils gcc49 gnubc
-
-If you don't have a gcc binary:
-$ ln -sf /usr/local/bin/gcc49 /usr/local/bin/gcc
+$ pkg install gnubc
 
 Prefer ports binutils and GNU bc(1):
 $ export PATH=/sbin:/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/usr/lib64/ccache
 
 $ cd tools/lkl
-$ gmake
+$ gmake CC=clang HOSTCC=clang
 
 
 Building LKL the host library and LKL applications
@@ -50,6 +47,11 @@ APIs
 * fs2tar - a tool that converts a filesystem image to a tar archive
 
 * cptofs/cpfromfs - a tool that copies files to/from a filesystem image
+
+
+Building with Clang
+-------------------
+Simply run make CC=clang HOSTCC=clang
 
 
 Supported hosts
