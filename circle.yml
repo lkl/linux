@@ -1,12 +1,12 @@
 ## Customize dependencies
 dependencies:
   pre:
-    - sudo apt-get update; sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs
+    - sudo apt-get update; sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs llvm clang
   post:
-    - make defconfig ARCH=lkl
-    - make ARCH=lkl -j8
+    - make defconfig ARCH=lkl CC=clang HOSTCC=clang
+    - make ARCH=lkl -j8 CC=clang HOSTCC=clang
 
 test:
   override:
-    - cd tools/lkl && make -j8
-    - cd tools/lkl && make test
+    - cd tools/lkl && make -j8 CC=clang HOSTCC=clang
+    - cd tools/lkl && make test CC=clang HOSTCC=clang
