@@ -30,12 +30,17 @@ $ export PATH=/sbin:/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/usr/
 $ cd tools/lkl
 $ gmake CC=clang HOSTCC=clang
 
+Supported hosts
+---------------
 
-Building LKL the host library and LKL applications
+The supported hosts for now are POSIX and Windows userspace applications.
+
+
+Building LKL, the host library and LKL based tools
 --------------------------------------------------
 
-% cd tools/lkl
-% make
+    $ cd tools/lkl
+    $ make
 
 will build LKL as a object file, it will install it in tools/lkl/lib together
 with the headers files in tools/lkl/include then will build the host library,
@@ -48,16 +53,37 @@ APIs
 
 * cptofs/cpfromfs - a tool that copies files to/from a filesystem image
 
+* lklfuse - a tool that can mount a filesystem image in userspace,
+  without root priviledges, using FUSE
 
+  
 Building with Clang
 -------------------
 Simply run make CC=clang HOSTCC=clang
 
 
-Supported hosts
----------------
+Building LKL for Windows
+------------------------
 
-The supported hosts for now are POSIX and Windows userspace applications.
+In order to build LKL for Win32 the mingw cross compiler needs to be installed
+on the host (e.g. on Ubuntu the following packages are required:
+binutils-mingw-w64-i686, gcc-mingw-w64-base, gcc-mingw-w64-i686
+mingw-w64-common, mingw-w64-i686-dev).
+
+Due to a bug in mingw regarding weak symbols the following patches needs to be
+applied to mingw-binutils:
+
+https://sourceware.org/ml/binutils/2015-10/msg00234.html
+
+and i686-w64-mingw32-gas, i686-w64-mingw32-ld and i686-w64-mingw32-objcopy need
+to be recompiled.
+
+With that pre-requisites fullfilled you can now build LKL for Win32 with the
+following command:
+
+    $ cd tools/lkl
+    $ make CROSS_COMPILE=i686-w64-mingw32-
+
 
 FAQ
 ---
