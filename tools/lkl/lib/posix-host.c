@@ -209,3 +209,4 @@ struct lkl_dev_blk_ops lkl_dev_blk_ops = {
 	.get_capacity = fd_get_capacity,
 	.request = fd_do_rw,
 };
+
