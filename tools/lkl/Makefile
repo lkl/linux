@@ -65,3 +65,4 @@ cpfromfs: cptofs
 
 test:
 	$(MAKE) -C tests
+
