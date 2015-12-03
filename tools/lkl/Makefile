@@ -12,16 +12,39 @@ endif
 OUTPUT_FORMAT=$(shell $(LD) -r -print-output-format)
 
 lib_source = $(filter-out %-host.c,$(wildcard lib/*.c))
+lib_objs = $(patsubst %.c,%.o, $(lib_source))
+
 source = $(wildcard tests/*.c)
+objs = $(patsubst %.c,%.o, $(source))
+execs = $(patsubst %.c,%, $(source))
+
 ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64 elf32-i386 elf64-x86-64-freebsd))
+# ELF builds
 source += $(wildcard *.c)
+objs = $(patsubst %.c,%.o, $(source))
+execs = $(patsubst %.c,%, $(source))
+
 lib_source += lib/posix-host.c
+lib_objs = $(patsubst %.c,%.o, $(lib_source))
+
+CFLAGS += -fPIC
 LDFLAGS += -lpthread -lrt
 source += $(wildcard *.c)
-execs =  cpfromfs
+
+all: lib/liblkl.a lib/liblkl.so $(execs)
+
+lib/liblkl.so: $(lib_objs) lib/lkl.o
+	gcc -o $@ -shared $^
+
 else ifeq ($(OUTPUT_FORMAT),pe-i386)
+# Win32 builds
 lib_source += lib/nt-host.c
+lib_objs = $(patsubst %.c,%.o, $(lib_source))
+
 KOPT="KALLSYMS_EXTRA_PASS=1"
+
+all: lib/liblkl.a $(execs)
+
 else
 $(error Unrecognized platform: $(OUTPUT_FORMAT))
 endif
@@ -29,12 +52,6 @@ endif
 ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64 elf64-x86-64-freebsd))
 CFLAGS += -D_FILE_OFFSET_BITS=64
 endif
-
-lib_objs = $(patsubst %.c,%.o, $(lib_source))
-objs = $(patsubst %.c,%.o, $(source))
-execs += $(patsubst %.c,%, $(source))
-
-all: lib/liblkl.a $(execs)
 
 lib/liblkl.a: $(lib_objs) lib/lkl.o
 	$(AR) -rc $@ $^
@@ -51,7 +68,7 @@ $(objs): lib/lkl.o
 $(execs): lib/liblkl.a
 
 clean:
-	-rm -rf include/lkl/ lib/liblkl.a $(lib_objs) lib/lkl.o $(objs) $(execs)
+	-rm -rf include/lkl/ lib/liblkl.a lib/liblkl.so $(lib_objs) lib/lkl.o $(objs) $(execs)
 	$(MAKE) -C ../.. ARCH=lkl clean
 
 fs2tar: LDFLAGS += -larchive
