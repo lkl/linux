@@ -22,6 +22,12 @@ static void print(const char *str, int len)
 	ret = write(STDOUT_FILENO, str, len);
 }
 
+static void seterrno(int error)
+{
+	/* LKL to Linux translation (assuming posix-host is Linux */
+	errno = -error;
+}
+
 struct pthread_sem {
 	pthread_mutex_t lock;
 	int count;
@@ -156,6 +162,7 @@ struct lkl_host_operations lkl_host_ops = {
 	.ioremap = lkl_ioremap,
 	.iomem_access = lkl_iomem_access,
 	.virtio_devices = lkl_virtio_devs,
+	.seterrno = seterrno
 };
 
 int fd_get_capacity(union lkl_disk_backstore bs, unsigned long long *res)

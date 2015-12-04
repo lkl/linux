@@ -12,6 +12,7 @@
  * is provided here for convenience to be implemented by the host library.
  *
  * @print - optional operation that receives console messages
+ * @seterrno - called to set errno for applications in thread local storage.
  *
  * @panic - called during a kernel panic
  *
@@ -39,6 +40,7 @@ struct lkl_host_operations {
 	const char *virtio_devices;
 
 	void (*print)(const char *str, int len);
+	void (*seterrno)(int);
 	void (*panic)(void);
 
 	void* (*sem_alloc)(int count);
