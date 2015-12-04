@@ -1,3 +1,6 @@
+general:
+  artifacts:
+
 ## Customize dependencies
 dependencies:
   pre:
@@ -7,6 +10,7 @@ dependencies:
     - sudo apt-get update
     - sudo apt-get install -qy clang-3.8
     - sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs
+    - sudo apt-get update; sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs valgrind
   post:
     - make defconfig ARCH=lkl CC=clang-3.8 HOSTCC=clang-3.8
     - make ARCH=lkl -j8 CC=clang-3.8 HOSTCC=clang-3.8
@@ -15,3 +19,11 @@ test:
   override:
     - cd tools/lkl && make -j8 CC=clang-3.8 HOSTCC=clang-3.8
     - cd tools/lkl && make test CC=clang-3.8 HOSTCC=clang-3.8
+    - cd tools/lkl && make CC=clang-3.8 HOSTCC=clang-3.8 valgrind:
+         timeout: 1800 # timeout to 30mins
+  post:
+    - mkdir -p $CIRCLE_TEST_REPORTS/junit/
+    - find ./tools/lkl/ -type f -name "*.xml" -exec cp {} $CIRCLE_TEST_REPORTS/ \;
+
+    
+    

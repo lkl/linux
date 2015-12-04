@@ -2,7 +2,6 @@
 include include/uapi/asm-generic/Kbuild.asm
 
 generic-y += auxvec.h
-generic-y += byteorder.h
 generic-y += elf.h
 generic-y += errno.h
 generic-y += fcntl.h
@@ -32,7 +31,6 @@ generic-y += termbits.h
 generic-y += termios.h
 generic-y += timex.h
 generic-y += types.h
-generic-y += unistd.h
 
 # no header-y since we need special user headers handling
 # see arch/lkl/script/headers.py
