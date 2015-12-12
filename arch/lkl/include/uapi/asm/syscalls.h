@@ -92,6 +92,7 @@ typedef __s64			s64;
 
 #include <linux/kdev_t.h>
 #include <asm/irq.h>
+#include <asm/host_ops.h>
 
 /* Define data structures used in system calls that are not defined in UAPI
  * headers */
@@ -137,6 +138,16 @@ struct ustat {
 
 long lkl_syscall(long no, long *params);
 long lkl_sys_halt(void);
+struct lkl_host_operations *lkl_get_host_ops(void);
+
+static inline void lkl_host_seterrno(int error)
+{
+	struct lkl_host_operations *host_ops;
+
+	host_ops = lkl_get_host_ops();
+	if (host_ops && host_ops->seterrno)
+		host_ops->seterrno(error);
+}
 
 #define __MAP0(m,...)
 #define __MAP1(m,t,a) m(t,a)
@@ -150,19 +161,44 @@ long lkl_sys_halt(void);
 #define __SC_LONG(t, a) (long)a
 #define __SC_DECL(t, a) t a
 
-#define LKL_SYSCALL0(name)					       \
-	static inline long lkl_sys_##name(void)			       \
-	{							       \
-		long params[6];					       \
-		return lkl_syscall(__lkl__NR_##name, params);	       \
+#define LKL_SYSCALL0(name)						\
+	static inline long lkl_sys_##name(void)				\
+	{								\
+		long params[6];						\
+		return lkl_syscall(__lkl__NR_##name, params);		\
+	};								\
+	static inline							\
+	long lkl_sys_wrapper_##name(void)				\
+	{								\
+		int ret;						\
+		long params[6];						\
+		ret = lkl_syscall(__lkl__NR_##name, params);		\
+		if (ret < 0) {						\
+			lkl_host_seterrno(ret);				\
+			ret = -1;					\
+		}							\
+		return ret;						\
 	}
 
-#define LKL_SYSCALLx(x, name, ...)				       \
-       	static inline						       \
-	long lkl_sys_##name(__MAP(x, __SC_DECL, __VA_ARGS__))	       \
-	{							       \
-		long params[6] = { __MAP(x, __SC_LONG, __VA_ARGS__) }; \
-		return lkl_syscall(__lkl__NR_##name, params);	       \
+
+#define LKL_SYSCALLx(x, name, ...)					\
+	static inline							\
+	long lkl_sys_##name(__MAP(x, __SC_DECL, __VA_ARGS__))		\
+	{								\
+		long params[6] = { __MAP(x, __SC_LONG, __VA_ARGS__) };	\
+		return lkl_syscall(__lkl__NR_##name, params);		\
+	}								\
+	static inline							\
+	long lkl_sys_wrapper_##name(__MAP(x, __SC_DECL, __VA_ARGS__))	\
+	{								\
+		int ret;						\
+		long params[6] = { __MAP(x, __SC_LONG, __VA_ARGS__) };	\
+		ret = lkl_syscall(__lkl__NR_##name, params);		\
+		if (ret < 0) {						\
+			lkl_host_seterrno(ret);				\
+			ret = -1;					\
+		}							\
+		return ret;						\
 	}
 
 #define SYSCALL_DEFINE0(name, ...) LKL_SYSCALL0(name)
