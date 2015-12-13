@@ -1,5 +1,5 @@
 CFLAGS := -Iinclude -Wall -g -O2 -Wextra -Wno-unused-parameter \
-	  -Wno-missing-field-initializers -fno-strict-aliasing
+	  -Wno-missing-field-initializers -fno-strict-aliasing -fPIC
 
 ifdef CROSS_COMPILE
 CC=$(CROSS_COMPILE)gcc
@@ -22,6 +22,7 @@ LDFLAGS += -lpthread -lrt
 source += $(wildcard *.c)
 execs =  cpfromfs
 lib += lib/liblkl.so
+lib += lib/liblkl-hijack.so
 else ifeq ($(OUTPUT_FORMAT),pe-i386)
 lib_source += lib/nt-host.c
 KOPT="KALLSYMS_EXTRA_PASS=1"
@@ -29,11 +30,13 @@ else
 $(error Unrecognized platform: $(OUTPUT_FORMAT))
 endif
 
+hijack_source = $(filter-out %-host.c,$(wildcard lib/hijack/*.c))
 ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64 elf64-x86-64-freebsd))
 CFLAGS += -D_FILE_OFFSET_BITS=64
 endif
 
 lib_objs = $(patsubst %.c,%.o, $(lib_source))
+hijack_objs = $(patsubst %.c,%.o, $(hijack_source))
 objs = $(patsubst %.c,%.o, $(source))
 execs += $(patsubst %.c,%, $(source))
 
@@ -44,6 +47,11 @@ lib/liblkl.a: $(lib_objs) lib/lkl.o
 
 lib/liblkl.so: $(lib_objs) lib/lkl.o
 	$(CC) -o $@ -shared $^
+
+# order of -lxxx again really matters for LD_PRELOAD
+lib/liblkl-hijack.so: $(hijack_objs) Makefile lib/liblkl.so
+	$(CC) -shared -nodefaultlibs $(lib_objs) -Llib -llkl $(hijack_objs) \
+	-ldl -lpthread -lrt -o $@
 
 lib/lkl.o:
 	$(MAKE) -C ../.. ARCH=lkl defconfig
@@ -57,7 +65,8 @@ $(objs): lib/lkl.o
 $(execs): lib/liblkl.a
 
 clean:
-	-rm -rf include/lkl/ $(lib) $(lib_objs) lib/lkl.o $(objs) $(execs)
+	-rm -rf include/lkl/ $(lib) $(lib_objs) lib/lkl.o $(objs) $(execs) \
+	$(hijack_objs)
 	$(MAKE) -C ../.. ARCH=lkl clean
 
 fs2tar: LDFLAGS += -larchive
@@ -74,3 +83,5 @@ test:
 
 valgrind:
 	$(MAKE) -C tests valgrind
+
+.NOTPARALLEL: lib/lkl.o

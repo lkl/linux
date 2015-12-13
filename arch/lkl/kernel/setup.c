@@ -104,6 +104,11 @@ out_free_init_sem:
 	return ret;
 }
 
+struct lkl_host_operations *lkl_get_host_ops(void)
+{
+	return lkl_ops;
+}
+
 void machine_halt(void)
 {
 	halt = true;
