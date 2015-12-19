@@ -19,6 +19,8 @@ typedef long (*syscall_handler_t)(long arg1, ...);
 syscall_handler_t syscall_table[__NR_syscalls] = {
 	[0 ... __NR_syscalls - 1] =  (syscall_handler_t)sys_ni_syscall,
 #include <asm/unistd.h>
+	/* override __IGNORE-ed syscalls */
+#include <asm/syscall_table.h>
 };
 
 static struct syscall_queue {

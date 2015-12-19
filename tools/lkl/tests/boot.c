@@ -420,6 +420,19 @@ static int test_umount(char *str, int len)
 	return 0;
 }
 
+static int test_syscall(char *str, int len)
+{
+	long ret, params[6];
+
+	ret = lkl_syscall(__lkl__NR_fork, params);
+
+	snprintf(str, len, "%ld", ret);
+	if (ret == -LKL_ENOSYS)
+		return 1;
+
+	return 0;
+}
+
 static struct cl_option *find_short_opt(char name)
 {
 	struct cl_option *opt;
@@ -516,6 +529,7 @@ int main(int argc, char **argv)
 	TEST(opendir);
 	TEST(getdents64);
 	TEST(umount);
+	TEST(syscall);
 
 	lkl_sys_halt();
 
