@@ -17,6 +17,23 @@
 #include <lkl_host.h>
 #include "iomem.h"
 
+/* Let's see if the host has semaphore.h */
+#include <unistd.h>
+
+#ifdef _POSIX_SEMAPHORES
+#include <semaphore.h>
+/* TODO(pscollins): We don't support fork() for now, but maybe one day
+ * we will? */
+#define SHARE_SEM 0
+/* No particular reason this is specific to _POSIX_SEMAPHORES, there
+ * just aren't any errors we'd like to catch in the pthread_cont_t
+ * case, and we get an unused warning otherwise */
+static void should_succeed(int ret, char *msg) {
+	if (ret < 0)
+		perror(msg);
+}
+#endif  /* _POSIX_SEMAPHORES */
+
 static void print(const char *str, int len)
 {
 	int ret __attribute__((unused));
@@ -25,22 +42,29 @@ static void print(const char *str, int len)
 }
 
 struct pthread_sem {
+#ifdef _POSIX_SEMAPHORES
+	sem_t sem;
+#else
 	pthread_mutex_t lock;
 	int count;
 	pthread_cond_t cond;
+#endif /* _POSIX_SEMAPHORES */
 };
 
 static void *sem_alloc(int count)
 {
 	struct pthread_sem *sem;
-
 	sem = malloc(sizeof(*sem));
 	if (!sem)
 		return NULL;
 
+#ifdef _POSIX_SEMAPHORES
+	should_succeed(sem_init(&sem->sem, SHARE_SEM, count), "sem_init");
+#else
 	pthread_mutex_init(&sem->lock, NULL);
 	sem->count = count;
 	pthread_cond_init(&sem->cond, NULL);
+#endif /* _POSIX_SEMAPHORES */
 
 	return sem;
 }
@@ -54,22 +78,35 @@ static void sem_up(void *_sem)
 {
 	struct pthread_sem *sem = (struct pthread_sem *)_sem;
 
+#ifdef _POSIX_SEMAPHORES
+	should_succeed(sem_post(&sem->sem), "sem_post");
+#else
 	pthread_mutex_lock(&sem->lock);
 	sem->count++;
 	if (sem->count > 0)
 		pthread_cond_signal(&sem->cond);
 	pthread_mutex_unlock(&sem->lock);
+#endif /* _POSIX_SEMAPHORES */
+
 }
 
 static void sem_down(void *_sem)
 {
 	struct pthread_sem *sem = (struct pthread_sem *)_sem;
 
+#ifdef _POSIX_SEMAPHORES
+	int ret = -1;
+        errno  = EINTR;
+        while (ret < 0 && errno == EINTR)
+		ret = sem_wait(&sem->sem);
+	should_succeed(ret, "sem_wait");
+#else
 	pthread_mutex_lock(&sem->lock);
 	while (sem->count <= 0)
 		pthread_cond_wait(&sem->cond, &sem->lock);
 	sem->count--;
 	pthread_mutex_unlock(&sem->lock);
+#endif /* _POSIX_SEMAPHORES */
 }
 
 static int thread_create(void (*fn)(void *), void *arg)
