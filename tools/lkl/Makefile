@@ -31,6 +31,24 @@ ifeq (,$(srctree))
 endif
 export srctree
 
+# we rely on the global Kconfig for the lkl host library
+KCONFIG_CONFIG        ?= $(srctree)/.config
+KCONFIG_AUTOHEADER    := $(srctree)/include/generated/autoconf.h
+KCONFIG_AUTOCONFIG    := $(srctree)/include/config/auto.conf
+export KCONFIG_AUTOCONFIG KCONFIG_AUTOHEADER
+
+# Some targets do not require the config variables and would cause
+# unneccessary re-configuration of the kernel tree
+NON_CONFIG_TARGETS := clean config %config
+
+ifneq (,$(filter-out $(NON_CONFIG_TARGETS),$(MAKECMDGOALS)))
+  # include kernel config
+  include $(KCONFIG_AUTOCONFIG)
+else ifeq ($(MAKECMDGOALS),)
+  # include kernel config
+  include $(KCONFIG_AUTOCONFIG)
+endif
+
 
 # Target build configuration
 
@@ -56,8 +74,25 @@ else
   $(error Unrecognized platform: $(OUTPUT_FORMAT))
 endif
 
-ALL_PROGRAMS := lklfuse$(EXESUF) cptofs$(EXESUF) cpfromfs$(EXESUF) fs2tar$(EXESUF)
-ALL_LIBRARIES := liblkl.a liblkl$(SOSUF) liblkl-hijack$(SOSUF)
+ifeq (y,$(CONFIG_LKL_FUSE))
+  ALL_PROGRAMS      += lklfuse$(EXESUF)
+endif
+ifeq (y,$(CONFIG_LKL_CPTOFS))
+  ALL_PROGRAMS      += cptofs$(EXESUF) cpfromfs$(EXESUF)
+endif
+ifeq (y,$(CONFIG_LKL_FS2TAR))
+  ALL_PROGRAMS      += fs2tar$(EXESUF)
+endif
+
+ifeq (y,$(CONFIG_LKL_STATIC))
+  ALL_LIBRARIES     += liblkl.a
+endif
+ifeq (y,$(CONFIG_LKL_SHARED))
+  ALL_LIBRARIES     += liblkl$(SOSUF)
+endif
+ifeq (y,$(CONFIG_LKL_HIJACK))
+  ALL_LIBRARIES     += liblkl-hijack$(SOSUF)
+endif
 
 static: liblkl.a
 shared: liblkl$(SOSUF)
@@ -97,11 +132,22 @@ ifeq (,$(filter $(OUTPUT_FORMAT),pe-i386))
 endif
 
 
+# forward all config-related targets to the main Kernel makefile
+$(KCONFIG_AUTOCONFIG) $(KCONFIG_AUTOHEADER): $(KCONFIG_CONFIG)
+	$(Q)$(MAKE) -C $(srctree) ARCH=lkl include/config/auto.conf
+
+$(KCONFIG_CONFIG): ;
+
+config: FORCE
+	$(Q)$(MAKE) -C $(srctree) ARCH=lkl $@
+
+%config: FORCE
+	$(Q)$(MAKE) -C $(srctree) ARCH=lkl $@
+
 %-in.o: lib/lkl.o FORCE
 	$(Q)$(MAKE) -f $(srctree)/tools/build/Makefile.build dir=$(patsubst %/,%,$(dir $*)) obj=$(notdir $*)
 
-lib/lkl.o:
-	$(Q)$(MAKE) -C ../.. ARCH=lkl $(KOPT) defconfig
+lib/lkl.o: $(KCONFIG_AUTOCONFIG)
 	$(Q)$(MAKE) -C ../.. ARCH=lkl $(KOPT) install INSTALL_PATH=$(CURDIR)
 
 liblkl.a: lib/lkl-in.o lib/lkl.o

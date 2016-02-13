@@ -20,6 +20,8 @@ test:
   override:
     - cd tools/lkl && make clean:
         parallel: true
+    - cd tools/lkl && make defconfig:
+        parallel: true
     - cd tools/lkl && make -j8:
         parallel: true
     - cd tools/lkl && make test:

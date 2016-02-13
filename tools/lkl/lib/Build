@@ -1,3 +1,5 @@
+include $(KCONFIG_AUTOCONFIG)
+
 lkl-y += fs.o
 lkl-y += iomem.o
 lkl-y += net.o
