@@ -1,0 +1,31 @@
+menuconfig LKL_HOST
+	bool "Build the LKL host library."
+	default y
+
+if LKL_HOST
+
+config LKL_STATIC
+	bool "Build a static host library."
+	default y
+
+config LKL_SHARED
+	bool "Build a shared object for the host library."
+	default y
+
+menu "LKL example tools"
+
+config LKL_FUSE
+	bool "lklfuse tool"
+
+config LKL_CPTOFS
+	bool "cptofs/cpfromfs tools"
+
+config LKL_FS2TAR
+	bool "fs2tar tool"
+
+config LKL_HIJACK
+	bool "lkl hijack library (NUSE)"
+
+endmenu
+
+endif # LKL_HOST
