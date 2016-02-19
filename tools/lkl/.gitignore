@@ -4,3 +4,4 @@ cptofs
 cpfromfs
 lklfuse
 tests/valgrind*.xml
+tests/net-test

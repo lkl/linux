@@ -42,6 +42,7 @@ endif
 all:
 	$(call run,)
 	$(HIJACK_TEST)
+	./net.sh
 
 test: all
 

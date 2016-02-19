@@ -6,11 +6,12 @@ machine:
   # Add some environment variables
   environment:
     CROSS_COMPILE: $([[ $CIRCLE_NODE_INDEX -eq 1 ]] && echo 'i686-w64-mingw32-')
+    MKARG: $([[ $CIRCLE_NODE_INDEX -eq 0 ]] && echo 'dpdk=yes')
 
 ## Customize dependencies
 dependencies:
   pre:
-    - sudo apt-get update; sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs valgrind gcc-mingw-w64-i686 wine
+    - sudo apt-get update; sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs valgrind gcc-mingw-w64-i686 wine linux-headers-generic
 
 test:
   pre:
@@ -20,7 +21,9 @@ test:
   override:
     - cd tools/lkl && make clean:
         parallel: true
-    - cd tools/lkl && make -j8:
+    - cd tools/lkl && ./scripts/dpdk-sdk-build.sh:
+        parallel: true
+    - cd tools/lkl &&  make -j8 ${MKARG}:
         parallel: true
     - cd tools/lkl && make test:
         parallel: true
