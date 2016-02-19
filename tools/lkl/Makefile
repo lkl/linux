@@ -27,7 +27,7 @@ execs =  cpfromfs
 endif
 lib += lib/liblkl.so
 else ifeq ($(OUTPUT_FORMAT),pe-i386)
-lib_source := $(filter-out virtio_net.c,$(lib_source))
+lib_source := $(filter-out lib/virtio_net%.c,$(lib_source))
 lib_source += lib/nt-host.c
 KOPT="KALLSYMS_EXTRA_PASS=1"
 LDFLAGS += -lws2_32

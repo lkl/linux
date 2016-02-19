@@ -30,13 +30,13 @@ if [ -c /dev/net/tun ]; then
     sudo ip tuntap add dev lkl_ptt0 mode tap user $USER
     sudo ip link set dev lkl_ptt0 up
     sudo ip addr add dev lkl_ptt0 192.168.13.1/24
-    LKL_HIJACK_NET_TAP=lkl_ptt0 LKL_HIJACK_NET_IP=192.168.13.2 LKL_HIJACK_NET_NETMASK_LEN=24 ${hijack_script} ip link | grep eth0
-    LKL_HIJACK_NET_TAP=lkl_ptt0 LKL_HIJACK_NET_IP=192.168.13.2 LKL_HIJACK_NET_NETMASK_LEN=24 ${hijack_script} ip addr | grep 192.168.13.2
+    LKL_HIJACK_NET_IFTYPE=tap LKL_HIJACK_NET_IFNAME=lkl_ptt0 LKL_HIJACK_NET_IP=192.168.13.2 LKL_HIJACK_NET_NETMASK_LEN=24 ${hijack_script} ip link | grep eth0
+    LKL_HIJACK_NET_IFTYPE=tap LKL_HIJACK_NET_IFNAME=lkl_ptt0 LKL_HIJACK_NET_IP=192.168.13.2 LKL_HIJACK_NET_NETMASK_LEN=24 ${hijack_script} ip addr | grep 192.168.13.2
     cp `which ping` .
-    LKL_HIJACK_NET_TAP=lkl_ptt0 LKL_HIJACK_NET_IP=192.168.13.2 LKL_HIJACK_NET_NETMASK_LEN=24 ${hijack_script} ./ping 192.168.13.1 -i 0.2 -c 65
+    LKL_HIJACK_NET_IFTYPE=tap LKL_HIJACK_NET_IFNAME=lkl_ptt0 LKL_HIJACK_NET_IP=192.168.13.2 LKL_HIJACK_NET_NETMASK_LEN=24 ${hijack_script} ./ping 192.168.13.1 -i 0.2 -c 65
     rm ./ping
-    (sudo arp -d 192.168.13.2 && ping -i 0.2 -c 65 192.168.13.2 & LKL_HIJACK_NET_TAP=lkl_ptt0 LKL_HIJACK_NET_IP=192.168.13.2 LKL_HIJACK_NET_NETMASK_LEN=24 ${hijack_script} sleep 15)
-    LKL_HIJACK_NET_MAC="aa:bb:cc:dd:ee:ff" LKL_HIJACK_NET_TAP=lkl_ptt0 LKL_HIJACK_NET_IP=192.168.13.2 LKL_HIJACK_NET_NETMASK_LEN=24 ${hijack_script} ip addr | grep "aa:bb:cc:dd:ee:ff"
+    (sudo arp -d 192.168.13.2 && ping -i 0.2 -c 65 192.168.13.2 & LKL_HIJACK_NET_IFTYPE=tap LKL_HIJACK_NET_IFNAME=lkl_ptt0 LKL_HIJACK_NET_IP=192.168.13.2 LKL_HIJACK_NET_NETMASK_LEN=24 ${hijack_script} sleep 15)
+    LKL_HIJACK_NET_MAC="aa:bb:cc:dd:ee:ff" LKL_HIJACK_NET_IFTYPE=tap LKL_HIJACK_NET_IFNAME=lkl_ptt0 LKL_HIJACK_NET_IP=192.168.13.2 LKL_HIJACK_NET_NETMASK_LEN=24 ${hijack_script} ip addr | grep "aa:bb:cc:dd:ee:ff"
     sudo ip link set dev lkl_ptt0 down
     sudo ip tuntap del dev lkl_ptt0 mode tap
 fi;

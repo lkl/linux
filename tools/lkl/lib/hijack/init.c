@@ -55,64 +55,41 @@ int parse_mac_str(char *mac_str, __lkl__u8 mac[LKL_ETH_ALEN])
 	return 1;
 }
 
-int init_tap(char *tap, char *mac_str)
-{
-	struct ifreq ifr = {
-		.ifr_flags = IFF_TAP | IFF_NO_PI,
-	};
-	union lkl_netdev nd;
-	__lkl__u8 mac[LKL_ETH_ALEN] = {0};
-	int ret = -1;
-
-	strncpy(ifr.ifr_name, tap, IFNAMSIZ);
-
-	nd.fd = open("/dev/net/tun", O_RDWR|O_NONBLOCK);
-	if (nd.fd < 0) {
-		fprintf(stderr, "failed to open tap: %s\n", strerror(errno));
-		return -1;
-	}
-
-	ret = ioctl(nd.fd, TUNSETIFF, &ifr);
-	if (ret < 0) {
-		fprintf(stderr, "failed to attach to %s: %s\n",
-			ifr.ifr_name, strerror(errno));
-		return -1;
-	}
-
-	ret = parse_mac_str(mac_str, mac);
-
-	if (ret < 0) {
-		fprintf(stderr, "failed to parse mac\n");
-		return -1;
-	} else if (ret > 0) {
-		ret = lkl_netdev_add(nd, mac);
-	} else {
-		ret = lkl_netdev_add(nd, NULL);
-	}
-
-	if (ret < 0) {
-		fprintf(stderr, "failed to add netdev: %s\n",
-			lkl_strerror(ret));
-		return -1;
-	}
-
-	return ret;
-}
-
 void __attribute__((constructor(102)))
 hijack_init(void)
 {
 	int ret, i, dev_null, nd_id = -1, nd_ifindex = -1;
-	char *tap = getenv("LKL_HIJACK_NET_TAP");
+	char *iftype = getenv("LKL_HIJACK_NET_IFTYPE");
+	char *ifname = getenv("LKL_HIJACK_NET_IFNAME");
 	char *mtu_str = getenv("LKL_HIJACK_NET_MTU");
+	__lkl__u8 mac[LKL_ETH_ALEN] = {0};
 	char *ip = getenv("LKL_HIJACK_NET_IP");
 	char *mac_str = getenv("LKL_HIJACK_NET_MAC");
 	char *netmask_len = getenv("LKL_HIJACK_NET_NETMASK_LEN");
 	char *gateway = getenv("LKL_HIJACK_NET_GATEWAY");
 	char *debug = getenv("LKL_HIJACK_DEBUG");
+	struct lkl_netdev *nd = NULL;
 
-	if (tap) {
-		nd_id = init_tap(tap, mac_str);
+	if (iftype && ifname && (strncmp(iftype, "tap", 3) == 0))
+		nd = lkl_netdev_tap_create(ifname);
+
+	if (nd) {
+		ret = parse_mac_str(mac_str, mac);
+
+		if (ret < 0) {
+			fprintf(stderr, "failed to parse mac\n");
+			return;
+		} else if (ret > 0) {
+			ret = lkl_netdev_add(nd, mac);
+		} else {
+			ret = lkl_netdev_add(nd, NULL);
+		}
+
+		if (ret < 0) {
+			fprintf(stderr, "failed to add netdev: %s\n",
+				lkl_strerror(ret));
+		}
+		nd_id = ret;
 	}
 
 	if (!debug)
