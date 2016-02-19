@@ -43,6 +43,16 @@ lib_objs = $(patsubst %.c,%.o, $(lib_source))
 objs = $(patsubst %.c,%.o, $(source))
 execs += $(patsubst %.c,%, $(source))
 
+# Intel DPDK configuration
+ifeq ($(dpdk),yes)
+RTE_SDK ?= $(shell pwd)/dpdk-2.2.0
+RTE_TARGET ?= build
+CFLAGS += -I$(RTE_SDK)/$(RTE_TARGET)/include -msse4.2 -mpopcnt
+CFLAGS += -DLKL_DPDK
+LDFLAGS +=-L$(RTE_SDK)/$(RTE_TARGET)/lib
+LDFLAGS +=-Wl,--whole-archive -ldpdk -Wl,--no-whole-archive -lm -ldl
+endif
+
 ifeq ($(OUTPUT_FORMAT),elf64-x86-64)
 lib += lib/liblkl-hijack.so
 hijack_objs = $(patsubst %.c,%.o,$(wildcard lib/hijack/*.c))
@@ -55,7 +65,7 @@ lib/liblkl.a: $(lib_objs) lib/lkl.o
 	$(AR) -rc $@ $^
 
 lib/liblkl.so: $(lib_objs) lib/lkl.o
-	$(CC) -o $@ -shared $^
+	$(CC) -o $@ -shared $(LDFLAGS) $^
 
 # order of -lxxx again really matters for LD_PRELOAD
 lib/liblkl-hijack.so: $(hijack_objs) Makefile lib/liblkl.so

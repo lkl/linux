@@ -238,6 +238,14 @@ int lkl_netdev_get_ifindex(int id);
  */
 struct lkl_netdev *lkl_netdev_tap_create(const char *ifname);
 
+/**
+ * lkl_netdev_dpdk_create - create DPDK net_device for the virtio net backend
+ *
+ * @ifname - interface name for the DPDK device. The name for DPDK device is
+ * only used for an internal use.
+ */
+struct lkl_netdev *lkl_netdev_dpdk_create(const char *ifname);
+
 #ifdef __cplusplus
 }
 #endif
