@@ -35,7 +35,7 @@ else
 $(error Unrecognized platform: $(OUTPUT_FORMAT))
 endif
 
-ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64 elf64-x86-64-freebsd))
+ifneq (,$(filter $(OUTPUT_FORMAT),elf32-i386 elf32-littlearm))
 CFLAGS += -D_FILE_OFFSET_BITS=64
 endif
 
