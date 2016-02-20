@@ -57,8 +57,8 @@ Building LKL on FreeBSD
     #Prefer ports binutils and GNU bc(1):
     $ export PATH=/sbin:/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/usr/lib64/ccache
 
-    $ cd tools/lkl
-    $ gmake
+    $ gmake ARCH=lkl defconfig
+    $ gmake tools/lkl
 
 Building LKL on Ubuntu
 -----------------------
@@ -68,11 +68,11 @@ Building LKL on Ubuntu
     # Optional, if you would like to be able to run tests
     $ sudo apt-get install btrfs-tools
     
-    $ cd tools/lkl
-    $ make
+    $ make ARCH=lkl defconfig
+    $ make tools/lkl
     
     # To check that everything works:
-    $ cd ../..
+    $ cd tools/lkl
     $ make test
 
 
@@ -95,8 +95,8 @@ to be recompiled.
 With that pre-requisites fullfilled you can now build LKL for Win32 with the
 following command:
 
-    $ cd tools/lkl
-    $ make CROSS_COMPILE=i686-w64-mingw32-
+    $ make ARCH=lkl defconfig
+    $ make CROSS_COMPILE=i686-w64-mingw32- tools/lkl
 
 
 FAQ
