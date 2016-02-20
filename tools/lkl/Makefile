@@ -35,9 +35,7 @@ else
 $(error Unrecognized platform: $(OUTPUT_FORMAT))
 endif
 
-ifneq (,$(filter $(OUTPUT_FORMAT),elf32-i386 elf32-littlearm))
 CFLAGS += -D_FILE_OFFSET_BITS=64
-endif
 
 lib_objs = $(patsubst %.c,%.o, $(lib_source))
 objs = $(patsubst %.c,%.o, $(source))
