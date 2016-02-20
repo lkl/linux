@@ -22,6 +22,7 @@ CFLAGS += -fPIC
 LDFLAGS += -lpthread
 ifeq (,$(shell $(CROSS_COMPILE)gcc -E -dM - < /dev/null | grep __ANDROID__))
 LDFLAGS += -lrt
+CFLAGS += -D_FILE_OFFSET_BITS=64
 source += $(wildcard *.c)
 execs =  cpfromfs
 endif
@@ -34,8 +35,6 @@ LDFLAGS += -lws2_32
 else
 $(error Unrecognized platform: $(OUTPUT_FORMAT))
 endif
-
-CFLAGS += -D_FILE_OFFSET_BITS=64
 
 lib_objs = $(patsubst %.c,%.o, $(lib_source))
 objs = $(patsubst %.c,%.o, $(source))
