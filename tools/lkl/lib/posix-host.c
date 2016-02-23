@@ -34,7 +34,7 @@ static void print(const char *str, int len)
 	ret = write(STDOUT_FILENO, str, len);
 }
 
-struct pthread_sem {
+struct lkl_sem_t {
 #ifdef _POSIX_SEMAPHORES
 	sem_t sem;
 #else
@@ -44,9 +44,9 @@ struct pthread_sem {
 #endif /* _POSIX_SEMAPHORES */
 };
 
-static void *sem_alloc(int count)
+static struct lkl_sem_t *sem_alloc(int count)
 {
-	struct pthread_sem *sem;
+	struct lkl_sem_t *sem;
 
 	sem = malloc(sizeof(*sem));
 	if (!sem)
@@ -67,15 +67,13 @@ static void *sem_alloc(int count)
 	return sem;
 }
 
-static void sem_free(void *sem)
+static void sem_free(struct lkl_sem_t *sem)
 {
 	free(sem);
 }
 
-static void sem_up(void *_sem)
+static void sem_up(struct lkl_sem_t *sem)
 {
-	struct pthread_sem *sem = (struct pthread_sem *)_sem;
-
 #ifdef _POSIX_SEMAPHORES
 	if (sem_post(&sem->sem) < 0)
 		lkl_printf("sem_post: %s\n", strerror(errno));
@@ -89,9 +87,8 @@ static void sem_up(void *_sem)
 
 }
 
-static void sem_down(void *_sem)
+static void sem_down(struct lkl_sem_t *sem)
 {
-	struct pthread_sem *sem = (struct pthread_sem *)_sem;
 #ifdef _POSIX_SEMAPHORES
 	int err;
 

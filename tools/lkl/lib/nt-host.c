@@ -5,24 +5,31 @@
 #include <lkl_host.h>
 #include "iomem.h"
 
+struct lkl_sem_t {
+	HANDLE sem;
+};
+
 static void *sem_alloc(int count)
 {
-	return CreateSemaphore(NULL, count, 100, NULL);
+	struct lkl_sem_t *sem = malloc(sizeof(struct lkl_sem_t));
+	sem->sem = CreateSemaphore(NULL, count, 100, NULL);
+	return sem;
 }
 
-static void sem_up(void *sem)
+static void sem_up(struct lkl_sem_t *sem)
 {
-	ReleaseSemaphore(sem, 1, NULL);
+	ReleaseSemaphore(sem->sem, 1, NULL);
 }
 
-static void sem_down(void *sem)
+static void sem_down(struct lkl_sem_t *sem)
 {
-	WaitForSingleObject(sem, INFINITE);
+	WaitForSingleObject(sem->sem, INFINITE);
 }
 
-static void sem_free(void *sem)
+static void sem_free(struct lkl_sem_t *sem)
 {
-	CloseHandle(sem);
+	CloseHandle(sem->sem);
+	free(sem);
 }
 
 static int thread_create(void (*fn)(void *), void *arg)
