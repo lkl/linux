@@ -22,6 +22,7 @@ CFLAGS += -fPIC
 LDFLAGS += -lpthread
 ifeq (,$(shell $(CROSS_COMPILE)gcc -E -dM - < /dev/null | grep __ANDROID__))
 LDFLAGS += -lrt
+CFLAGS += -D_FILE_OFFSET_BITS=64
 source += $(wildcard *.c)
 execs =  cpfromfs
 endif
@@ -33,10 +34,6 @@ KOPT="KALLSYMS_EXTRA_PASS=1"
 LDFLAGS += -lws2_32
 else
 $(error Unrecognized platform: $(OUTPUT_FORMAT))
-endif
-
-ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64 elf64-x86-64-freebsd))
-CFLAGS += -D_FILE_OFFSET_BITS=64
 endif
 
 lib_objs = $(patsubst %.c,%.o, $(lib_source))
