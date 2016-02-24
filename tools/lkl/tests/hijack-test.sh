@@ -24,6 +24,27 @@ cp `which ping6` .
 ${hijack_script} ./ping6 ::1 -c 2
 rm ping6
 
+echo "== Mount/dump tests =="
+# Need to say || true because ip -h returns < 0
+ans=$(LKL_HIJACK_MOUNT=proc,sysfs\
+  LKL_HIJACK_DUMP=/sysfs/class/net/lo/mtu,/sysfs/class/net/lo/dev_id\
+  LKL_HIJACK_DEBUG=1\
+  ${hijack_script} ip -h) || true
+echo "$ans" | grep "Successfully created /proc"
+echo "$ans" | grep "Successfully mounted /proc as /proc with type proc (flags: 0)"
+
+echo "$ans" | grep "Successfully created /sysfs"
+echo "$ans" | grep "Successfully mounted /sysfs as /sysfs with type sysfs (flags: 0)"
+
+echo "$ans" | grep "Successfully mounted /sysfs as /sysfs with type sysfs (flags: 0)"
+
+echo "$ans" | grep "Successfully read 6 bytes from /sysfs/class/net/lo/mtu"
+# Need to grab the end because something earlier on prints out this number
+echo "$ans" | tail -n 15 | grep "65536"
+
+echo "$ans" | grep "Successfully read 4 bytes from /sysfs/class/net/lo/dev_id"
+echo "$ans" | grep "0x0"
+
 echo "== TAP tests =="
 if [ -c /dev/net/tun ]; then
     sudo ip tuntap del dev lkl_ptt0 mode tap || true
