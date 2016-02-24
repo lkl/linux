@@ -1,0 +1,6 @@
+include $(KCONFIG_AUTOCONFIG)
+
+hijack-y += hijack.o
+hijack-y += init.o
+hijack-y += xlate.o
+

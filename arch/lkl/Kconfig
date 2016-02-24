@@ -84,3 +84,4 @@ source lib/Kconfig
 
 source lib/Kconfig.debug
 
+source tools/lkl/Kconfig
