@@ -231,22 +231,18 @@ int lkl_netdev_add(union lkl_netdev nd, void *mac);
 int lkl_netdev_get_ifindex(int id);
 
 /**
- * lkl_create_syscall_thread - create an additional system call thread
+ * lkl_run_in_new_syscall_thread - run a function in a new thread attached to a
+ * new kernel syscall thread
  *
- * Create a new system call thread. All subsequent system calls issued from this
- * host thread are queued to the newly created system call thread.
+ * Create a new host thread and a system call thread. All subsequent system
+ * calls issued from the new host thread are queued to the newly created system
+ * call thread.
  *
- * System call threads must be stopped up by calling @lkl_stop_syscall_thread
- * before @lkl_halt is called.
+ * @fn - the user function that will run in the newly created host thread; this
+ * function must exit before @lkl_sys_halt is called
+ * @arg - argument to be passed with the function
  */
-int lkl_create_syscall_thread(void);
-
-/**
- * lkl_stop_syscall_thread - stop the associated system call thread
- *
- * Stop the system call thread associated with this host thread, if any.
- */
-int lkl_stop_syscall_thread();
+int lkl_create_syscall_thread(void (*fn)(void*), void *arg);
 
 #ifdef __cplusplus
 }

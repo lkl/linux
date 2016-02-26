@@ -193,7 +193,7 @@ long lkl_syscall(long no, long *params)
 
 static int syscall_threads;
 
-int lkl_create_syscall_thread(void)
+static int __lkl_create_syscall_thread(void)
 {
 	struct syscall_thread_data *data;
 	long params[6], ret;
@@ -240,7 +240,7 @@ int lkl_create_syscall_thread(void)
 	return 0;
 }
 
-int lkl_stop_syscall_thread(void)
+static int __lkl_stop_syscall_thread(void)
 {
 	struct syscall_thread_data *data;
 	long params[6] = { 0, };
@@ -268,6 +268,42 @@ int lkl_stop_syscall_thread(void)
 		return ret;
 
 	__sync_fetch_and_sub(&syscall_threads, 1);
+	return 0;
+}
+
+struct bootstrap_syscall_thread_data {
+	void *sem;
+	void (*fn)(void *);
+	void *arg;
+};
+
+static void bootstrap_syscall_thread(void *arg)
+{
+	struct bootstrap_syscall_thread_data *data = arg;
+
+	__lkl_create_syscall_thread();
+	lkl_ops->sem_up(data->sem);
+	data->fn(data->arg);
+	__lkl_stop_syscall_thread();
+}
+
+int lkl_create_syscall_thread(void (*fn)(void*), void *arg)
+{
+	struct bootstrap_syscall_thread_data data;
+	int ret;
+
+	data.sem = lkl_ops->sem_alloc(0);
+	if (!data.sem)
+		return -ENOMEM;
+	data.fn = fn;
+	data.arg = arg;
+
+	ret = lkl_ops->thread_create(bootstrap_syscall_thread, &data);
+	if (ret)
+		return ret;
+
+	lkl_ops->sem_down(data.sem);
+	lkl_ops->sem_free(data.sem);
 	return 0;
 }
 

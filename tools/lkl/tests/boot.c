@@ -672,21 +672,10 @@ static void test_thread(void *data)
 	char tmp[LKL_PIPE_BUF+1];
 	int ret;
 
-	ret = lkl_create_syscall_thread();
-	if (ret < 0) {
-		fprintf(stderr, "%s: %s\n", __func__, lkl_strerror(ret));
-	}
-
 	ret = lkl_sys_read(pipe_fds[0], tmp, sizeof(tmp));
 	if (ret < 0) {
 		fprintf(stderr, "%s: %s\n", __func__, lkl_strerror(ret));
 	}
-
-	ret = lkl_stop_syscall_thread();
-	if (ret < 0) {
-		fprintf(stderr, "%s: %s %d\n", __func__, lkl_strerror(ret), ret);
-	}
-
 }
 
 static int test_syscall_thread(char *str, int len)
@@ -707,13 +696,12 @@ static int test_syscall_thread(char *str, int len)
 		return TEST_FAILURE;
 	}
 
-	ret = lkl_host_ops.thread_create(test_thread, pipe_fds);
+
+	ret = lkl_create_syscall_thread(test_thread, pipe_fds);
 	if (ret) {
 		snprintf(str, len, "failed to create thread");
 		return TEST_FAILURE;
 	}
-
-	sleep(1);
 
 	ret = lkl_sys_write(pipe_fds[1], tmp, sizeof(tmp));
 	if (ret != sizeof(tmp)) {
