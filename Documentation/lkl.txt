@@ -18,18 +18,6 @@ interface.
 LKL is implemented as an architecture port in arch/lkl. It uses host operations
 defined by the application or a host library (tools/lkl/lib).
 
-
-Building LKL on FreeBSD
------------------------
-
-$ pkg install gnubc
-
-Prefer ports binutils and GNU bc(1):
-$ export PATH=/sbin:/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/usr/lib64/ccache
-
-$ cd tools/lkl
-$ gmake CC=clang HOSTCC=clang
-
 Supported hosts
 ---------------
 
@@ -39,8 +27,7 @@ The supported hosts for now are POSIX and Windows userspace applications.
 Building LKL, the host library and LKL based tools
 --------------------------------------------------
 
-    $ cd tools/lkl
-    $ make
+    $ make tools/lkl
 
 will build LKL as a object file, it will install it in tools/lkl/lib together
 with the headers files in tools/lkl/include then will build the host library,
@@ -56,10 +43,36 @@ APIs
 * lklfuse - a tool that can mount a filesystem image in userspace,
   without root priviledges, using FUSE
 
-  
 Building with Clang
 -------------------
 Simply run make CC=clang HOSTCC=clang
+
+Building LKL on FreeBSD
+-----------------------
+
+    $ pkg install binutils gcc49 gnubc
+
+    #If you don't have a gcc binary:
+    $ ln -sf /usr/local/bin/gcc49 /usr/local/bin/gcc
+
+    #Prefer ports binutils and GNU bc(1):
+    $ export PATH=/sbin:/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/usr/lib64/ccache
+
+    $ gmake tools/lkl
+
+Building LKL on Ubuntu
+-----------------------
+
+    $ sudo apt-get install libfuse-dev libarchive-dev xfsprogs
+    
+    # Optional, if you would like to be able to run tests
+    $ sudo apt-get install btrfs-tools
+    
+    $ make tools/lkl
+    
+    # To check that everything works:
+    $ cd tools/lkl
+    $ make test
 
 
 Building LKL for Windows
@@ -81,9 +94,66 @@ to be recompiled.
 With that pre-requisites fullfilled you can now build LKL for Win32 with the
 following command:
 
-    $ cd tools/lkl
-    $ make CROSS_COMPILE=i686-w64-mingw32-
+    $ make CROSS_COMPILE=i686-w64-mingw32- tools/lkl
 
+LKL hijack library
+------------------
+
+LKL hijack library (liblkl-hijack.so) is used to replace system calls used by an
+application on the fly so that the application can use LKL instead of the kernel
+of host operating system. LD_PRELOAD is used to dynamically override system calls
+with this library when you execute a program.
+
+You can usually use this library via a wrapper script.
+
+    $ cd tools/lkl
+    $ ./bin/lkl-hijack.sh ip address show
+
+There are environmental variables to configure the behavior of LKL. The followings
+are the list of those variable for your environment.
+
+* LKL_HIJACK_NET_TAP
+
+  an interface name for tap device in host operating system to connect to LKL.
+```
+    $ LKL_HIJACK_NET_TAP=tap0 lkl-hijack.sh ip address show
+```
+* LKL_HIJACK_NET_IP
+
+  the IP address of the interface specified by LKL_HIJACK_NET_TAP.
+```
+    $ LKL_HIJACK_NET_IP=198.51.100.5 lkl-hijack.sh ip address show
+```
+* LKL_HIJACK_NET_NETMASK_LEN
+
+  the network mask length of the interface specified by LKL_HIJACK_NET_TAP.
+```
+    $ LKL_HIJACK_NET_IP=198.51.100.5 LKL_HIJACK_NET_NETMASK_LEN=24 lkl-hijack.sh ip address show
+```
+* LKL_HIJACK_NET_MAC
+
+  the MAC address of the interface specified by LKL_HIJACK_NET_TAP.
+```
+    $ LKL_HIJACK_NET_MAC="aa:bb:cc:dd:ee:ff" lkl-hijack.sh ip address show
+```
+* LKL_HIJACK_NET_GATEWAY
+
+  the gateway IP address of LKL network stack.
+```
+     $ LKL_HIJACK_NET_GATEWAY=198.51.100.5 lkl-hijack.sh ip address show
+```
+* LKL_HIJACK_NET_MTU
+
+  the MTU size of the interface specified by LKL_HIJACK_NET_TAP.
+```
+     $ LKL_HIJACK_NET_MTU=1280 lkl-hijack.sh ip address show
+```
+* LKL_HIJACK_DEBUG
+
+  increate the verbose level of debug information.
+```
+     $ LKL_HIJACK_DEBUG=1 lkl-hijack.sh ip address show
+```
 
 FAQ
 ---

@@ -4,21 +4,27 @@
 #include <time.h>
 #include <stdlib.h>
 #include <stdint.h>
-#ifndef __MINGW32__
-#include <argp.h>
-#endif
 #include <lkl.h>
 #include <lkl_host.h>
 #ifndef __MINGW32__
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <net/if.h>
+#include <linux/if_tun.h>
+#include <sys/ioctl.h>
+#include <sys/epoll.h>
 #else
 #include <windows.h>
 #endif
 
+#define TEST_SUCCESS 1
+#define TEST_FAILURE 0
+#define MAX_MSG_LEN 60
+
 static struct cl_args {
 	int printk;
 	const char *disk_filename;
+	const char *tap_ifname;
 	const char *fstype;
 } cla;
 
@@ -30,6 +36,7 @@ static struct cl_option {
 } options[] = {
 	{"enable-printk", 'p', "show Linux printks", 0},
 	{"disk-file", 'd', "disk file to use", 1},
+	{"net-tap", 'n', "tap interface to use", 1},
 	{"type", 't', "filesystem type", 1},
 	{0},
 };
@@ -42,6 +49,9 @@ static int parse_opt(int key, char *arg)
 		break;
 	case 'd':
 		cla.disk_filename = arg;
+		break;
+	case 'n':
+		cla.tap_ifname = arg;
 		break;
 	case 't':
 		cla.fstype = arg;
@@ -69,17 +79,19 @@ static int g_test_pass = 0;
 
 static int do_test(char *name, int (*fn)(char *, int))
 {
-	char str[60];
+	char str[MAX_MSG_LEN];
 	int result;
 
 	result = fn(str, sizeof(str));
-	printf("%-20s %s [%s]\n", name, result ? "passed" : "failed", str);
+	printf("%-20s %s [%s]\n", name,
+		result == TEST_SUCCESS ? "passed" : "failed", str);
 	return result;
 }
 
-#define sleep_ns 87654321
 
 #ifndef __MINGW32__
+
+#define sleep_ns 87654321
 int test_nanosleep(char *str, int len)
 {
 	struct lkl_timespec ts = {
@@ -94,15 +106,15 @@ int test_nanosleep(char *str, int len)
 	ret = lkl_sys_nanosleep(&ts, NULL);
 	clock_gettime(CLOCK_MONOTONIC, &stop);
 
-	delta = (stop.tv_sec - start.tv_sec) +
+	delta = 1e9*(stop.tv_sec - start.tv_sec) +
 		(stop.tv_nsec - start.tv_nsec);
 
 	snprintf(str, len, "%ld", delta);
 
-	if (ret == 0 && delta > sleep_ns * 0.9 && delta < sleep_ns * 1.1)
-		return 1;
+	if (ret == 0 && delta > sleep_ns * 0.9)
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 #endif
 
@@ -115,9 +127,9 @@ int test_getpid(char *str, int len)
 	snprintf(str, len, "%ld", ret);
 
 	if (ret == 1)
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 
 #define access_rights 0721
@@ -131,9 +143,9 @@ int test_creat(char *str, int len)
 	snprintf(str, len, "%ld", ret);
 
 	if (ret == 0)
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 
 int test_close(char *str, int len)
@@ -145,9 +157,9 @@ int test_close(char *str, int len)
 	snprintf(str, len, "%ld", ret);
 
 	if (ret == 0)
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 
 int test_failopen(char *str, int len)
@@ -159,9 +171,9 @@ int test_failopen(char *str, int len)
 	snprintf(str, len, "%ld", ret);
 
 	if (ret == -LKL_ENOENT)
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 
 int test_umask(char *str, int len)
@@ -175,9 +187,9 @@ int test_umask(char *str, int len)
 	snprintf(str, len, "%lo %lo", ret, ret2);
 
 	if (ret > 0 && ret2 == 0777)
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 
 int test_open(char *str, int len)
@@ -189,9 +201,9 @@ int test_open(char *str, int len)
 	snprintf(str, len, "%ld", ret);
 
 	if (ret == 0)
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 
 static const char write_test[] = "test";
@@ -205,9 +217,9 @@ int test_write(char *str, int len)
 	snprintf(str, len, "%ld", ret);
 
 	if (ret == sizeof(write_test))
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 
 int test_lseek(char *str, int len)
@@ -219,9 +231,9 @@ int test_lseek(char *str, int len)
 	snprintf(str, len, "%zd ", ret);
 
 	if (ret >= 0)
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 
 int test_read(char *str, int len)
@@ -234,9 +246,9 @@ int test_read(char *str, int len)
 	snprintf(str, len, "%ld %s", ret, buf);
 
 	if (ret == sizeof(write_test) && strcmp(write_test, buf) == 0)
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 
 int test_fstat(char *str, int len)
@@ -250,9 +262,9 @@ int test_fstat(char *str, int len)
 
 	if (ret == 0 && stat.st_size == sizeof(write_test) &&
 	    stat.st_mode == (access_rights | LKL_S_IFREG))
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 
 int test_mkdir(char *str, int len)
@@ -264,9 +276,9 @@ int test_mkdir(char *str, int len)
 	snprintf(str, len, "%ld", ret);
 
 	if (ret == 0)
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 
 int test_stat(char *str, int len)
@@ -279,28 +291,27 @@ int test_stat(char *str, int len)
 	snprintf(str, len, "%ld %o", ret, stat.st_mode);
 
 	if (ret == 0 && stat.st_mode == (access_rights | LKL_S_IFDIR))
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 
-static const char *tmp_file;
-static union lkl_disk_backstore bs;
+static union lkl_disk disk;
 static int disk_id = -1;
 
 int test_disk_add(char *str, int len)
 {
 #ifdef __MINGW32__
-	bs.handle = CreateFile(cla.disk_filename, GENERIC_READ | GENERIC_WRITE,
+	disk.handle = CreateFile(cla.disk_filename, GENERIC_READ | GENERIC_WRITE,
 			       0, NULL, OPEN_EXISTING, 0, NULL);
-	if (!bs.handle)
+	if (!disk.handle)
 #else
-	bs.fd = open(cla.disk_filename, O_RDWR);
-	if (bs.fd < 0)
+	disk.fd = open(cla.disk_filename, O_RDWR);
+	if (disk.fd < 0)
 #endif
 		goto out_unlink;
 
-	disk_id = lkl_disk_add(bs);
+	disk_id = lkl_disk_add(disk);
 	if (disk_id < 0)
 		goto out_close;
 
@@ -308,9 +319,9 @@ int test_disk_add(char *str, int len)
 
 out_close:
 #ifdef __MINGW32__
-	CloseHandle(bs.handle);
+	CloseHandle(disk.handle);
 #else
-	close(bs.fd);
+	close(disk.fd);
 #endif
 
 out_unlink:
@@ -321,12 +332,186 @@ out_unlink:
 #endif
 
 out:
-	snprintf(str, len, "%x %d", bs.fd, disk_id);
+	snprintf(str, len, "%x %d", disk.fd, disk_id);
 
 	if (disk_id >= 0)
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
+}
+
+#ifndef __MINGW32__
+static int netdev_id = -1;
+
+int test_netdev_add(char *str, int len)
+{
+	union lkl_netdev netdev = { -1, };
+	struct ifreq ifr = {
+		.ifr_flags = IFF_TAP | IFF_NO_PI,
+	};
+	int ret;
+
+	strncpy(ifr.ifr_name, cla.tap_ifname, IFNAMSIZ);
+
+	ret = open("/dev/net/tun", O_RDWR|O_NONBLOCK);
+	if (ret < 0)
+		goto out;
+
+	netdev.fd = ret;
+
+	ret = ioctl(netdev.fd, TUNSETIFF, &ifr);
+	if (ret < 0)
+		goto out;
+
+	ret = lkl_netdev_add(netdev, NULL);
+	if (ret < 0)
+		goto out;
+
+	netdev_id = ret;
+
+out:
+	snprintf(str, len, "%d %d %d", ret, netdev.fd, netdev_id);
+	return ret >= 0 ? TEST_SUCCESS : TEST_FAILURE;
+}
+
+static int test_netdev_ifup(char *str, int len)
+{
+	long ret;
+	int ifindex = -1;
+
+	ret = lkl_netdev_get_ifindex(netdev_id);
+	if (ret < 0)
+		goto out;
+	ifindex = ret;
+
+	ret = lkl_if_up(ifindex);
+
+out:
+	snprintf(str, len, "%ld %d", ret, ifindex);
+
+	if (!ret)
+		return TEST_SUCCESS;
+	return TEST_FAILURE;
+}
+#endif /* __MINGW32__ */
+
+static int test_pipe2(char *str, int len)
+{
+	int pipe_fds[2];
+	int READ_IDX = 0, WRITE_IDX = 1;
+	const char msg[] = "Hello world!";
+	int msg_len_bytes = strlen(msg) + 1;
+	int cmp_res = 0;
+	long ret;
+
+	ret = lkl_sys_pipe2(pipe_fds, LKL_O_NONBLOCK);
+	if (ret) {
+		snprintf(str, len, "pipe2: %s", lkl_strerror(ret));
+		return TEST_FAILURE;
+	}
+
+	ret = lkl_sys_write(pipe_fds[WRITE_IDX], msg, msg_len_bytes);
+	if (ret != msg_len_bytes) {
+		if (ret < 0)
+			snprintf(str, len, "write: %s", lkl_strerror(ret));
+		else
+			snprintf(str, len, "write: short write");
+		return TEST_FAILURE;
+	}
+
+	ret = lkl_sys_read(pipe_fds[READ_IDX], str, msg_len_bytes);
+	if (ret != msg_len_bytes) {
+		if (ret < 0)
+			snprintf(str, len, "read: %s", lkl_strerror(ret));
+		else
+			snprintf(str, len, "read: short read\n");
+		return TEST_FAILURE;
+	}
+
+	if ((cmp_res = memcmp(msg, str, msg_len_bytes))) {
+		snprintf(str, MAX_MSG_LEN, "%d", cmp_res);
+		return TEST_FAILURE;
+	}
+
+	ret = lkl_sys_close(pipe_fds[0]);
+	if (ret) {
+		snprintf(str, len, "close: %s", lkl_strerror(ret));
+		return TEST_FAILURE;
+	}
+
+	ret = lkl_sys_close(pipe_fds[1]);
+	if (ret) {
+		snprintf(str, len, "close: %s", lkl_strerror(ret));
+		return TEST_FAILURE;
+	}
+
+	return TEST_SUCCESS;
+}
+
+static int test_epoll(char *str, int len)
+{
+	int epoll_fd, pipe_fds[2];
+	int READ_IDX = 0, WRITE_IDX = 1;
+	struct lkl_epoll_event wait_on, read_result;
+	const char msg[] = "Hello world!";
+	long ret;
+
+	memset(&wait_on, 0, sizeof(wait_on));
+	memset(&read_result, 0, sizeof(read_result));
+
+	ret = lkl_sys_pipe2(pipe_fds, LKL_O_NONBLOCK);
+	if (ret) {
+		snprintf(str, len, "pipe2: %s", lkl_strerror(ret));
+		return TEST_FAILURE;
+	}
+
+	epoll_fd = lkl_sys_epoll_create(1);
+	if (epoll_fd < 0) {
+		snprintf(str, len, "epoll_create: %s", lkl_strerror(ret));
+		return TEST_FAILURE;
+	}
+
+	wait_on.events = LKL_POLLIN | LKL_POLLOUT;
+	wait_on.data = pipe_fds[READ_IDX];
+
+	ret = lkl_sys_epoll_ctl(epoll_fd, LKL_EPOLL_CTL_ADD, pipe_fds[READ_IDX],
+				&wait_on);
+	if (ret < 0) {
+		snprintf(str, len, "epoll_ctl: %s", lkl_strerror(ret));
+		return TEST_FAILURE;
+	}
+
+	/* Shouldn't be ready before we have written something */
+	ret = lkl_sys_epoll_wait(epoll_fd, &read_result, 1, 0);
+	if (ret != 0) {
+		if (ret < 0)
+			snprintf(str, len, "epoll_wait: %s", lkl_strerror(ret));
+		else
+			snprintf(str, len, "epoll_wait: bad event");
+		return TEST_FAILURE;
+	}
+
+	ret = lkl_sys_write(pipe_fds[WRITE_IDX], msg, strlen(msg) + 1);
+	if (ret < 0) {
+		snprintf(str, len, "write: %s", lkl_strerror(ret));
+		return TEST_FAILURE;
+	}
+
+	/* We expect exactly 1 fd to be ready immediately */
+	ret = lkl_sys_epoll_wait(epoll_fd, &read_result, 1, 0);
+	if (ret != 1) {
+		if (ret < 0)
+			snprintf(str, len, "epoll_wait: %s", lkl_strerror(ret));
+		else
+			snprintf(str, len, "epoll_wait: bad ev no %ld\n", ret);
+		return TEST_FAILURE;
+	}
+
+	/* Already tested reading from pipe2 so no need to do it
+	 * here */
+	snprintf(str, MAX_MSG_LEN, "%s", msg);
+
+	return TEST_SUCCESS;
 }
 
 static char mnt_point[32];
@@ -341,9 +526,9 @@ static int test_mount(char *str, int len)
 	snprintf(str, len, "%ld", ret);
 
 	if (ret == 0)
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 
 static int test_chdir(char *str, int len)
@@ -355,9 +540,9 @@ static int test_chdir(char *str, int len)
 	snprintf(str, len, "%ld", ret);
 
 	if (ret == 0)
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 
 static int dir_fd;
@@ -369,9 +554,9 @@ static int test_opendir(char *str, int len)
 	snprintf(str, len, "%d", dir_fd);
 
 	if (dir_fd > 0)
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
 }
 
 static int test_getdents64(char *str, int len)
@@ -389,7 +574,7 @@ static int test_getdents64(char *str, int len)
 	len -= wr;
 
 	if (ret < 0)
-		return 0;
+		return TEST_FAILURE;
 
 	for (pos = buf; pos - buf < ret; pos += de->d_reclen) {
 		de = (struct lkl_linux_dirent64 *)pos;
@@ -399,7 +584,7 @@ static int test_getdents64(char *str, int len)
 		len -= wr;
 	}
 
-	return 1;
+	return TEST_SUCCESS;
 }
 
 static int test_umount(char *str, int len)
@@ -415,9 +600,133 @@ static int test_umount(char *str, int len)
 	snprintf(str, len, "%ld %ld %ld", ret, ret2, ret3);
 
 	if (!ret && !ret2 && !ret3)
-		return 1;
+		return TEST_SUCCESS;
 
-	return 0;
+	return TEST_FAILURE;
+}
+
+static int test_lo_ifup(char *str, int len)
+{
+	long ret;
+
+	ret = lkl_if_up(1);
+
+	snprintf(str, len, "%ld", ret);
+
+	if (!ret)
+		return TEST_SUCCESS;
+	return TEST_FAILURE;
+}
+
+static int test_mutex(char *str, int len)
+{
+	long ret = TEST_SUCCESS;
+	/* Can't do much to verify that this works, so we'll just let
+	 * Valgrind warn us on CI if we've made bad memory
+	 * accesses. */
+
+	struct lkl_mutex_t *mutex = lkl_host_ops.mutex_alloc();
+	lkl_host_ops.mutex_lock(mutex);
+	lkl_host_ops.mutex_unlock(mutex);
+	lkl_host_ops.mutex_free(mutex);
+
+	snprintf(str, len, "%ld", ret);
+
+	return ret;
+}
+
+static int test_semaphore(char *str, int len)
+{
+	long ret = TEST_SUCCESS;
+	/* Can't do much to verify that this works, so we'll just let
+	 * Valgrind warn us on CI if we've made bad memory
+	 * accesses. */
+
+	struct lkl_sem_t *sem = lkl_host_ops.sem_alloc(1);
+	lkl_host_ops.sem_down(sem);
+	lkl_host_ops.sem_up(sem);
+	lkl_host_ops.sem_free(sem);
+
+	snprintf(str, len, "%ld", ret);
+
+	return ret;
+}
+
+static int test_gettid(char *str, int len)
+{
+	long tid = lkl_host_ops.gettid();
+	snprintf(str, len, "%ld", tid);
+
+	/* As far as I know, thread IDs are non-zero on all reasonable
+	 * systems. */
+	if (tid) {
+		return TEST_SUCCESS;
+	} else {
+		return TEST_FAILURE;
+	}
+}
+
+static void test_thread(void *data)
+{
+	int *pipe_fds = (int*) data;
+	char tmp[LKL_PIPE_BUF+1];
+	int ret;
+
+	ret = lkl_create_syscall_thread();
+	if (ret < 0) {
+		fprintf(stderr, "%s: %s\n", __func__, lkl_strerror(ret));
+	}
+
+	ret = lkl_sys_read(pipe_fds[0], tmp, sizeof(tmp));
+	if (ret < 0) {
+		fprintf(stderr, "%s: %s\n", __func__, lkl_strerror(ret));
+	}
+
+	ret = lkl_stop_syscall_thread();
+	if (ret < 0) {
+		fprintf(stderr, "%s: %s %d\n", __func__, lkl_strerror(ret), ret);
+	}
+
+}
+
+static int test_syscall_thread(char *str, int len)
+{
+	int pipe_fds[2];
+	char tmp[LKL_PIPE_BUF+1];
+	long ret;
+
+	ret = lkl_sys_pipe2(pipe_fds, 0);
+	if (ret) {
+		snprintf(str, len, "pipe2: %s", lkl_strerror(ret));
+		return TEST_FAILURE;
+	}
+
+	ret = lkl_sys_fcntl(pipe_fds[0], LKL_F_SETPIPE_SZ, 1);
+	if (ret < 0) {
+		snprintf(str, len, "fcntl setpipe_sz: %s", lkl_strerror(ret));
+		return TEST_FAILURE;
+	}
+
+	ret = lkl_host_ops.thread_create(test_thread, pipe_fds);
+	if (ret) {
+		snprintf(str, len, "failed to create thread");
+		return TEST_FAILURE;
+	}
+
+	sleep(1);
+
+	ret = lkl_sys_write(pipe_fds[1], tmp, sizeof(tmp));
+	if (ret != sizeof(tmp)) {
+		if (ret < 0)
+			snprintf(str, len, "write: %s", lkl_strerror(ret));
+		else
+			snprintf(str, len, "write: short write: %ld", ret);
+		return TEST_FAILURE;
+	}
+
+	sleep(1);
+
+	return TEST_SUCCESS;
 }
 
 static struct cl_option *find_short_opt(char name)
@@ -493,7 +802,10 @@ int main(int argc, char **argv)
 	lkl_host_ops.print = printk;
 
 	TEST(disk_add);
-
+#ifndef __MINGW32__
+	if (cla.tap_ifname)
+		TEST(netdev_add);
+#endif /* __MINGW32__ */
 	lkl_start_kernel(&lkl_host_ops, 16 * 1024 * 1024, "");
 
 	TEST(getpid);
@@ -510,17 +822,25 @@ int main(int argc, char **argv)
 	TEST(stat);
 #ifndef __MINGW32__
 	TEST(nanosleep);
-#endif
+	if (netdev_id >= 0)
+		TEST(netdev_ifup);
+#endif  /* __MINGW32__ */
+	TEST(pipe2);
+	TEST(epoll);
 	TEST(mount);
 	TEST(chdir);
 	TEST(opendir);
 	TEST(getdents64);
 	TEST(umount);
+	TEST(lo_ifup);
+	TEST(mutex);
+	TEST(semaphore);
+	TEST(gettid);
+	TEST(syscall_thread);
 
 	lkl_sys_halt();
 
-	close(bs.fd);
-	unlink(tmp_file);
+	close(disk.fd);
 
 	return g_test_pass;
 }

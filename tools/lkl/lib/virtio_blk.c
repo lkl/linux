@@ -1,81 +1,73 @@
 #include <lkl_host.h>
 #include "virtio.h"
+#include "endian.h"
 
 struct virtio_blk_dev {
 	struct virtio_dev dev;
-	struct {
-		uint64_t capacity;
-	} config;
+	struct lkl_virtio_blk_config config;
 	struct lkl_dev_blk_ops *ops;
-	union lkl_disk_backstore backstore;
-};
-
-struct virtio_blk_req_header {
-	uint32_t type;
-	uint32_t prio;
-	uint64_t sector;
+	union lkl_disk disk;
 };
 
 struct virtio_blk_req_trailer {
 	uint8_t status;
 };
 
-static int blk_check_features(uint32_t features)
+static int blk_check_features(struct virtio_dev *dev)
 {
-	if (!features)
+	if (dev->driver_features == dev->device_features)
 		return 0;
 
 	return -LKL_EINVAL;
 }
 
-void lkl_dev_blk_complete(struct lkl_dev_buf *bufs, unsigned char status,
-			  int len)
+static int blk_enqueue(struct virtio_dev *dev, struct virtio_req *req)
 {
-	struct virtio_dev_req *req;
-	struct virtio_blk_req_trailer *f;
-
-	req = container_of(bufs - 1, struct virtio_dev_req, buf);
-
-	if (req->buf_count < 2) {
-		lkl_printf("virtio_blk: no status buf\n");
-		return;
-	}
-
-	if (req->buf[req->buf_count - 1].len != sizeof(*f)) {
-		lkl_printf("virtio_blk: bad status buf\n");
-	} else {
-		f = req->buf[req->buf_count - 1].addr;
-		f->status = status;
-	}
-
-	virtio_dev_complete(req, len);
-}
-
-static void blk_queue(struct virtio_dev *dev, struct virtio_dev_req *req)
-{
-	struct virtio_blk_req_header *h;
 	struct virtio_blk_dev *blk_dev;
+	struct lkl_virtio_blk_outhdr *h;
+	struct virtio_blk_req_trailer *t;
+	struct lkl_blk_req lkl_req;
 
-	if (req->buf[0].len != sizeof(struct virtio_blk_req_header)) {
-		lkl_printf("virtio_blk: bad header buf\n");
-		lkl_dev_blk_complete(&req->buf[1], LKL_DEV_BLK_STATUS_UNSUP, 0);
-		return;
+	if (req->buf_count < 3) {
+		lkl_printf("virtio_blk: no status buf\n");
+		goto out;
 	}
 
 	h = req->buf[0].addr;
+	t = req->buf[req->buf_count - 1].addr;
 	blk_dev = container_of(dev, struct virtio_blk_dev, dev);
 
-	blk_dev->ops->request(blk_dev->backstore, le32toh(h->type),
-			      le32toh(h->prio), le32toh(h->sector),
-			      &req->buf[1], req->buf_count - 2);
+	t->status = LKL_DEV_BLK_STATUS_IOERR;
+
+	if (req->buf[0].len != sizeof(*h)) {
+		lkl_printf("virtio_blk: bad header buf\n");
+		goto out;
+	}
+
+	if (req->buf[req->buf_count - 1].len != sizeof(*t)) {
+		lkl_printf("virtio_blk: bad status buf\n");
+		goto out;
+	}
+
+	lkl_req.type = le32toh(h->type);
+	lkl_req.prio = le32toh(h->ioprio);
+	lkl_req.sector = le32toh(h->sector);
+	lkl_req.buf = &req->buf[1];
+	lkl_req.count = req->buf_count - 2;
+
+	t->status = blk_dev->ops->request(blk_dev->disk, &lkl_req);
+
+out:
+	virtio_req_complete(req, 0);
+	return 0;
 }
 
 static struct virtio_dev_ops blk_ops = {
 	.check_features = blk_check_features,
-	.queue = blk_queue,
+	.enqueue = blk_enqueue,
 };
 
-int lkl_disk_add(union lkl_disk_backstore backstore)
+int lkl_disk_add(union lkl_disk disk)
 {
 	struct virtio_blk_dev *dev;
 	unsigned long long capacity;
@@ -86,7 +78,7 @@ int lkl_disk_add(union lkl_disk_backstore backstore)
 	if (!dev)
 		return -LKL_ENOMEM;
 
-	dev->dev.device_id = 2;
+	dev->dev.device_id = LKL_VIRTIO_ID_BLOCK;
 	dev->dev.vendor_id = 0;
 	dev->dev.device_features = 0;
 	dev->dev.config_gen = 0;
@@ -94,16 +86,16 @@ int lkl_disk_add(union lkl_disk_backstore backstore)
 	dev->dev.config_len = sizeof(dev->config);
 	dev->dev.ops = &blk_ops;
 	dev->ops = &lkl_dev_blk_ops;
-	dev->backstore = backstore;
+	dev->disk = disk;
 
-	ret = dev->ops->get_capacity(backstore, &capacity);
+	ret = dev->ops->get_capacity(disk, &capacity);
 	if (ret) {
 		ret = -LKL_ENOMEM;
 		goto out_free;
 	}
 	dev->config.capacity = capacity;
 
-	ret = virtio_dev_setup(&dev->dev, 1, 65536);
+	ret = virtio_dev_setup(&dev->dev, 1, 32);
 	if (ret)
 		goto out_free;
 

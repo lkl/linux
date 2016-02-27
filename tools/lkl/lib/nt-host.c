@@ -1,27 +1,66 @@
 #include <windows.h>
 #include <assert.h>
 #include <unistd.h>
+#undef s_addr
 #include <lkl_host.h>
 #include "iomem.h"
 
-static void *sem_alloc(int count)
+struct lkl_mutex_t {
+	HANDLE mutex;
+};
+
+struct lkl_sem_t {
+	HANDLE sem;
+};
+
+static struct lkl_sem_t *sem_alloc(int count)
 {
-	return CreateSemaphore(NULL, count, 100, NULL);
+	struct lkl_sem_t *sem = malloc(sizeof(struct lkl_sem_t));
+
+	sem->sem = CreateSemaphore(NULL, count, 100, NULL);
+	return sem;
 }
 
-static void sem_up(void *sem)
+static void sem_up(struct lkl_sem_t *sem)
 {
-	ReleaseSemaphore(sem, 1, NULL);
+	ReleaseSemaphore(sem->sem, 1, NULL);
 }
 
-static void sem_down(void *sem)
+static void sem_down(struct lkl_sem_t *sem)
 {
-	WaitForSingleObject(sem, INFINITE);
+	WaitForSingleObject(sem->sem, INFINITE);
 }
 
-static void sem_free(void *sem)
+static void sem_free(struct lkl_sem_t *sem)
 {
-	CloseHandle(sem);
+	CloseHandle(sem->sem);
+	free(sem);
+}
+
+static struct lkl_mutex_t *mutex_alloc(void)
+{
+	struct lkl_mutex_t *_mutex = malloc(sizeof(struct lkl_mutex_t));
+	if (!_mutex)
+		return NULL;
+
+	_mutex->mutex = CreateMutex(0, FALSE, 0);
+	return _mutex;
+}
+
+static void mutex_lock(struct lkl_mutex_t *mutex)
+{
+	WaitForSingleObject(mutex->mutex, INFINITE);
+}
+
+static void mutex_unlock(struct lkl_mutex_t *_mutex)
+{
+	ReleaseMutex(_mutex->mutex);
+}
+
+static void mutex_free(struct lkl_mutex_t *_mutex)
+{
+	CloseHandle(_mutex->mutex);
+	free(_mutex);
 }
 
 static int thread_create(void (*fn)(void *), void *arg)
@@ -34,6 +73,27 @@ static int thread_create(void (*fn)(void *), void *arg)
 static void thread_exit(void)
 {
 	ExitThread(0);
+}
+
+static int tls_alloc(unsigned int *key)
+{
+	*key = TlsAlloc();
+	return *key == TLS_OUT_OF_INDEXES ? -1 : 0;
+}
+
+static int tls_free(unsigned int key)
+{
+	return TlsFree(key) ? 0 : -1;
+}
+
+static int tls_set(unsigned int key, void *data)
+{
+	return TlsSetValue(key, data) ? 0 : -1;
+}
+
+static void *tls_get(unsigned int key)
+{
+	return TlsGetValue(key);
 }
 
 
@@ -123,6 +183,11 @@ static void print(const char *str, int len)
 	write(1, str, len);
 }
 
+static long gettid(void)
+{
+	return GetCurrentThreadId();
+}
+
 static void *mem_alloc(unsigned long size)
 {
 	return malloc(size);
@@ -136,6 +201,14 @@ struct lkl_host_operations lkl_host_ops = {
 	.sem_free = sem_free,
 	.sem_up = sem_up,
 	.sem_down = sem_down,
+	.mutex_alloc = mutex_alloc,
+	.mutex_free = mutex_free,
+	.mutex_lock = mutex_lock,
+	.mutex_unlock = mutex_unlock,
+	.tls_alloc = tls_alloc,
+	.tls_free = tls_free,
+	.tls_set = tls_set,
+	.tls_get = tls_get,
 	.time = time_ns,
 	.timer_alloc = timer_alloc,
 	.timer_set_oneshot = timer_set_oneshot,
@@ -146,45 +219,44 @@ struct lkl_host_operations lkl_host_ops = {
 	.ioremap = lkl_ioremap,
 	.iomem_access = lkl_iomem_access,
 	.virtio_devices = lkl_virtio_devs,
+	.gettid = gettid,
 };
 
-int handle_get_capacity(union lkl_disk_backstore bs, unsigned long long *res)
+int handle_get_capacity(union lkl_disk disk, unsigned long long *res)
 {
 	LARGE_INTEGER tmp;
 
-	if (!GetFileSizeEx(bs.handle, &tmp))
+	if (!GetFileSizeEx(disk.handle, &tmp))
 		return -1;
 
 	*res = tmp.QuadPart;
 	return 0;
 }
 
-void handle_do_rw(union lkl_disk_backstore bs, unsigned int type,
-		  unsigned int prio, unsigned long long sector,
-		  struct lkl_dev_buf *bufs, int count)
+static int blk_request(union lkl_disk disk, struct lkl_blk_req *req)
 {
-	unsigned long long offset = sector * 512;
+	unsigned long long offset = req->sector * 512;
 	OVERLAPPED ov = { 0, };
 	int err = 0, ret;
 
-	switch (type) {
+	switch (req->type) {
 	case LKL_DEV_BLK_TYPE_READ:
 	case LKL_DEV_BLK_TYPE_WRITE:
 	{
 		int i;
 
-		for (i = 0; i < count; i++) {
+		for (i = 0; i < req->count; i++) {
 			DWORD res;
 
 			ov.Offset = offset & 0xffffffff;
 			ov.OffsetHigh = offset >> 32;
 
-			if (type == LKL_DEV_BLK_TYPE_READ)
-				ret = ReadFile(bs.handle, bufs[i].addr,
-					       bufs[i].len, &res, &ov);
+			if (req->type == LKL_DEV_BLK_TYPE_READ)
+				ret = ReadFile(disk.handle, req->buf[i].addr,
+					       req->buf[i].len, &res, &ov);
 			else
-				ret = WriteFile(bs.handle, bufs[i].addr,
-						bufs[i].len, &res, &ov);
+				ret = WriteFile(disk.handle, req->buf[i].addr,
+						req->buf[i].len, &res, &ov);
 			if (!ret) {
 				lkl_printf("%s: I/O error: %d\n", __func__,
 					   GetLastError());
@@ -192,36 +264,35 @@ void handle_do_rw(union lkl_disk_backstore bs, unsigned int type,
 				goto out;
 			}
 
-			if (res != bufs[i].len) {
+			if (res != req->buf[i].len) {
 				lkl_printf("%s: I/O error: short: %d %d\n",
-					   res, bufs[i].len);
+					   res, req->buf[i].len);
 				err = -1;
 				goto out;
 			}
 
-			offset += bufs[i].len;
+			offset += req->buf[i].len;
 		}
 		break;
 	}
 	case LKL_DEV_BLK_TYPE_FLUSH:
 	case LKL_DEV_BLK_TYPE_FLUSH_OUT:
-		ret = FlushFileBuffers(bs.handle);
+		ret = FlushFileBuffers(disk.handle);
 		if (!ret)
 			err = 1;
 		break;
 	default:
-		lkl_dev_blk_complete(bufs, LKL_DEV_BLK_STATUS_UNSUP, 0);
-		return;
+		return LKL_DEV_BLK_STATUS_UNSUP;
 	}
 
 out:
 	if (err < 0)
-		lkl_dev_blk_complete(bufs, LKL_DEV_BLK_STATUS_IOERR, 0);
-	else
-		lkl_dev_blk_complete(bufs, LKL_DEV_BLK_STATUS_OK, err);
+		return LKL_DEV_BLK_STATUS_IOERR;
+
+	return LKL_DEV_BLK_STATUS_OK;
 }
 
 struct lkl_dev_blk_ops lkl_dev_blk_ops = {
 	.get_capacity = handle_get_capacity,
-	.request = handle_do_rw,
+	.request = blk_request,
 };

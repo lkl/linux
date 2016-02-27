@@ -37,6 +37,8 @@ typedef __s64			s64;
 
 #define __user
 
+#define sockaddr __lkl__kernel_sockaddr_storage
+
 #include <asm/unistd.h>
 /* Temporary undefine system calls that don't have data types defined in UAPI
  * headers */
@@ -89,9 +91,24 @@ typedef __s64			s64;
 #include <asm/signal.h>
 #include <asm/siginfo.h>
 #include <linux/utime.h>
+#include <asm/socket.h>
+#include <linux/if.h>
+#define __UAPI_DEF_IN_IPPROTO	1
+#define __UAPI_DEF_IN_ADDR	1
+#define __UAPI_DEF_IN_ADDR	1
+#define __UAPI_DEF_IP_MREQ	1
+#define __UAPI_DEF_IN_PKTINFO	1
+#define __UAPI_DEF_SOCKADDR_IN	1
+#define __UAPI_DEF_IN_CLASS	1
+#include <linux/in.h>
+#include <linux/sockios.h>
+#include <linux/route.h>
 
 #include <linux/kdev_t.h>
 #include <asm/irq.h>
+#include <linux/virtio_blk.h>
+#include <linux/virtio_net.h>
+#include <linux/virtio_ring.h>
 
 /* Define data structures used in system calls that are not defined in UAPI
  * headers */
@@ -134,6 +151,64 @@ struct ustat {
 	char			f_fpack[6];
 };
 
+#define AF_UNSPEC       0
+#define AF_UNIX         1
+#define AF_LOCAL        1
+#define AF_INET         2
+#define AF_AX25         3
+#define AF_IPX          4
+#define AF_APPLETALK    5
+#define AF_NETROM       6
+#define AF_BRIDGE       7
+#define AF_ATMPVC       8
+#define AF_X25          9
+#define AF_INET6        10
+#define AF_ROSE         11
+#define AF_DECnet       12
+#define AF_NETBEUI      13
+#define AF_SECURITY     14
+#define AF_KEY          15
+#define AF_NETLINK      16
+#define AF_ROUTE        AF_NETLINK
+#define AF_PACKET       17
+#define AF_ASH          18
+#define AF_ECONET       19
+#define AF_ATMSVC       20
+#define AF_RDS          21
+#define AF_SNA          22
+#define AF_IRDA         23
+#define AF_PPPOX        24
+#define AF_WANPIPE      25
+#define AF_LLC          26
+#define AF_IB           27
+#define AF_MPLS         28
+#define AF_CAN          29
+#define AF_TIPC         30
+#define AF_BLUETOOTH    31
+#define AF_IUCV         32
+#define AF_RXRPC        33
+#define AF_ISDN         34
+#define AF_PHONET       35
+#define AF_IEEE802154   36
+#define AF_CAIF         37
+#define AF_ALG          38
+#define AF_NFC          39
+#define AF_VSOCK        40
+
+#define SOCK_STREAM		1
+#define SOCK_DGRAM		2
+#define SOCK_RAW		3
+#define SOCK_RDM		4
+#define SOCK_SEQPACKET		5
+#define SOCK_DCCP		6
+#define SOCK_PACKET		10
+
+/* avoid colision with system headers defines */
+#define sa_handler sa_handler
+#define st_atime st_atime
+#define st_mtime st_mtime
+#define st_ctime st_ctime
+#define s_addr s_addr
 
 long lkl_syscall(long no, long *params);
 long lkl_sys_halt(void);
@@ -151,18 +226,18 @@ long lkl_sys_halt(void);
 #define __SC_DECL(t, a) t a
 
 #define LKL_SYSCALL0(name)					       \
-	static inline long lkl_sys_##name(void)			       \
+	static inline long lkl_sys##name(void)			       \
 	{							       \
 		long params[6];					       \
-		return lkl_syscall(__lkl__NR_##name, params);	       \
+		return lkl_syscall(__lkl__NR##name, params);	       \
 	}
 
 #define LKL_SYSCALLx(x, name, ...)				       \
        	static inline						       \
-	long lkl_sys_##name(__MAP(x, __SC_DECL, __VA_ARGS__))	       \
+	long lkl_sys##name(__MAP(x, __SC_DECL, __VA_ARGS__))	       \
 	{							       \
 		long params[6] = { __MAP(x, __SC_LONG, __VA_ARGS__) }; \
-		return lkl_syscall(__lkl__NR_##name, params);	       \
+		return lkl_syscall(__lkl__NR##name, params);	       \
 	}
 
 #define SYSCALL_DEFINE0(name, ...) LKL_SYSCALL0(name)
@@ -172,5 +247,7 @@ long lkl_sys_halt(void);
 #define SYSCALL_DEFINE4(name, ...) LKL_SYSCALLx(4, name, __VA_ARGS__)
 #define SYSCALL_DEFINE5(name, ...) LKL_SYSCALLx(5, name, __VA_ARGS__)
 #define SYSCALL_DEFINE6(name, ...) LKL_SYSCALLx(6, name, __VA_ARGS__)
+
+#include <asm/syscall_defs.h>
 
 #endif

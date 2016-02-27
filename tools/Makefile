@@ -15,6 +15,7 @@ help:
 	@echo '  hv         - tools used when in Hyper-V clients'
 	@echo '  iio        - IIO tools'
 	@echo '  lguest     - a minimal 32-bit x86 hypervisor'
+	@echo '  lkl        - The Linux Kernel Library host libraries and tools'
 	@echo '  perf       - Linux performance measurement and analysis tool'
 	@echo '  selftests  - various kernel selftests'
 	@echo '  turbostat  - Intel CPU idle stats and freq reporting tool'
@@ -48,7 +49,7 @@ acpi: FORCE
 cpupower: FORCE
 	$(call descend,power/$@)
 
-cgroup firewire hv guest usb virtio vm net iio: FORCE
+cgroup firewire hv guest lkl usb virtio vm net iio: FORCE
 	$(call descend,$@)
 
 liblockdep: FORCE
@@ -83,7 +84,7 @@ acpi_install:
 cpupower_install:
 	$(call descend,power/$(@:_install=),install)
 
-cgroup_install firewire_install hv_install lguest_install perf_install usb_install virtio_install vm_install net_install:
+cgroup_install firewire_install hv_install lguest_install lkl_install perf_install usb_install virtio_install vm_install net_install:
 	$(call descend,$(@:_install=),install)
 
 selftests_install:
@@ -101,7 +102,7 @@ freefall_install:
 install: acpi_install cgroup_install cpupower_install hv_install firewire_install lguest_install \
 		perf_install selftests_install turbostat_install usb_install \
 		virtio_install vm_install net_install x86_energy_perf_policy_install \
-		tmon freefall_install
+		tmon freefall_install lkl_install
 
 acpi_clean:
 	$(call descend,power/acpi,clean)
@@ -109,7 +110,7 @@ acpi_clean:
 cpupower_clean:
 	$(call descend,power/cpupower,clean)
 
-cgroup_clean hv_clean firewire_clean lguest_clean usb_clean virtio_clean vm_clean net_clean iio_clean:
+cgroup_clean hv_clean firewire_clean lguest_clean lkl_clean usb_clean virtio_clean vm_clean net_clean iio_clean:
 	$(call descend,$(@:_clean=),clean)
 
 liblockdep_clean:
@@ -136,6 +137,6 @@ freefall_clean:
 clean: acpi_clean cgroup_clean cpupower_clean hv_clean firewire_clean lguest_clean \
 		perf_clean selftests_clean turbostat_clean usb_clean virtio_clean \
 		vm_clean net_clean iio_clean x86_energy_perf_policy_clean tmon_clean \
-		freefall_clean
+		freefall_clean lkl_clean
 
 .PHONY: FORCE

@@ -51,6 +51,20 @@ def find_ml_symbols(regexp, store):
                         store.add(j)
                     break
 
+def find_enums(block_regexp, symbol_regexp, store):
+    for h in headers:
+        for i in block_regexp.finditer(open(h).read()):
+            for j in reversed(i.groups()):
+                if j:
+                    # remove comments
+                    j = re.sub(re.compile("(\/\*(\*(?!\/)|[^*])*\*\/)", re.S|re.M), " ", j)
+                    for k in symbol_regexp.finditer(j):
+                        for l in k.groups():
+                            if l:
+                                if not has_lkl_prefix(l):
+                                    store.add(l)
+                                break
+
 def lkl_prefix(w):
     r = ""
 
@@ -77,10 +91,12 @@ def replace(h):
         search_str = "(#[ \t]*include[ \t]*[<\"][ \t]*)" + i + "([ \t]*[>\"])"
         replace_str = "\\1" + "lkl/" + i + "\\2"
         content = re.sub(search_str, replace_str, content)
-    for d in defines:
-        search_str = "(\W)" + d + "(\W)"
-        replace_str = "\\1" + lkl_prefix(d) + "\\2"
-        content = re.sub(search_str, replace_str, content, flags = re.MULTILINE)
+    tmp = ""
+    for w in re.split("(\W+)", content):
+        if w in defines:
+            w = lkl_prefix(w)
+        tmp += w
+    content = tmp
     for s in structs:
         search_str = "(\W?struct\s+)" + s + "(\W)"
         replace_str = "\\1" + lkl_prefix(s) + "\\2"
@@ -99,49 +115,9 @@ args = parser.parse_args()
 find_headers("arch/lkl/include/uapi/asm/syscalls.h")
 headers.add("arch/lkl/include/uapi/asm/host_ops.h")
 
-defines = set()
-structs = set()
-unions = set()
+new_headers = set()
 
-p = re.compile("#[ \t]*define[ \t]*(\w+)")
-find_symbols(p, defines)
-p = re.compile("typedef.*(\(\*(\w+)\)\(.*\)\s*|\W+(\w+)\s*|\s+(\w+)\(.*\)\s*);")
-find_symbols(p, defines)
-p = re.compile("typedef\s+(struct|union)\s+\w*\s*{[^\}]*}\W*(\w+)\s*;", re.M|re.S)
-find_ml_symbols(p, defines)
-defines.add("siginfo_t")
-defines.add("sigevent_t")
-p = re.compile("struct\s+(\w+)\s*\{")
-find_symbols(p, structs)
-structs.add("iovec")
-p = re.compile("union\s+(\w+)\s*\{")
-find_symbols(p, unions)
-
-def generate_syscalls(h):
-    syscalls = dict()
-    p = re.compile("[^_]SYSCALL_DEFINE[0-6]\((\w+)[^\)]*\)", flags = re.M|re.S)
-    for root, dirs, files in os.walk("."):
-        if root == '.' and 'arch' in dirs:
-            dirs.remove('arch')
-        for name in files:
-            if fnmatch.fnmatch(name, "*.c"):
-                path = os.path.join(root, name)
-                for i in p.finditer(open(path).read()):
-                    if "old_kernel_stat" in i.group(0):
-                        continue
-                    if "old_utsname" in i.group(0):
-                        continue
-                    syscalls[i.group(1)] = i.group(0)
-    f = open(h, "r+")
-    f.seek(-8, 2);
-    f.write("\n")
-    for s in syscalls:
-        f.write("#ifdef __lkl__NR_%s" % s)
-        f.write("%s\n" % syscalls[s])
-        f.write("#endif\n\n")
-    f.write("#endif\n")
-
-def process_header(h):
+for h in headers:
     dir = os.path.dirname(h)
     out_dir = args.path + "/" + re.sub("(arch/lkl/include/uapi/|arch/lkl/include/generated/uapi/|include/uapi/|include/generated/uapi/|include/generated)(.*)", "lkl/\\2", dir)
     try:
@@ -151,9 +127,36 @@ def process_header(h):
     print("  INSTALL\t%s" % (out_dir + "/" + os.path.basename(h)))
     os.system("scripts/headers_install.sh %s %s %s" % (out_dir, dir,
                                                        os.path.basename(h)))
-    if h == "arch/lkl/include/uapi/asm/syscalls.h":
-        generate_syscalls(out_dir + "/" + os.path.basename(h))
-    replace(out_dir + "/" + os.path.basename(h))
+    new_headers.add(out_dir + "/" + os.path.basename(h))
+
+headers = new_headers
+
+defines = set()
+structs = set()
+unions = set()
+
+p = re.compile("#[ \t]*define[ \t]*(\w+)")
+find_symbols(p, defines)
+p = re.compile("typedef.*(\(\*(\w+)\)\(.*\)\s*|\W+(\w+)\s*|\s+(\w+)\(.*\)\s*);")
+find_symbols(p, defines)
+p = re.compile("typedef\s+(struct|union)\s+\w*\s*{[^\\{\}]*}\W*(\w+)\s*;", re.M|re.S)
+find_ml_symbols(p, defines)
+defines.add("siginfo_t")
+defines.add("sigevent_t")
+p = re.compile("struct\s+(\w+)\s*\{")
+find_symbols(p, structs)
+structs.add("iovec")
+p = re.compile("union\s+(\w+)\s*\{")
+find_symbols(p, unions)
+p = re.compile("static\s+__inline__(\s+\w+)+\s+(\w+)\([^)]*\)\s")
+find_symbols(p, defines)
+p = re.compile("enum\s+(\w*)\s*{([^}]*)}", re.M|re.S)
+q = re.compile("(\w+)\s*(,|=[^,]*|$)", re.M|re.S)
+find_enums(p, q, defines)
+
+def process_header(h):
+    print("  REPLACE\t%s" % (out_dir + "/" + os.path.basename(h)))
+    replace(h)
 
 p = multiprocessing.Pool(args.jobs)
 try:

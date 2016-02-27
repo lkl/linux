@@ -13,9 +13,6 @@
 #include <fcntl.h>
 #include <archive.h>
 #include <archive_entry.h>
-#undef st_atime
-#undef st_mtime
-#undef st_ctime
 #include <lkl.h>
 #include <lkl_host.h>
 
@@ -151,11 +148,11 @@ static inline void fsimg_copy_stat(struct stat *st, struct lkl_stat *fst)
 	st->st_size = fst->st_size;
 	st->st_blksize = fst->st_blksize;
 	st->st_blocks = fst->st_blocks;
-	st->st_atim.tv_sec = fst->st_atime;
+	st->st_atim.tv_sec = fst->lkl_st_atime;
 	st->st_atim.tv_nsec = fst->st_atime_nsec;
-	st->st_mtim.tv_sec = fst->st_mtime;
+	st->st_mtim.tv_sec = fst->lkl_st_mtime;
 	st->st_mtim.tv_nsec = fst->st_mtime_nsec;
-	st->st_ctim.tv_sec = fst->st_ctime;
+	st->st_ctim.tv_sec = fst->lkl_st_ctime;
 	st->st_ctim.tv_nsec = fst->st_ctime_nsec;
 }
 
@@ -337,7 +334,7 @@ out:
 
 int main(int argc, char **argv)
 {
-	union lkl_disk_backstore bs;
+	union lkl_disk disk;
 	long ret;
 	char mpoint[32];
 	unsigned int disk_id;
@@ -348,15 +345,15 @@ int main(int argc, char **argv)
 	if (!cla.printk)
 		lkl_host_ops.print = NULL;
 
-	bs.fd = open(cla.fsimg_path, O_RDONLY);
-	if (bs.fd < 0) {
+	disk.fd = open(cla.fsimg_path, O_RDONLY);
+	if (disk.fd < 0) {
 		fprintf(stderr, "can't open fsimg %s: %s\n", cla.fsimg_path,
 			strerror(errno));
 		ret = 1;
 		goto out;
 	}
 
-	ret = lkl_disk_add(bs);
+	ret = lkl_disk_add(disk);
 	if (ret < 0) {
 		fprintf(stderr, "can't add disk: %s\n", lkl_strerror(ret));
 		goto out_close;
@@ -394,7 +391,7 @@ out_umount:
 	lkl_umount_dev(disk_id, 0, 1000);
 
 out_close:
-	close(bs.fd);
+	close(disk.fd);
 
 out:
 	lkl_sys_halt();

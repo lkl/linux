@@ -33,15 +33,9 @@ void __init setup_arch(char **cl)
 
 int run_init_process(const char *init_filename)
 {
-	lkl_ops->sem_up(init_sem);
-
-	run_syscalls();
+	initial_syscall_thread(init_sem);
 
 	kernel_halt();
-
-	/* We want to kill init without panic()ing */
-	init_pid_ns.child_reaper = 0;
-	do_exit(0);
 
 	return 0;
 }
@@ -147,8 +141,10 @@ void arch_cpu_idle(void)
 {
 	if (halt) {
 		threads_cleanup();
-		free_IRQ();
-		free_mem();
+		/* TODO(pscollins): If we free here, it causes a
+		 * segfault because the tx/rx threads are still
+		 * running in parallel. */
+		/* free_mem(); */
 		lkl_ops->sem_up(halt_sem);
 		lkl_ops->thread_exit();
 	}

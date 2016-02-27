@@ -48,7 +48,7 @@ static int timer_irq;
 
 static void timer_fn(void *arg)
 {
-	lkl_trigger_irq(timer_irq, NULL);
+	lkl_trigger_irq(timer_irq);
 }
 
 static int clockevent_set_state_shutdown(struct clock_event_device *evt)
@@ -121,5 +121,5 @@ void __init time_init(void)
 
 	clockevents_config_and_register(&clockevent, HZ, 0, 0xffffffff);
 
-	pr_info("lkl: time and timers initialized\n");
+	pr_info("lkl: time and timers initialized (irq%d)\n", timer_irq);
 }

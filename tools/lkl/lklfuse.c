@@ -11,9 +11,6 @@
 #include <fuse.h>
 #include <fuse/fuse_opt.h>
 #include <fuse/fuse_lowlevel.h>
-#undef st_atime
-#undef st_mtime
-#undef st_ctime
 #include <lkl.h>
 #include <lkl_host.h>
 
@@ -23,7 +20,7 @@ struct lklfuse {
 	const char *file;
 	const char *log;
 	const char *type;
-	union lkl_disk_backstore bs;
+	union lkl_disk disk;
 	int disk_id;
 	int ro;
 	int mb;
@@ -112,11 +109,11 @@ static void lklfuse_xlat_stat(const struct lkl_stat *in, struct stat *st)
 	st->st_size = in->st_size;
 	st->st_blksize = in->st_blksize;
 	st->st_blocks = in->st_blocks;
-	st->st_atim.tv_sec = in->st_atime;
+	st->st_atim.tv_sec = in->lkl_st_atime;
 	st->st_atim.tv_nsec = in->st_atime_nsec;
-	st->st_mtim.tv_sec = in->st_mtime;
+	st->st_mtim.tv_sec = in->lkl_st_mtime;
 	st->st_mtim.tv_nsec = in->st_mtime_nsec;
-	st->st_ctim.tv_sec = in->st_ctime;
+	st->st_ctim.tv_sec = in->lkl_st_ctime;
 	st->st_ctim.tv_nsec = in->st_ctime_nsec;
 }
 
@@ -446,7 +443,7 @@ static int lklfuse_utimens(const char *path, const struct timespec tv[2])
 	ts[1].tv_sec = tv[0].tv_sec;
 	ts[1].tv_nsec = tv[0].tv_nsec;
 
-	return lkl_sys_utimensat(-1, path, ts, 0);
+	return lkl_sys_utimensat(-1, path, ts, LKL_AT_SYMLINK_NOFOLLOW);
 }
 
 static int lklfuse_fallocate(const char *path, int mode, off_t offset,
@@ -586,9 +583,9 @@ int main(int argc, char **argv)
 		goto out_free;
 	}
 
-	lklfuse.bs.fd = ret;
+	lklfuse.disk.fd = ret;
 
-	ret = lkl_disk_add(lklfuse.bs);
+	ret = lkl_disk_add(lklfuse.disk);
 	if (ret < 0) {
 		fprintf(stderr, "can't add disk: %s\n", lkl_strerror(ret));
 		goto out_close_disk;
@@ -637,7 +634,7 @@ out_fuse_unmount:
 	fuse_unmount(mnt, ch);
 
 out_close_disk:
-	close(lklfuse.bs.fd);
+	close(lklfuse.disk.fd);
 
 out_free:
 	free(mnt);

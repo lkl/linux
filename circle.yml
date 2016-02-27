@@ -1,6 +1,12 @@
 general:
   artifacts:
 
+## Customize the test machine
+machine:
+  # Add some environment variables
+  environment:
+    CROSS_COMPILE: $([[ $CIRCLE_NODE_INDEX -eq 1 ]] && echo 'i686-w64-mingw32-')
+
 ## Customize dependencies
 dependencies:
   pre:
@@ -14,11 +20,21 @@ dependencies:
   post:
     - make defconfig ARCH=lkl CC=clang-3.8 HOSTCC=clang-3.8
     - make ARCH=lkl -j8 CC=clang-3.8 HOSTCC=clang-3.8
+    - sudo apt-get update; sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs valgrind gcc-mingw-w64-i686 wine
 
 test:
+    pre:
+    - sudo cp tools/lkl/bin/i686-w64-mingw32-* /usr/bin:
+        parallel: true
+
   override:
+    - cd tools/lkl && make clean:
+	parallel: true
     - cd tools/lkl && make -j8 CC=clang-3.8 HOSTCC=clang-3.8
+	parallel: true
     - cd tools/lkl && make test
+	parallel: true
+
     - ? >
         if [ -n "${RUN_NIGHTLY_BUILD}" ]; then
           cd tools/lkl && make valgrind;
