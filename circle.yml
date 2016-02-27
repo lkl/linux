@@ -16,10 +16,6 @@ dependencies:
     - sudo apt-get update
     - sudo apt-get install -qy clang-3.8
     - sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs
-    - sudo apt-get update; sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs valgrind
-  post:
-    - make defconfig ARCH=lkl CC=clang-3.8 HOSTCC=clang-3.8
-    - make ARCH=lkl -j8 CC=clang-3.8 HOSTCC=clang-3.8
     - sudo apt-get update; sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs valgrind gcc-mingw-w64-i686 wine
 
 test:
