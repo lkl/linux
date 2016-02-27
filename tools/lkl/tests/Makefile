@@ -25,12 +25,17 @@ QUICK?=0
 VALGRIND_TEXT?=0
 FS_TYPES?=ext4 btrfs vfat xfs
 
+ifeq (,$(filter $(OUTPUT_FORMAT),pe-i386))
+# Hijacking is not supported on Win32
+	HIJACK_TEST="./hijack-test.sh"
+else
+	HIJACK_TEST=
+endif
+
 # The hijack tests are very time consuming, so run with `QUICK=1 make
 # test` if you want to stick to the unit tests
 ifeq ($(QUICK),1)
 	HIJACK_TEST=
-else
-	HIJACK_TEST="./hijack-test.sh"
 endif
 
 ifeq ($(VALGRIND_TEXT),1)
