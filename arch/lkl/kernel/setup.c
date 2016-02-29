@@ -24,8 +24,8 @@ static unsigned long mem_size;
  */
 #if defined(CONFIG_DUMMY_CONSOLE)
 struct screen_info screen_info = {
- .orig_video_lines	= 30,
- .orig_video_cols	= 80,
+ .orig_video_lines	= CONFIG_DUMMY_CONSOLE_ROWS,
+ .orig_video_cols	= CONFIG_DUMMY_CONSOLE_COLUMNS,
  .orig_video_mode	= 0,
  .orig_video_ega_bx	= 0,
  .orig_video_isVGA	= 1,
