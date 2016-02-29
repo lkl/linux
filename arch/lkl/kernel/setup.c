@@ -22,7 +22,7 @@ static unsigned long mem_size;
 /*
  * Prepare a screen_info structure when console is enabled.
  */
-#if defined(CONFIG_VGA_CONSOLE) || defined(CONFIG_DUMMY_CONSOLE)
+#if defined(CONFIG_DUMMY_CONSOLE)
 struct screen_info screen_info = {
  .orig_video_lines	= 30,
  .orig_video_cols	= 80,
