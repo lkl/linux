@@ -182,10 +182,11 @@ long lkl_syscall(long no, long *params)
 	lkl_ops->sem_up(data->mutex);
 
 	if (no == __NR_reboot) {
-		lkl_ops->sem_free(data->completion);
 		lkl_ops->sem_free(data->mutex);
-		if (data != &default_syscall_thread_data)
+		if (data != &default_syscall_thread_data) {
+			lkl_ops->sem_free(data->completion);
 			lkl_ops->mem_free(data);
+		}
 	}
 
 	return s.ret;
