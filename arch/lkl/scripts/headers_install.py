@@ -53,11 +53,11 @@ def find_ml_symbols(regexp, store):
 
 def find_enums(block_regexp, symbol_regexp, store):
     for h in headers:
-        for i in block_regexp.finditer(open(h).read()):
+        # remove comments
+        content = re.sub(re.compile("(\/\*(\*(?!\/)|[^*])*\*\/)", re.S|re.M), " ", open(h).read())
+        for i in block_regexp.finditer(content):
             for j in reversed(i.groups()):
                 if j:
-                    # remove comments
-                    j = re.sub(re.compile("(\/\*(\*(?!\/)|[^*])*\*\/)", re.S|re.M), " ", j)
                     for k in symbol_regexp.finditer(j):
                         for l in k.groups():
                             if l:
