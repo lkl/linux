@@ -66,32 +66,55 @@ static inline int is_tx_queue(struct virtio_dev *dev, struct virtio_queue *queue
        return &dev->queue[TX_QUEUE_IDX] == queue;
 }
 
+/* Inside the LKL kernel, we wrapped this buffer (which corresponds to
+ * an IP packet) with a header to make sure it got routed to the TAP
+ * device. This header is meaningless to the oustide world, so we cut
+ * it off the top of the packet before sending it to the TAP
+ * device. */
+void strip_dev_buf_header(const struct lkl_dev_buf *in_buf,
+			struct lkl_dev_buf *out_buf,
+			struct lkl_virtio_net_hdr_v1 **out_hdr)
+{
+	memset(out_buf, 0, sizeof(*out_buf));
+
+	/* Header starts at the top of the buffer */
+	*out_hdr = in_buf->addr;
+
+	out_buf->len = in_buf->len - sizeof(**out_hdr);
+	out_buf->addr = in_buf->addr + sizeof(**out_hdr);
+}
+
 static int net_enqueue(struct virtio_dev *dev, struct virtio_req *req)
 {
 	struct lkl_virtio_net_hdr_v1 *header;
-	struct virtio_net_dev *net_dev;
-	int ret, len;
-	void *buf;
+	struct lkl_dev_buf out_buf;
+	int ret;
 
-	header = req->buf[0].addr;
-	net_dev = netdev_of(dev);
-	len = req->buf[0].len - sizeof(*header);
+	struct virtio_net_dev *net_dev = netdev_of(dev);
 
-	buf = &header[1];
+	/* Let's try the first buffer first */
+	strip_dev_buf_header(&req->buf[0], &out_buf, &header);
 
-	if (!len && req->buf_count > 1) {
-		buf = req->buf[1].addr;
-		len = req->buf[1].len;
+	/* The first buffer was just a header. If this request has
+	 * multiple buffers, it's a TX packet and the info we care
+	 * about is in the second buffer (because an empty packet is
+	 * useless to the TAP device), so let's send that. If we don't
+	 * have multiple buffers, this must be an RX packet, and its
+	 * length is going to be updated below. */
+	if (!out_buf.len && req->buf_count > 1) {
+		/* We have another buffer to take, let's use that */
+		out_buf.addr = req->buf[1].addr;
+		out_buf.len = req->buf[1].len;
 	}
 
 	/* Pick which virtqueue to send the buffer(s) to */
 	if (is_tx_queue(dev, req->q)) {
-		ret = net_dev->ops->tx(net_dev->nd, buf, len);
+		ret = net_dev->ops->tx(net_dev->nd, out_buf.addr, (int)out_buf.len);
 		if (ret < 0)
 			return -1;
 	} else if (is_rx_queue(dev, req->q)) {
 		header->num_buffers = 1;
-		ret = net_dev->ops->rx(net_dev->nd, buf, &len);
+		ret = net_dev->ops->rx(net_dev->nd, out_buf.addr, (int*)&out_buf.len);
 		if (ret < 0)
 			return -1;
 	} else {
@@ -99,7 +122,7 @@ static int net_enqueue(struct virtio_dev *dev, struct virtio_req *req)
 		return -1;
 	}
 
-	virtio_req_complete(req, len + sizeof(*header));
+	virtio_req_complete(req, out_buf.len + sizeof(*header));
 	return 0;
 }
 
