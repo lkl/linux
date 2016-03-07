@@ -5,31 +5,37 @@ general:
 machine:
   # Add some environment variables
   environment:
-    CROSS_COMPILE: $([[ $CIRCLE_NODE_INDEX -eq 1 ]] && echo 'i686-w64-mingw32-')
+    CROSS_COMPILE: $(case $CIRCLE_NODE_INDEX in 0) host='' ;; 1) host='i686-w64-mingw32-' ;; 2) host='arm-linux-androideabi-' ;; esac; echo $host)
+    PATH: /home/ubuntu/android-toolchain/bin:${PATH}
 
 ## Customize dependencies
 dependencies:
   pre:
+    # required for 14.04 container
+    # - sudo dpkg --add-architecture i386
+    - sudo apt-get update; sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs valgrind gcc-mingw-w64-i686 wine qemu-user-static
+    - /usr/local/android-ndk/build/tools/make-standalone-toolchain.sh --platform=android-21 --install-dir=/home/ubuntu/android-toolchain --arch=arm
     - sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
     - wget -O - http://llvm.org/apt/llvm-snapshot.gpg.key|sudo apt-key add -
     - echo "deb http://llvm.org/apt/precise/ llvm-toolchain-precise main" > /tmp/a && sudo mv /tmp/a /etc/apt/sources.list.d/llvm-precise.list
     - sudo apt-get update
     - sudo apt-get install -qy clang-3.8
-    - sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs
-    - sudo apt-get update; sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs valgrind gcc-mingw-w64-i686 wine
+
 
 test:
-    pre:
+  pre:
     - sudo cp tools/lkl/bin/i686-w64-mingw32-* /usr/bin:
         parallel: true
 
   override:
     - cd tools/lkl && make clean:
-	parallel: true
+        parallel: true
     - cd tools/lkl && make -j8 CC=clang-3.8 HOSTCC=clang-3.8:
-	parallel: true
+        parallel: true
+    - cd tools/lkl && if [ $CIRCLE_NODE_INDEX -eq 2 ] ; then make tests/boot-in.o; arm-linux-androideabi-gcc -o tests/boot tests/boot-in.o liblkl.a -static ; fi:
+        parallel: true
     - cd tools/lkl && make test:
-	parallel: true
+         parallel: true
 
     - ? >
         if [ -n "${RUN_NIGHTLY_BUILD}" ]; then
@@ -40,6 +46,3 @@ test:
   post:
     - mkdir -p $CIRCLE_TEST_REPORTS/junit/
     - find ./tools/lkl/ -type f -name "*.xml" -exec cp {} $CIRCLE_TEST_REPORTS/ \;
-
-    
-    
