@@ -41,12 +41,12 @@ export CFLAGS += -Iinclude -Wall -g -O2 -Wextra -Wno-unused-parameter \
 
 OUTPUT_FORMAT = $(shell $(LD) -r -print-output-format)
 
-ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64 elf32-i386 elf64-x86-64-freebsd))
+ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64 elf32-i386 elf64-x86-64-freebsd elf32-littlearm))
+  OUTPUT_DEF = $(shell echo | $(CC) -dM -E -)
   CFLAGS   += -fPIC -pthread
-  LDLIBS   += -lrt -lpthread
-  export CONFIG_AUTO_LKL_POSIX_HOST=y
-else ifneq (,$(filter $(OUTPUT_FORMAT),elf32-littlearm))
-  CFLAGS   += -fPIC
+  ifeq (,$(filter $(OUTPUT_DEF),__ANDROID__))
+    LDLIBS   += -lrt -lpthread
+  endif
   export CONFIG_AUTO_LKL_POSIX_HOST=y
 else ifneq (,$(filter $(OUTPUT_FORMAT),pe-i386))
   KOPT      = "KALLSYMS_EXTRA_PASS=1"
@@ -94,7 +94,7 @@ $(TEST_TARGETS): tests/boot
 
 # because of libdl, liblkl-hijack will not compile on windows
 # fortunately, the test target will handle a missing libhijack.so correctly
-ifeq (,$(filter $(OUTPUT_FORMAT),pe-i386))
+ifeq (,$(filter $(OUTPUT_FORMAT),pe-i386 elf32-littlearm))
   test: liblkl-hijack$(SOSUF)
 endif
 
@@ -117,8 +117,13 @@ cpfromfs$(EXESUF): cptofs$(EXESUF)
 
 # because of argp and fuse, none of the binaries will compile on windows
 # because of libdl, liblkl-hijack will not compile on windows
+# arm-android neither for the moment
 ifneq (,$(filter $(OUTPUT_FORMAT),pe-i386))
   all: $(filter-out liblkl-hijack$(SOSUF), $(ALL_LIBRARIES))
+else ifneq (,$(filter $(OUTPUT_DEF),__ANDROID__))
+  all: $(filter-out liblkl-hijack$(SOSUF), $(ALL_LIBRARIES))
+else ifneq (,$(filter $(OUTPUT_FORMAT),elf32-littlearm))
+  all: $(filter-out liblkl-hijack$(SOSUF), $(ALL_LIBRARIES)) $(ALL_PROGRAMS)
 else
   all: $(ALL_PROGRAMS) $(ALL_LIBRARIES)
 endif
