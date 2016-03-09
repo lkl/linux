@@ -1,6 +1,6 @@
 
 Introduction
-------------
+============
 
 LKL (Linux Kernel Library) is aiming to allow reusing the Linux kernel code as
 extensively as possible with minimal effort and reduced maintenance overhead.
@@ -19,13 +19,13 @@ LKL is implemented as an architecture port in arch/lkl. It uses host operations
 defined by the application or a host library (tools/lkl/lib).
 
 Supported hosts
----------------
+===============
 
 The supported hosts for now are POSIX and Windows userspace applications.
 
 
 Building LKL, the host library and LKL based tools
---------------------------------------------------
+==================================================
 
     $ make tools/lkl
 
@@ -43,9 +43,11 @@ APIs
 * lklfuse - a tool that can mount a filesystem image in userspace,
   without root priviledges, using FUSE
 
+  
+  
 Building with Clang
 -------------------
-Simply run make CC=clang HOSTCC=clang
+    $ make CC=clang HOSTCC=clang tools/lkl
 
 Building LKL on FreeBSD
 -----------------------
@@ -74,7 +76,6 @@ Building LKL on Ubuntu
     $ cd tools/lkl
     $ make test
 
-
 Building LKL for Windows
 ------------------------
 
@@ -96,8 +97,6 @@ following command:
 
     $ make CROSS_COMPILE=i686-w64-mingw32- tools/lkl
 
-    
-    
 Building LKL on Windows
 ------------------------
 
@@ -105,34 +104,60 @@ To build on Windows, certain GNU tools need to be installed. These tools can com
 from several different projects, such as cygwin, unxutils, gnu-win32 or busybox-w32. 
 Below is one minimal/modular set-up based on msys2.
 
-Common build dependencies:
+##H3 Common build dependencies:
 MSYS2 (provides GNU bash and many other utilities)
 https://sourceforge.net/projects/msys2/
 Extra utilities from MSYS2/pacman: 
 bc, base-devel 
 
-General considerations:
+##H3 General considerations:
 No spaces in pathnames (source, prefix, destination,...)! 
 Make sure that all utilities are in the PATH.  
 Win64 (and MinGW 64-bit crt) is LLP64, which causes conflicts in size of "long" in the 
 Linux source. Cygwin (and msys2) are LP64, like linux. Linux (and lkl) can (currently) not 
-be built on LLP64.
+be built on LLP64. Different compilation options will have its own advantages and 
+disadvantages. Using Cygwin libc (newlib) will be more unix-like and does not have
+architecture portability issues. On the other hand, a more native compilation will integrate
+better with the host OS. For example, to develop native Windows drivers using the Windows 
+Driver Kit (WDK), the compilation needs to be MSVC-compatible.
 
-For MSYS2 (and Cygwin):
-Msys2 will install a gcc tool chain as part of the base-devel bundle.
+##H3 Different compilation options 
+(sorted from most unix-like to most native)
+
+##H4 For MSYS2 (and Cygwin):
+Msys2 will install a gcc tool chain as part of the base-devel bundle. Alternatively, clang
+can be used by installing the clang-svn package via pacman. 
 Binutils need to be re-built with patches for weak symbols as described above.
-Using the msys2 shell, cd to the lkl sources. 
-and run:
+Using the msys2 shell, run:
 
     $ make tools/lkl
+or
+    $ make CC=clang HOSTCC=clang tools/lkl
 
-For MinGW:
+##H4 For MinGW:
 Install mingw-w64-i686-toolchain via pacman, mingw-w64-i686-binutils need to be re-built with the 
-weak symbols patches. Start a MinGW Win32 shell (64-bit will not work, see above)
+weak symbols patches. Alternatively, clang can be used by installing mingw-w64-i686-clang.
+Start a MinGW Win32 shell (64-bit will not work, see above)
 and run:
 
     $ make tools/lkl
+or
+    $ make CC=clang HOSTCC=clang tools/lkl
+    
+##H4 For LLVM/Clang (native):
+Clang installed via msys2 will be unix-like and gcc-compatible. In contrast, native Windows Clang
+strives to be MSVC-compatible. This comes with the same limitations as MinGW (LLP64) but the
+build does not depend on binutils (MSVC linker is used).
 
+    **not tested yet !**
+
+##H4 For Visual Studio (Clang with Microsoft CodeGen):
+This takes the MSVC compatibility further and clang is only used to parse the code. The actual
+compilation is done by the Microsoft C/C++ compiler components. In this set-up also the MSVC
+C/C++ compiler cl.exe is in the PATH, but it will be a challenge to get Linux to compile with
+this compiler.
+
+    **not tested yet !**
 
 LKL hijack library
 ------------------
