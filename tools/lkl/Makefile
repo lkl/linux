@@ -99,6 +99,13 @@ ifeq (,$(filter $(OUTPUT_FORMAT),pe-i386 elf32-littlearm))
 endif
 
 
+# Virtual Distributed Ethernet configuration
+ifeq ($(vde),y)
+  export CONFIG_AUTO_LKL_NET_VDE=y
+  CFLAGS     += -DCONFIG_AUTO_LKL_NET_VDE
+  LDLIBS     += $(shell pkg-config --libs vdeplug)
+endif
+
 %-in.o: lib/lkl.o FORCE
 	$(Q)$(MAKE) -f $(srctree)/tools/build/Makefile.build dir=$(patsubst %/,%,$(dir $*)) obj=$(notdir $*)
 
