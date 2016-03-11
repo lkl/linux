@@ -13,7 +13,7 @@ dependencies:
   pre:
     # required for 14.04 container
     # - sudo dpkg --add-architecture i386
-    - sudo apt-get update; sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs valgrind gcc-mingw-w64-i686 wine qemu-user-static libkrb5-26-heimdal
+    - sudo apt-get update; sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs valgrind gcc-mingw-w64-i686 wine qemu-user-static libkrb5-26-heimdal python-pycurl
     - /usr/local/android-ndk/build/tools/make-standalone-toolchain.sh --platform=android-21 --install-dir=/home/ubuntu/android-toolchain --arch=arm
     - sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
     - wget -O - http://llvm.org/apt/llvm-snapshot.gpg.key|sudo apt-key add -
