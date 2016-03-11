@@ -24,7 +24,7 @@ test:
   override:
     - cd tools/lkl && make clean:
         parallel: true
-    - cd tools/lkl && make -j8:
+    - cd tools/lkl && make -j8 CC=clang-3.8 HOSTCC=clang-3.8:
         parallel: true
     - cd tools/lkl && make test:
         parallel: true
