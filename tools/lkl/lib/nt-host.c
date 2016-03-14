@@ -63,7 +63,7 @@ static void mutex_free(struct lkl_mutex_t *_mutex)
 	free(_mutex);
 }
 
-static int thread_create(void (*fn)(void *), void *arg)
+static lkl_thread_t thread_create(void (*fn)(void *), void *arg)
 {
 	DWORD WINAPI (*win_fn)(LPVOID arg) = (DWORD WINAPI (*)(LPVOID))fn;
 
