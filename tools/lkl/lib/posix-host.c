@@ -176,11 +176,12 @@ static void mutex_free(struct lkl_mutex_t *_mutex)
 	free(_mutex);
 }
 
-static int thread_create(void (*fn)(void *), void *arg)
+static lkl_thread_t thread_create(void (*fn)(void *), void *arg)
 {
 	pthread_t thread;
+	WARN_PTHREAD(pthread_create(&thread, NULL, (void* (*)(void *))fn, arg));
 
-	return pthread_create(&thread, NULL, (void* (*)(void *))fn, arg);
+	return (lkl_thread_t) thread;
 }
 
 static void thread_exit(void)
