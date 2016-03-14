@@ -32,6 +32,8 @@ struct lkl_sem_t;
  *
  * @thread_create - create a new thread and run f(arg) in its context; returns a
  * thread handle or NULL if the thread could not be created
+ * @thread_detach - on POSIX systems, free up resources held by
+ * pthreads. Noop on Win32.
  * @thread_exit - terminates the current thread
  *
  * @tls_alloc - allocate a thread local storage key; returns 0 if succesful
@@ -75,6 +77,7 @@ struct lkl_host_operations {
 	void (*mutex_unlock)(struct lkl_mutex_t *mutex);
 
 	int (*thread_create)(void (*f)(void *), void *arg);
+	void (*thread_detach)(void);
 	void (*thread_exit)(void);
 
 	int (*tls_alloc)(unsigned int *key);
