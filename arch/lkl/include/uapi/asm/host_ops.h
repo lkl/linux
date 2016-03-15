@@ -34,6 +34,8 @@ typedef unsigned long lkl_thread_t;
  * @thread_create - create a new thread and run f(arg) in its context; returns a
  * thread handle or 0 if the thread could not be created
  * @thread_exit - terminates the current thread
+ * @thread_join - wait for the given thread to terminate. Returns 0
+ * for success, -1 otherwise
  *
  * @tls_alloc - allocate a thread local storage key; returns 0 if succesful
  * @tls_free - frees a thread local storage key; returns 0 if succesful
@@ -56,7 +58,8 @@ typedef unsigned long lkl_thread_t;
  * @iomem_acess - reads or writes to and I/O memory region; addr must be in the
  * range returned by ioremap
  *
- * @gettid - returns the host thread id of the caller
+ * @gettid - returns the host thread id of the caller, which need not
+ * be the same as the handle returned by thread_create
  */
 struct lkl_host_operations {
 	const char *virtio_devices;
@@ -77,6 +80,7 @@ struct lkl_host_operations {
 
 	lkl_thread_t (*thread_create)(void (*f)(void *), void *arg);
 	void (*thread_exit)(void);
+	int (*thread_join)(lkl_thread_t tid);
 
 	int (*tls_alloc)(unsigned int *key);
 	int (*tls_free)(unsigned int key);
