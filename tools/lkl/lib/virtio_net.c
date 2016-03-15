@@ -14,6 +14,10 @@
 #define NUM_QUEUES (TX_QUEUE_IDX + 1)
 #define QUEUE_DEPTH 32
 
+/* In fact, we'll hit the limit on the devs string below long before
+ * we hit this, but it's good enough for now. */
+#define MAX_NET_DEVS 16
+
 #ifdef DEBUG
 #define bad_request(s) do {			\
 		lkl_printf("%s\n", s);		\
@@ -124,6 +128,22 @@ void poll_thread(void *arg)
 	}
 }
 
+struct virtio_net_dev *registered_devs[MAX_NET_DEVS];
+static int registered_dev_idx = 0;
+
+static void dev_register(struct virtio_net_dev *dev)
+{
+	if (registered_dev_idx == MAX_NET_DEVS) {
+		lkl_printf("Too many virtio_net devices!\n");
+		lkl_host_ops.panic();
+	} else {
+		/* We only ever call this function before we started
+		 * the LKL kernel, so we don't need any
+		 * synchronization. */
+		registered_devs[registered_dev_idx++] = dev;
+	}
+}
+
 static void free_queue_locks(struct lkl_mutex_t **queues, int num_queues)
 {
 	int i = 0;
@@ -204,7 +224,7 @@ int lkl_netdev_add(struct lkl_netdev *nd, void *mac)
 	if (lkl_host_ops.thread_create(poll_thread, &dev->tx_poll) == 0)
 		goto out_cleanup_dev;
 
-	/* RX/TX thread polls will exit when the host netdev handle is closed */
+	dev_register(dev);
 
 	return count++;
 
