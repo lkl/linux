@@ -194,7 +194,8 @@ hijack_init(void)
 		lkl_host_ops.print = NULL;
 
 
-	ret = lkl_start_kernel(&lkl_host_ops, 64 * 1024 * 1024, "");
+	ret = lkl_start_kernel(&lkl_host_ops, &lkl_netdevs_remove,
+			64 * 1024 * 1024, "");
 	if (ret) {
 		fprintf(stderr, "can't start kernel: %s\n", lkl_strerror(ret));
 		return;
@@ -272,5 +273,4 @@ hijack_fini(void)
 
 
 	lkl_sys_halt();
-	lkl_netdevs_remove();
 }

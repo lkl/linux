@@ -503,7 +503,7 @@ static int start_lkl(void)
 	long ret;
 	char mpoint[32];
 
-	ret = lkl_start_kernel(&lkl_host_ops, lklfuse.mb * 1024 * 1024, "");
+	ret = lkl_start_kernel(&lkl_host_ops, NULL, lklfuse.mb * 1024 * 1024, "");
 	if (ret) {
 		fprintf(stderr, "can't start kernel: %s\n", lkl_strerror(ret));
 		goto out;

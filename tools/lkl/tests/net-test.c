@@ -152,7 +152,7 @@ static int test_net_init(int argc, char **argv)
 		lkl_host_ops.print = NULL;
 
 
-	ret = lkl_start_kernel(&lkl_host_ops, 64 * 1024 * 1024, "");
+	ret = lkl_start_kernel(&lkl_host_ops, NULL, 64 * 1024 * 1024, "");
 	if (ret) {
 		fprintf(stderr, "can't start kernel: %s\n", lkl_strerror(ret));
 		return -1;
