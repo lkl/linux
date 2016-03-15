@@ -46,7 +46,8 @@ APIs
 
 Building LKL with Clang
 ----------------------
-   $ make CC=clang HOSTCC=clang
+
+    $ make CC=clang HOSTCC=clang tools/lkl
 
 
 Building LKL on FreeBSD
@@ -139,15 +140,17 @@ setting CC and HOSTCC (see above).  Start a MinGW Win32 shell (64-bit will not w
     $ make tools/lkl
 
 ### LLVM/clang (native)
-Native LLVM/Clang aims for MSVC-compatible builds using link.exe as linker.
+Native LLVM/Clang aims for MSVC-compatible builds using link.exe as linker but other linker
+options are also available.
 
-	Not tested yet!
+    Not tested yet!
 
 ### Visual Studio C/C++ (Clang with MicrosoftCodeGen (C2))
 From Visual Studio 2015.1 and later, Clang can be used as an alternative code parser (C1)
-for visual studio C/C++ (MSVC) compilation.
+for visual studio C/C++ (MSVC) compilation. Instead of LLVM, further processing into object
+code is done by MicrosoftCodeGen (C2).
 
-	Not tested yet!
+    Not tested yet!
 
 
 LKL hijack library
