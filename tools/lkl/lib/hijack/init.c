@@ -171,6 +171,8 @@ hijack_init(void)
 	/* Must be run before lkl_netdev_tap_create */
 	fixup_netdev_tap_ops();
 
+	lkl_host_ops.host_cleanup = lkl_netdevs_remove;
+
 	if (tap) {
 		fprintf(stderr,
 			"WARN: variable LKL_HIJACK_NET_TAP is now obsoleted.\n"
@@ -290,5 +292,4 @@ hijack_fini(void)
 
 
 	lkl_sys_halt();
-	lkl_netdevs_remove();
 }

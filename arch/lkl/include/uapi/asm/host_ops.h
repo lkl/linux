@@ -16,6 +16,10 @@ typedef unsigned long lkl_thread_t;
  * command line format. This string is appended to the kernel command line and
  * is provided here for convenience to be implemented by the host library.
  *
+ * @host_cleanup - release resources held on the host by LKL. Not
+ * implemented on all platforms. Provided here for convenience to be
+ * implemented by the host library.
+ *
  * @print - optional operation that receives console messages
  *
  * @panic - called during a kernel panic
@@ -65,6 +69,8 @@ typedef unsigned long lkl_thread_t;
  */
 struct lkl_host_operations {
 	const char *virtio_devices;
+
+	int (*host_cleanup)(void);
 
 	void (*print)(const char *str, int len);
 	void (*panic)(void);
@@ -117,7 +123,7 @@ struct lkl_host_operations {
  * generate the Linux kernel command line
  */
 int lkl_start_kernel(struct lkl_host_operations *lkl_ops,
-		     unsigned long mem_size,
-		     const char *cmd_line, ...);
+		unsigned long mem_size,
+		const char *cmd_line, ...);
 
 #endif
