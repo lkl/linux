@@ -280,11 +280,6 @@ int epoll_ctl(int epollfd, int op, int fd, struct epoll_event *event)
 	return lkl_call(__lkl__NR_epoll_ctl, 4, epollfd, op, fd, event);
 }
 
-int eventfd(unsigned int count, int flags)
-{
-	return lkl_sys_eventfd2(count, flags);
-}
-
 HOST_CALL(eventfd_read);
 int eventfd_read(int fd, uint64_t *value)
 {
@@ -308,3 +303,11 @@ int eventfd_write(int fd, uint64_t value)
 	return lkl_sys_write(fd, (void *) &value,
 			     sizeof(value)) != sizeof(value) ? -1 : 0;
 }
+
+/* Hijack eventfd only if we turned it on in our config files */
+#ifdef CONFIG_EVENTFD
+int eventfd(unsigned int count, int flags)
+{
+	return lkl_sys_eventfd2(count, flags);
+}
+#endif
