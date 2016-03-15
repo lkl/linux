@@ -62,6 +62,11 @@ struct virtio_dev {
 	void *base;
 };
 
+struct lkl_netdev {
+	struct lkl_dev_net_ops *ops;
+	lkl_thread_t rx_tid, tx_tid;
+};
+
 int virtio_dev_setup(struct virtio_dev *dev, int queues, int num_max);
 void virtio_dev_cleanup(struct virtio_dev *dev);
 void virtio_req_complete(struct virtio_req *req, uint32_t len);
