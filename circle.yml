@@ -28,15 +28,15 @@ test:
         parallel: true
 
   override:
-    - cd tools/lkl && make clean:
+    - make clean tools/lkl:
         parallel: true
     - cd tools/lkl && ./scripts/dpdk-sdk-build.sh:
         parallel: true
-    - cd tools/lkl &&  make -j8 CC=clang-3.8 HOSTCC=clang-3.8 ${MKARG}:
+    - make -j8 CC=clang-3.8 HOSTCC=clang-3.8 ${MKARG} tools/lkl:
         parallel: true
     - cd tools/lkl && if [ $CIRCLE_NODE_INDEX -eq 2 ] ; then make tests/boot-in.o; arm-linux-androideabi-gcc -o tests/boot tests/boot-in.o liblkl.a -static ; fi:
         parallel: true
-    - cd tools/lkl && make test:
+    - make test tools/lkl:
         parallel: true
 
     - ? >
