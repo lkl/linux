@@ -19,6 +19,8 @@ static bool halt;
 void (*pm_power_off)(void) = NULL;
 static unsigned long mem_size;
 
+static int (*host_cleanup)(void);
+
 long lkl_panic_blink(int state)
 {
 	lkl_ops->panic();
@@ -50,14 +52,16 @@ static void __init lkl_run_kernel(void *arg)
 }
 
 int __init lkl_start_kernel(struct lkl_host_operations *ops,
-			    unsigned long _mem_size,
-			    const char *fmt, ...)
+			int (*_host_cleanup)(void),
+			unsigned long _mem_size,
+			const char *fmt, ...)
 {
 	va_list ap;
 	int ret;
 
 	lkl_ops = ops;
 	mem_size = _mem_size;
+	host_cleanup = _host_cleanup;
 
 	va_start(ap, fmt);
 	ret = vsnprintf(boot_command_line, COMMAND_LINE_SIZE, fmt, ap);
@@ -140,6 +144,12 @@ long lkl_sys_halt(void)
 
 	free_initial_syscall_thread();
 
+	/* We've been given a cleanup callback, and it's succeeded */
+	if (host_cleanup && !host_cleanup())
+		/* so we know that there is nothing else touching our
+		 * memory */
+		free_mem();
+
 	return 0;
 }
 
@@ -147,10 +157,6 @@ void arch_cpu_idle(void)
 {
 	if (halt) {
 		threads_cleanup();
-		/* TODO(pscollins): If we free here, it causes a
-		 * segfault because the tx/rx threads are still
-		 * running in parallel. */
-		/* free_mem(); */
 
 		/* Shutdown the clockevents source. */
 		tick_suspend_local();
