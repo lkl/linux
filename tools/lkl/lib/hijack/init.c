@@ -123,14 +123,14 @@ static int mount_fs(char *fstype)
 
 static void mount_cmds_exec(char *_cmds, int (*callback)(char*))
 {
-	char *saveptr, *token;
+	char *token;
 	int ret = 0;
 	char *cmds = strdup(_cmds);
-	token = strtok_r(cmds, ",", &saveptr);
+	token = strsep(&cmds, ",");
 
 	while (token && !ret) {
 		ret = callback(token);
-		token = strtok_r(NULL, ",", &saveptr);
+		token = strsep(&cmds, ",");
 	}
 
 	if (ret)
