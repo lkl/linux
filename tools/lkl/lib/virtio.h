@@ -67,6 +67,13 @@ struct lkl_netdev {
 	lkl_thread_t rx_tid, tx_tid;
 };
 
+extern struct lkl_netdev_tap_ops {
+	/* We need this so that we can "unhijack" this function in
+	 * case we decided to hijack it. */
+	int (*eventfd)(unsigned int initval, int flags);
+} lkl_netdev_tap_ops;
+
+
 int virtio_dev_setup(struct virtio_dev *dev, int queues, int num_max);
 void virtio_dev_cleanup(struct virtio_dev *dev);
 void virtio_req_complete(struct virtio_req *req, uint32_t len);
