@@ -54,6 +54,11 @@ static inline long long lkl_sys_lseek(unsigned int fd, __lkl__kernel_loff_t off,
 #endif
 
 /**
+ * lkl_netdev - host network device handle, defined in virtio.h.
+ */
+struct lkl_netdev;
+
+/**
  * lkl_strerror - returns a string describing the given error code
  *
  * @err - error code
@@ -210,7 +215,8 @@ int lkl_set_ipv4_gateway(unsigned int addr);
 
 
 /**
- * lkl_netdev - host network device handle, defined in virtio.h.
+ * lkl_netdev - host network device handle, defined in
+ * tools/lkl/lib/virtio.h.
  */
 struct lkl_netdev;
 
