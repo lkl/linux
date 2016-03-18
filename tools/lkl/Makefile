@@ -39,7 +39,11 @@ export srctree
 export CFLAGS += -Iinclude -Wall -g -O2 -Wextra -Wno-unused-parameter \
 	  -Wno-missing-field-initializers -fno-strict-aliasing
 
-OUTPUT_FORMAT = $(shell $(LD) -r -print-output-format)
+ifeq ($(LD), link)
+	OUTPUT_FORMAT =  pe-i386
+else
+	OUTPUT_FORMAT = $(shell $(LD) -r -print-output-format)
+endif
 
 ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64 elf32-i386 elf64-x86-64-freebsd elf32-littlearm))
   OUTPUT_DEF = $(shell echo | $(CC) -dM -E -)
