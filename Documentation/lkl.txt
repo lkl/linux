@@ -154,6 +154,7 @@ code is done by MicrosoftCodeGen (C2).
 * cd to lkl sources
 
     $ source tools/lkl/ClangC2env.sh
+
     $ make CC=clang HOSTCC=clang CFLAGS="$C2FLAGS" HOSTCFLAGS="$C2FLAGS" LD=link tools/lkl
     
     **current status:** fails due to missing types u32, u64 and bool. Might be missing an include
