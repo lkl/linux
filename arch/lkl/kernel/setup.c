@@ -43,6 +43,9 @@ int run_init_process(const char *init_filename)
 
 static void __init lkl_run_kernel(void *arg)
 {
+	/* Nobody will ever join us */
+	lkl_ops->thread_detach();
+
 	start_kernel();
 }
 
@@ -81,7 +84,7 @@ int __init lkl_start_kernel(struct lkl_host_operations *ops,
 	}
 
 	ret = lkl_ops->thread_create(lkl_run_kernel, NULL);
-	if (ret) {
+	if (!ret) {
 		ret = -ENOMEM;
 		goto out_free_idle_sem;
 	}
@@ -134,6 +137,8 @@ long lkl_sys_halt(void)
 	lkl_ops->sem_free(halt_sem);
 	lkl_ops->sem_free(idle_sem);
 	lkl_ops->sem_free(init_sem);
+
+	free_initial_syscall_thread();
 
 	return 0;
 }

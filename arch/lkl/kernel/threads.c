@@ -119,6 +119,11 @@ static void thread_bootstrap(void *_tba)
 	int (*f)(void *) = tba->f;
 	void *arg = tba->arg;
 
+	/* Our lifecycle is managed by the LKL kernel, so we want to
+	 * detach here in order to free up host resources when we're
+	 * killed */
+	lkl_ops->thread_detach();
+
 	lkl_ops->sem_down(ti->sched_sem);
 	kfree(tba);
 	if (ti->prev_sched)
@@ -144,7 +149,7 @@ int copy_thread(unsigned long clone_flags, unsigned long esp,
 	tba->ti = ti;
 
 	ret = lkl_ops->thread_create(thread_bootstrap, tba);
-	if (ret) {
+	if (!ret) {
 		kfree(tba);
 		return -ENOMEM;
 	}
@@ -180,15 +185,8 @@ int threads_init(void)
 	if (!ti->sched_sem) {
 		pr_early("lkl: failed to allocate init schedule semaphore\n");
 		ret = -ENOMEM;
-		goto out;
 	}
 
-	return 0;
-
-out_free_init_sched_sem:
-	lkl_ops->sem_free(ti->sched_sem);
-
-out:
 	return ret;
 }
 

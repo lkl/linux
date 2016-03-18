@@ -53,13 +53,17 @@ struct lkl_sem_t {
 			lkl_printf("%s: %s\n", #exp, strerror(errno));	\
 	} while (0)
 
-/* pthread_* functions use the reverse convention */
-#define WARN_PTHREAD(exp) do {						\
-		int __ret = exp;					\
-		if (__ret > 0)						\
-			lkl_printf("%s: %s\n", #exp, strerror(__ret));	\
-	} while (0)
+static int _warn_pthread(int ret, char *str_exp)
+{
+	if (ret > 0)
+		lkl_printf("%s: %s\n", str_exp, strerror(ret));
 
+	return ret;
+}
+
+
+/* pthread_* functions use the reverse convention */
+#define WARN_PTHREAD(exp) _warn_pthread(exp, #exp)
 
 static struct lkl_sem_t *sem_alloc(int count)
 {
@@ -176,11 +180,18 @@ static void mutex_free(struct lkl_mutex_t *_mutex)
 	free(_mutex);
 }
 
-static int thread_create(void (*fn)(void *), void *arg)
+static lkl_thread_t thread_create(void (*fn)(void *), void *arg)
 {
 	pthread_t thread;
+	if (WARN_PTHREAD(pthread_create(&thread, NULL, (void* (*)(void *))fn, arg)))
+		return 0;
+	else
+		return (lkl_thread_t) thread;
+}
 
-	return pthread_create(&thread, NULL, (void* (*)(void *))fn, arg);
+static void thread_detach(void)
+{
+	WARN_PTHREAD(pthread_detach(pthread_self()));
 }
 
 static void thread_exit(void)
@@ -273,6 +284,7 @@ static long _gettid(void)
 struct lkl_host_operations lkl_host_ops = {
 	.panic = panic,
 	.thread_create = thread_create,
+	.thread_detach = thread_detach,
 	.thread_exit = thread_exit,
 	.sem_alloc = sem_alloc,
 	.sem_free = sem_free,

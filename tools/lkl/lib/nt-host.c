@@ -63,11 +63,15 @@ static void mutex_free(struct lkl_mutex_t *_mutex)
 	free(_mutex);
 }
 
-static int thread_create(void (*fn)(void *), void *arg)
+static lkl_thread_t thread_create(void (*fn)(void *), void *arg)
 {
 	DWORD WINAPI (*win_fn)(LPVOID arg) = (DWORD WINAPI (*)(LPVOID))fn;
 
-	return CreateThread(NULL, 0, win_fn, arg, 0, NULL) ? 0 : -1;
+	return CreateThread(NULL, 0, win_fn, arg, 0, NULL);
+}
+
+static void thread_detach(void)
+{
 }
 
 static void thread_exit(void)
@@ -196,6 +200,7 @@ static void *mem_alloc(unsigned long size)
 struct lkl_host_operations lkl_host_ops = {
 	.panic = panic,
 	.thread_create = thread_create,
+	.thread_detach = thread_detach,
 	.thread_exit = thread_exit,
 	.sem_alloc = sem_alloc,
 	.sem_free = sem_free,
