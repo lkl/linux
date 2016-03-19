@@ -149,16 +149,18 @@ options are also available.
 From Visual Studio 2015.1 and later, Clang can be used as an alternative code parser (C1)
 for visual studio C/C++ (MSVC) compilation. Instead of LLVM, further processing into object
 code is done by MicrosoftCodeGen (C2).
-* Start a Visual Studio developer shell
+* Start a Visual Studio developer shell (x86 if on x64 host)
 * From inside the VS shell, start an msys2 shell
 * cd to lkl sources
 
     $ source tools/lkl/ClangC2env.sh
 
-    $ make CC=clang HOSTCC=clang CFLAGS="$C2FLAGS" HOSTCFLAGS="$C2FLAGS" LD=link tools/lkl
+    $ INCLUDE=$INCLUDE:${PWD}/tools/lkl/msvc
     
-    **current status:** fails due to missing types u32, u64 and bool. Might be missing an include
-    directory.
+    $ make CC=clang HOSTCC=clang CFLAGS="$C2FLAGS -I${PWD}/tools/lkl/msvc" HOSTCFLAGS="$CFLAGS" LD=link tools/lkl
+    
+**current status:** fails due to missing types u32, u64 and bool. Might be missing an include 
+directory.
 
 
 LKL hijack library

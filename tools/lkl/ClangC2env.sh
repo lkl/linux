@@ -29,8 +29,8 @@ mount -o bind "${VCINSTALLDIR}" /tmp/msvc
 # avoid space in clang path
 mount -o bind "${VCINSTALLDIR}"/"Clang 3.7"  /tmp/clang 
 
-mount -o bind "${UniversalCRTSdkDir}"/lib/"${UCRTVersion}"/ucrt /tmp/ucrt/lib 
-mount -o bind "${UniversalCRTSdkDir}"/include/"{$UCRTVersion}"/ucrt /tmp/ucrt/include 
+mount -o bind "${UniversalCRTSdkDir}"/Lib/"${UCRTVersion}"/ucrt /tmp/ucrt/lib 
+mount -o bind "${UniversalCRTSdkDir}"/Include/"${UCRTVersion}" /tmp/ucrt/include 
 
 mount -o bind "${WindowsSdkDir}"/lib/"${WindowsSDKLibVersion}"/um/x86 /tmp/winsdk/lib 
 mount -o bind "${WindowsSdkDir}"/include /tmp/winsdk/include 
@@ -41,12 +41,12 @@ mount -o bind "${NETFXSDKDir}" /tmp/netfxsdk
 
 
 export PATH="/tmp/clang/bin/x86:/tmp/clang/bin/x86/x86:/tmp/msvc/bin/amd64_x86:/tmp/msvc/bin/amd64:/tmp/msvc/vcpackages:/tmp/msvc/bin:/tmp/winsdk/tools:/mingw32/bin:/usr/bin:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl"
-export INCLUDE="/tmp/clang/include:/tmp/msvc/include:/tmp/ucrt/include:/tmp/netfxsdk/include/um"
+export INCLUDE="/tmp/clang/include:/tmp/msvc/include:/tmp/ucrt/include/ucrt:/tmp/ucrt/include/um:/tmp/ucrt/include/shared:/tmp/winsdk/include/um:/tmp/netfxsdk/include/um"
 export LIB="/tmp/clang/lib/x86:/tmp/msvc/lib:/tmp/msvc/atlmfc/lib:/tmp/ucrt/lib/x86:/tmp/netfxsdk/lib/um/x86:/tmp/winsdk/include/shared:/tmp/winsdk/include/um:/tmp/winsdk/include/winrt"
 export LIBPATH="/tmp/clang/lib/x86:/tmp/msvc/lib:/tmp/msvc/atlmfc/lib:/tmp/winsdk/libpath"
 
 export CC=clang
-export C2FLAGS="-O2 -I/tmp/clang/include -I/tmp/msvc/include -I/tmp/ucrt/include -I/tmp/netfxsdk/include/um"
+export C2FLAGS="-O2 -I/tmp/clang/include -I/tmp/msvc/include -I/tmp/ucrt/include/ucrt -I/tmp/ucrt/include/um -I/tmp/ucrt/include/shared -I/tmp/winsdk/include/um -I/tmp/winsdk/include/shared -I/tmp/netfxsdk/include/um"
 
 
 
