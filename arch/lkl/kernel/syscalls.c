@@ -158,7 +158,7 @@ int syscall_thread(void *_data)
 	return 0;
 }
 
-static unsigned int syscall_thread_data_key;
+static __thread struct syscall_thread_data *syscall_thread_data;
 
 static int syscall_thread_data_init(struct syscall_thread_data *data,
 				    void *completion)
@@ -213,9 +213,6 @@ static struct syscall_thread_data *__lkl_create_syscall_thread(void)
 	struct syscall_thread_data *data;
 	long params[6], ret;
 
-	if (!lkl_ops->tls_set)
-		return ERR_PTR(-ENOTSUPP);
-
 	data = lkl_ops->mem_alloc(sizeof(*data));
 	if (!data)
 		return ERR_PTR(-ENOMEM);
@@ -226,9 +223,7 @@ static struct syscall_thread_data *__lkl_create_syscall_thread(void)
 	if (ret < 0)
 		goto out_free;
 
-	ret = lkl_ops->tls_set(syscall_thread_data_key, data);
-	if (ret < 0)
-		goto out_free;
+	syscall_thread_data = data;
 
 	params[0] = (long)data;
 	ret = __lkl_syscall(&default_syscall_thread_data,
@@ -289,8 +284,7 @@ int lkl_stop_syscall_thread(void)
 {
 	struct syscall_thread_data *data = NULL;
 
-	if (lkl_ops->tls_get)
-		data = lkl_ops->tls_get(syscall_thread_data_key);
+	data = syscall_thread_data;
 	if (!data)
 		return -EINVAL;
 
@@ -311,8 +305,8 @@ long lkl_syscall(long no, long *params)
 {
 	struct syscall_thread_data *data = NULL;
 
-	if (auto_syscall_threads && lkl_ops->tls_get) {
-		data = lkl_ops->tls_get(syscall_thread_data_key);
+	if (auto_syscall_threads) {
+		data = syscall_thread_data;
 		if (!data) {
 			data = __lkl_create_syscall_thread();
 			if (!data)
@@ -342,11 +336,6 @@ int initial_syscall_thread(void *sem)
 {
 	int ret = 0;
 
-	if (lkl_ops->tls_alloc)
-		ret = lkl_ops->tls_alloc(&syscall_thread_data_key);
-	if (ret)
-		return ret;
-
 	init_pid_ns.child_reaper = 0;
 
 	ret = syscall_thread_data_init(&default_syscall_thread_data, sem);
@@ -356,10 +345,6 @@ int initial_syscall_thread(void *sem)
 	ret = syscall_thread(&default_syscall_thread_data);
 
 out:
-	if (lkl_ops->tls_free)
-		lkl_ops->tls_free(syscall_thread_data_key);
-
-
 	return ret;
 }
 
