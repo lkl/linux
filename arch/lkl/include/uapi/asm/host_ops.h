@@ -37,11 +37,6 @@ typedef unsigned long lkl_thread_t;
  * pthreads. Noop on Win32.
  * @thread_exit - terminates the current thread
  *
- * @tls_alloc - allocate a thread local storage key; returns 0 if succesful
- * @tls_free - frees a thread local storage key; returns 0 if succesful
- * @tls_set - associate data to the thread local storage key; returns 0 if succesful
- * @tls_get - return data associated with the thread local storage key or NULL on error
- *
  * @mem_alloc - allocate memory
  * @mem_free - free memory
  *
@@ -80,11 +75,6 @@ struct lkl_host_operations {
 	lkl_thread_t (*thread_create)(void (*f)(void *), void *arg);
 	void (*thread_detach)(void);
 	void (*thread_exit)(void);
-
-	int (*tls_alloc)(unsigned int *key);
-	int (*tls_free)(unsigned int key);
-	int (*tls_set)(unsigned int key, void *data);
-	void *(*tls_get)(unsigned int key);
 
 	void* (*mem_alloc)(unsigned long);
 	void (*mem_free)(void *);
