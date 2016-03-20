@@ -41,6 +41,7 @@ export CFLAGS += -Iinclude -Wall -g -O2 -Wextra -Wno-unused-parameter \
 
 ifeq ($(LD), link)
 	OUTPUT_FORMAT =  pe-i386
+	WINDOWS_HOST = yes
 	# relplace binutils with MS Build utilities
 	HOSTLD = link
 	AR = lib
