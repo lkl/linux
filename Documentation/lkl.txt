@@ -152,13 +152,13 @@ code is done by MicrosoftCodeGen (C2).
 * Start a Visual Studio developer shell (x86 if on x64 host)
 * From inside the VS shell, start an msys2 shell
 * cd to lkl sources
-
+```
     $ source tools/lkl/ClangC2env.sh
 
     $ INCLUDE=$INCLUDE:${PWD}/tools/lkl/msvc
     
-    $ make CC=clang HOSTCC=clang CFLAGS="$C2FLAGS -I${PWD}/tools/lkl/msvc" HOSTCFLAGS="$CFLAGS" LD=link tools/lkl
-    
+    $ make CC=clang HOSTCC=clang CFLAGS="$C2FLAGS -I${PWD}/tools/lkl/msvc" HOSTCFLAGS="$CFLAGS" LD=link EXESUF=.exe tools/lkl
+```    
 **current status:** permission issues for fixdep, conf looks for locale.h in /usr/include (exists in /tmp/ucrt/include/ucrt)
 
 

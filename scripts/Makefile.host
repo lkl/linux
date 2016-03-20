@@ -20,10 +20,6 @@
 # Will compile qconf as a C++ program, and menu as a C program.
 # They are linked as C++ code to the executable qconf
 
-ifeq ($(WINDOWS_HOST), yes)
-	EXESUF=.exe
-endif
-
 __hostprogs := $(sort $(hostprogs-y) $(hostprogs-m))
 
 # C code
@@ -89,9 +85,9 @@ hostcxx_flags  = -Wp,-MD,$(depfile) $(__hostcxx_flags)
 # Create executable from a single .c file
 # host-csingle -> Executable
 quiet_cmd_host-csingle 	= HOSTCC  $@
-      cmd_host-csingle	= $(HOSTCC) $(hostc_flags) -o $@$ $< \
+      cmd_host-csingle	= $(HOSTCC) $(hostc_flags) -o $@$(EXESUF) $< \
 	  	$(HOST_LOADLIBES) $(HOSTLOADLIBES_$(@F))
-$(host-csingle): $(obj)/%$(EXESUF): $(src)/%.c FORCE
+$(host-csingle): $(obj)/%: $(src)/%.c FORCE
 	$(call if_changed_dep,host-csingle)
 
 # Link an executable based on list of .o files, all plain c
