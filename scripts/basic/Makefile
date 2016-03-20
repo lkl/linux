@@ -8,9 +8,9 @@
 # ---------------------------------------------------------------------------
 # fixdep: 	 Used to generate dependency information during build process
 
-hostprogs-y	:= fixdep
-hostprogs-$(CONFIG_BUILD_BIN2C)     += bin2c
+hostprogs-y	:= fixdep$(EXESUF)
+hostprogs-$(CONFIG_BUILD_BIN2C)     += bin2c$(EXESUF)
 always		:= $(hostprogs-y)
 
 # fixdep is needed to compile other host programs
-$(addprefix $(obj)/,$(filter-out fixdep,$(always))): $(obj)/fixdep
+$(addprefix $(obj)/,$(filter-out fixdep,$(always))): $(obj)/fixdep$(EXESUF)
