@@ -105,7 +105,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#if !defined(__MINGW32__) || !defined(_MSC_VER)
+#if !defined(__MINGW32__) && !defined(_MSC_VER)
 #include <sys/mman.h>
 #endif
 #include <unistd.h>
@@ -115,7 +115,7 @@
 #include <stdio.h>
 #include <limits.h>
 #include <ctype.h>
-#if !defined(__MINGW32__) || !defined(_MSC_VER)
+#if !defined(__MINGW32__) && !defined(_MSC_VER)
 #include <arpa/inet.h>
 #else
 inline unsigned int ntohl(unsigned int val);

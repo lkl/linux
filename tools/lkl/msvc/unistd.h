@@ -9,8 +9,12 @@
 #include <io.h> 
 
 #define PATH_MAX _MAX_PATH
-#define open _sopen_s
-#define close _close
 
+#define _CRT_SECURE_NO_WARNINGS 1
+#define open _open
+#define close _close
+#define read _read
+
+typedef int ssize_t;
 
 #endif /* __MSVC_HACK_UNISTD_H */

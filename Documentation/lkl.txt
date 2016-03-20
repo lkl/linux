@@ -159,8 +159,7 @@ code is done by MicrosoftCodeGen (C2).
     
     $ make CC=clang HOSTCC=clang CFLAGS="$C2FLAGS -I${PWD}/tools/lkl/msvc" HOSTCFLAGS="$CFLAGS" LD=link tools/lkl
     
-**current status:** fails due to missing types u32, u64 and bool. Might be missing an include 
-directory.
+**current status:** permission issues for fixdep, conf looks for locale.h in /usr/include (exists in /tmp/ucrt/include/ucrt)
 
 
 LKL hijack library
