@@ -157,9 +157,18 @@ code is done by MicrosoftCodeGen (C2).
 
     $ INCLUDE=$INCLUDE:${PWD}/tools/lkl/msvc
     
+    #to use gcc as HOSTCC
+    
+    $ make CC=clang CFLAGS="$C2FLAGS -I${PWD}/tools/lkl/msvc" LD=link tools/lkl
+    
+    #to use ClangC2 as HOSTCC
+    
     $ make CC=clang HOSTCC=clang CFLAGS="$C2FLAGS -I${PWD}/tools/lkl/msvc" HOSTCFLAGS="$CFLAGS" LD=link EXESUF=.exe tools/lkl
+    
 ```    
-**current status:** permission issues for fixdep, conf looks for locale.h in /usr/include (exists in /tmp/ucrt/include/ucrt)
+**current status/bugs/blockers:** 
+* ClangC2 as HOSTCC causes permission issues for fixdep, .exe suffix not always there.
+* bypassing HOSTCC issues using gcc, compilation stops for unknown types "bool", "u32", "u64"
 
 
 LKL hijack library

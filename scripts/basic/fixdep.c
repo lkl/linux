@@ -128,6 +128,16 @@ inline unsigned int ntohl(unsigned int val)
 }
 #endif
 
+#if defined(_MSC_VER)
+int msvc_open(const char *path, int oflag, ...) {
+    int filehandle;
+    errno_t errno;
+    errno = _sopen_s(&filehandle, path, oflag, _SH_DENYNO, _S_IREAD | _S_IWRITE);
+    return filehandle;
+}
+#define open msvc_open
+#endif
+
 #define INT_CONF ntohl(0x434f4e46)
 #define INT_ONFI ntohl(0x4f4e4649)
 #define INT_NFIG ntohl(0x4e464947)

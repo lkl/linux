@@ -10,8 +10,6 @@
 
 #define PATH_MAX _MAX_PATH
 
-#define _CRT_SECURE_NO_WARNINGS 1
-#define open _open
 #define close _close
 #define read _read
 
