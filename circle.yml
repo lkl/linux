@@ -18,7 +18,8 @@ dependencies:
     - /usr/local/android-ndk/build/tools/make-standalone-toolchain.sh --platform=android-21 --install-dir=/home/ubuntu/android-toolchain --arch=arm
     - wget -O - http://llvm.org/apt/llvm-snapshot.gpg.key|sudo apt-key add -
     - echo "deb http://llvm.org/apt/precise/ llvm-toolchain-precise main" > /tmp/a && sudo mv /tmp/a /etc/apt/sources.list.d/llvm-precise.list
-    - sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+    - sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys BA9EF27F
+    - echo "deb http://ppa.launchpad.net/ubuntu-toolchain-r/test/ubuntu precise main " > /tmp/b && sudo mv /tmp/b /etc/apt/sources.list.d/ubuntu-toolchain-r.list
     - sudo apt-get update
     - sudo apt-get install -qy clang-3.8 lldb-3.8
 
