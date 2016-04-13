@@ -1,6 +1,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <lkl_host.h>
+#include <lkl/linux/virtio_ring.h>
 #include "iomem.h"
 #include "virtio.h"
 #include "endian.h"
@@ -67,16 +68,22 @@ void virtio_req_complete(struct virtio_req *req, uint32_t len)
 	struct virtio_queue *q = req->q;
 	struct virtio_dev *dev = req->dev;
 	uint16_t idx = le16toh(q->used->idx) & (q->num - 1);
-	int send_irq = 0;
+	uint16_t new = le16toh(q->used->idx) + 1;
 
 	q->used->ring[idx].id = htole16(req->idx);
 	q->used->ring[idx].len = htole16(len);
-	if (virtio_get_used_event(q) == q->used->idx)
-		send_irq = 1;
-	q->used->idx = htole16(le16toh(q->used->idx) + 1);
+	q->used->idx = htole16(new);
 
-	if (send_irq)
+	/* The condition is that only trigger the irq if
+	 * used->idx >= used_event + 1 > last_used_idx_signaled
+	 * i.e., the used_event set by virtio_net driver is between used->idx
+	 * and last_used_idx_signaled.
+	 */
+	if (lkl_vring_need_event(le16toh(virtio_get_used_event(q)), new,
+					q->last_used_idx_signaled)) {
+		q->last_used_idx_signaled = new;
 		virtio_deliver_irq(dev);
+	}
 }
 
 /* Grab the vring_desc from the queue at the appropriate index in the
