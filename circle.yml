@@ -16,6 +16,12 @@ dependencies:
     # - sudo dpkg --add-architecture i386
     - sudo apt-get update; sudo apt-get install bc libfuse-dev libarchive-dev xfsprogs valgrind gcc-mingw-w64-i686 wine qemu-user-static linux-headers-$(uname -r)
     - /usr/local/android-ndk/build/tools/make-standalone-toolchain.sh --platform=android-21 --install-dir=/home/ubuntu/android-toolchain --arch=arm
+    - wget -O - http://llvm.org/apt/llvm-snapshot.gpg.key|sudo apt-key add -
+    - echo "deb http://llvm.org/apt/precise/ llvm-toolchain-precise main" > /tmp/a && sudo mv /tmp/a /etc/apt/sources.list.d/llvm-precise.list
+    - sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys BA9EF27F
+    - echo "deb http://ppa.launchpad.net/ubuntu-toolchain-r/test/ubuntu precise main " > /tmp/b && sudo mv /tmp/b /etc/apt/sources.list.d/ubuntu-toolchain-r.list
+    - sudo apt-get update
+    - sudo apt-get install -qy clang-3.8 lldb-3.8
 
 
 test:
@@ -28,7 +34,7 @@ test:
         parallel: true
     - cd tools/lkl && ./scripts/dpdk-sdk-build.sh:
         parallel: true
-    - cd tools/lkl &&  make -j8 ${MKARG}:
+    - cd tools/lkl &&  make -j8 CC=clang-3.8 HOSTCC=clang-3.8 ${MKARG}:
         parallel: true
     - cd tools/lkl && if [ $CIRCLE_NODE_INDEX -eq 2 ] ; then make tests/boot-in.o; arm-linux-androideabi-gcc -o tests/boot tests/boot-in.o liblkl.a -static ; fi:
         parallel: true

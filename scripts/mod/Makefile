@@ -6,10 +6,10 @@ modpost-objs	:= modpost.o file2alias.o sumversion.o
 devicetable-offsets-file := devicetable-offsets.h
 
 define sed-y
-	"/^->/{s:->#\(.*\):/* \1 */:; \
-	s:^->\([^ ]*\) [\$$#]*\([-0-9]*\) \(.*\):#define \1 \2 /* \3 */:; \
-	s:^->\([^ ]*\) [\$$#]*\([^ ]*\) \(.*\):#define \1 \2 /* \3 */:; \
-	s:->::; p;}"
+	"/^@->/{s:@->#\(.*\):/* \1 */:; \
+	s:^@->\([^ ]*\) [\$$#]*\([-0-9]*\) \(.*\):#define \1 \2 /* \3 */:; \
+	s:^@->\([^ ]*\) [\$$#]*\([^ ]*\) \(.*\):#define \1 \2 /* \3 */:; \
+	s:@->::; p;}"
 endef
 
 quiet_cmd_offsets = GEN     $@
@@ -40,9 +40,9 @@ $(obj)/modpost.o $(obj)/file2alias.o $(obj)/sumversion.o: $(obj)/elfconfig.h
 $(obj)/file2alias.o: $(obj)/$(devicetable-offsets-file)
 
 quiet_cmd_elfconfig = MKELF   $@
-      cmd_elfconfig = $(obj)/mk_elfconfig < $< > $@
+      cmd_elfconfig = $(obj)/mk_elfconfig$(EXESUF) < $< > $@
 
-$(obj)/elfconfig.h: $(obj)/empty.o $(obj)/mk_elfconfig FORCE
+$(obj)/elfconfig.h: $(obj)/empty.o $(obj)/mk_elfconfig$(EXESUF) FORCE
 	$(call if_changed,elfconfig)
 
 targets += elfconfig.h

@@ -27,13 +27,13 @@ gconfig: $(obj)/gconf
 menuconfig: $(obj)/mconf
 	$< $(silent) $(Kconfig)
 
-config: $(obj)/conf
+config: $(obj)/conf$(EXESUF)
 	$< $(silent) --oldaskconfig $(Kconfig)
 
 nconfig: $(obj)/nconf
 	$< $(silent) $(Kconfig)
 
-silentoldconfig: $(obj)/conf
+silentoldconfig: $(obj)/conf$(EXESUF)
 	$(Q)mkdir -p include/config include/generated
 	$< $(silent) --$@ $(Kconfig)
 
@@ -80,7 +80,7 @@ simple-targets := oldconfig allnoconfig allyesconfig allmodconfig \
 	alldefconfig randconfig listnewconfig olddefconfig
 PHONY += $(simple-targets)
 
-$(simple-targets): $(obj)/conf
+$(simple-targets): $(obj)/conf$(EXESUF)
 	$< $(silent) --$@ $(Kconfig)
 
 PHONY += oldnoconfig savedefconfig defconfig
@@ -90,10 +90,10 @@ PHONY += oldnoconfig savedefconfig defconfig
 # counter-intuitive name.
 oldnoconfig: olddefconfig
 
-savedefconfig: $(obj)/conf
+savedefconfig: $(obj)/conf$(EXESUF)
 	$< $(silent) --$@=defconfig $(Kconfig)
 
-defconfig: $(obj)/conf
+defconfig: $(obj)/conf$(EXESUF)
 ifeq ($(KBUILD_DEFCONFIG),)
 	$< $(silent) --defconfig $(Kconfig)
 else
@@ -101,12 +101,12 @@ else
 	$(Q)$< $(silent) --defconfig=arch/$(SRCARCH)/configs/$(KBUILD_DEFCONFIG) $(Kconfig)
 endif
 
-%_defconfig: $(obj)/conf
+%_defconfig: $(obj)/conf$(EXESUF)
 	$(Q)$< $(silent) --defconfig=arch/$(SRCARCH)/configs/$@ $(Kconfig)
 
 configfiles=$(wildcard $(srctree)/kernel/configs/$@ $(srctree)/arch/$(SRCARCH)/configs/$@)
 
-%.config: $(obj)/conf
+%.config: $(obj)/conf$(EXESUF)
 	$(if $(call configfiles),, $(error No configuration exists for this target on this architecture))
 	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/kconfig/merge_config.sh -m .config $(configfiles)
 	+$(Q)yes "" | $(MAKE) -f $(srctree)/Makefile oldconfig

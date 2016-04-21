@@ -7,3 +7,6 @@ tests/valgrind*.xml
 *.exe
 *.dll
 tests/net-test
+Debug/*.log
+Debug/*.obj
+Debug/lkl.tlog/*

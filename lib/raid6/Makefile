@@ -117,8 +117,8 @@ $(obj)/tilegx8.c:   $(src)/tilegx.uc $(src)/unroll.awk FORCE
 	$(call if_changed,unroll)
 
 quiet_cmd_mktable = TABLE   $@
-      cmd_mktable = $(obj)/mktables > $@ || ( rm -f $@ && exit 1 )
+      cmd_mktable = $(obj)/mktables$(EXESUF) > $@ || ( rm -f $@ && exit 1 )
 
 targets += tables.c
-$(obj)/tables.c: $(obj)/mktables FORCE
+$(obj)/tables.c: $(obj)/mktables$(EXESUF) FORCE
 	$(call if_changed,mktable)

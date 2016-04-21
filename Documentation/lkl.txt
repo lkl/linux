@@ -44,6 +44,11 @@ APIs
 * lklfuse - a tool that can mount a filesystem image in userspace,
   without root priviledges, using FUSE
 
+Building LKL with Clang
+----------------------
+
+    $ make CC=clang HOSTCC=clang tools/lkl
+
 
 Building LKL on FreeBSD
 -----------------------
@@ -113,20 +118,57 @@ Below is one minimal/modular set-up based on msys2.
 * Win64 (and MinGW 64-bit crt) is LLP64, which causes conflicts in size of "long" in the 
 Linux source. Linux (and lkl) can (currently) not 
 be built on LLP64.
-* Cygwin (and msys2) are LP64, like linux. 
+* Cygwin (and msys2) are LP64, like linux.
+* Different compilation options have different advantages and disadvantages msys2/cygwin (newlib)
+will be unix-like and portable but a more native compilation will integrate better with the
+host OS. For example, to develop native drivers with Windows Driver Kit (WDK), it needs
+to be MSVC-compatible. 
 
 ### For MSYS2 (and Cygwin):
 Msys2 will install a gcc tool chain as part of the base-devel bundle. Binutils (2.26) is already 
-patched for NT weak externals. Using the msys2 shell, cd to the lkl sources and run:
+patched for NT weak externals. Clang ("clang-svn")  can be used as an alternative compiler by 
+setting CC and HOSTCC (see above). Using the msys2 shell, cd to the lkl sources and run:
 
     $ make tools/lkl
 
 ### For MinGW:
 Install mingw-w64-i686-toolchain via pacman, mingw-w64-i686-binutils (2.26) is already patched
-for NT weak externals. Start a MinGW Win32 shell (64-bit will not work, see above)
-and run:
+for NT weak externals. Clang ("mingw-w64-i686-clang") can be used as an alternative compiler by 
+setting CC and HOSTCC (see above).  Start a MinGW Win32 shell (64-bit will not work, see above),
+ cd to the lkl sources and run:
 
     $ make tools/lkl
+
+### LLVM/clang (native)
+Native LLVM/Clang aims for MSVC-compatible builds using link.exe as linker but other linker
+options are also available.
+
+    Not tested yet!
+
+### Visual Studio C/C++ (Clang with MicrosoftCodeGen (C2))
+From Visual Studio 2015.1 and later, Clang can be used as an alternative code parser (C1)
+for visual studio C/C++ (MSVC) compilation. Instead of LLVM, further processing into object
+code is done by MicrosoftCodeGen (C2).
+* Start a Visual Studio developer shell (x86 if on x64 host)
+* From inside the VS shell, start an msys2 shell
+* cd to lkl sources
+```
+    $ source tools/lkl/ClangC2env.sh
+
+    $ INCLUDE=$INCLUDE:${PWD}/tools/lkl/msvc
+    
+    #to use gcc as HOSTCC
+    
+    $ make CC=clang CFLAGS="$C2FLAGS -I${PWD}/tools/lkl/msvc" LD=link tools/lkl
+    
+    #to use ClangC2 as HOSTCC
+    
+    $ make CC=clang HOSTCC=clang CFLAGS="$C2FLAGS -I${PWD}/tools/lkl/msvc" HOSTCFLAGS="$CFLAGS" LD=link EXESUF=.exe tools/lkl
+    
+```    
+**current status/bugs/blockers:** 
+* ClangC2 as HOSTCC causes permission issues for fixdep, .exe suffix not always there.
+* bypassing HOSTCC issues using gcc, compilation stops for unknown types "bool", "u32", "u64"
 
 
 LKL hijack library

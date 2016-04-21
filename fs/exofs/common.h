@@ -183,7 +183,7 @@ struct exofs_fcb {
 #define EXOFS_INO_ATTR_SIZE	sizeof(struct exofs_fcb)
 
 /* This is the Attribute the fcb is stored in */
-static const struct __weak osd_attr g_attr_inode_data = ATTR_DEF(
+static const struct osd_attr g_attr_inode_data __maybe_unused = ATTR_DEF(
 	EXOFS_APAGE_FS_DATA,
 	EXOFS_ATTR_INODE_DATA,
 	EXOFS_INO_ATTR_SIZE);

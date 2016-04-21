@@ -105,7 +105,9 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#if !defined(__MINGW32__) && !defined(_MSC_VER)
 #include <sys/mman.h>
+#endif
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
@@ -113,12 +115,86 @@
 #include <stdio.h>
 #include <limits.h>
 #include <ctype.h>
+#if !defined(__MINGW32__) && !defined(_MSC_VER)
 #include <arpa/inet.h>
+#else
+inline unsigned int ntohl(unsigned int val);
+inline unsigned int ntohl(unsigned int val)
+{
+	return (((val&0xff      ) << 24) |
+			((val&0xff00    ) << 8 ) |
+			((val&0xff0000  ) >> 8 ) |
+			((val&0xff000000) >> 24) );
+}
+#endif
+
+#if defined(_MSC_VER)
+int msvc_open(const char *path, int oflag, ...) {
+    int filehandle;
+    errno_t errno;
+    errno = _sopen_s(&filehandle, path, oflag, _SH_DENYNO, _S_IREAD | _S_IWRITE);
+    return filehandle;
+}
+#define open msvc_open
+#endif
 
 #define INT_CONF ntohl(0x434f4e46)
 #define INT_ONFI ntohl(0x4f4e4649)
 #define INT_NFIG ntohl(0x4e464947)
 #define INT_FIG_ ntohl(0x4649475f)
+
+#if defined(__MINGW32__) || defined(_MSC_VER)
+#define UNUSED __attribute__ ((__unused__))
+
+void *mmap(void *start UNUSED, size_t size, int prot UNUSED,
+	   int flags UNUSED, int fd, off_t offset UNUSED);
+
+void munmap(void *p, size_t size UNUSED);
+
+/* Workaround specifically for fixdep */
+#define PROT_READ 0
+#define MAP_PRIVATE 0
+void *mmap(void *start UNUSED, size_t size, int prot UNUSED,
+	   int flags UNUSED, int fd, off_t offset UNUSED)
+{
+	void *p;
+	void *curP;
+	ssize_t readB;
+
+	p = malloc(size);
+	if (!p)
+		return (void*)((long)-1);
+
+	curP = p;
+
+	while (size > 0)
+	{
+		readB = read(fd, curP, size);
+
+		if (readB == 0)
+		{
+			/* EOF reached */
+			break;
+		}
+		else if (readB < 0)
+		{
+			perror("fixdep: read config");
+			free(p);
+			return (void*)((long)-1);
+		}
+
+		size -= readB;
+		curP += readB;
+	}
+
+	return p;
+}
+void munmap(void *p, size_t size UNUSED)
+{
+	free(p);
+}
+#endif
+
 
 char *target;
 char *depfile;
@@ -303,6 +379,7 @@ static void parse_dep_file(void *map, size_t len)
 	char *m = map;
 	char *end = m + len;
 	char *p;
+        char *slash;
 	char s[PATH_MAX];
 	int is_target;
 	int saw_any_target = 0;
@@ -310,11 +387,11 @@ static void parse_dep_file(void *map, size_t len)
 
 	while (m < end) {
 		/* Skip any "white space" */
-		while (m < end && (*m == ' ' || *m == '\\' || *m == '\n'))
+		while (m < end && (*m == ' ' || *m == '\\' || *m == '\r' || *m == '\n'))
 			m++;
 		/* Find next "white space" */
 		p = m;
-		while (p < end && *p != ' ' && *p != '\\' && *p != '\n')
+		while (p < end && *p != ' ' && *p != '\r' && *p != '\n')
 			p++;
 		/* Is the token we found a target name? */
 		is_target = (*(p-1) == ':');
@@ -326,6 +403,14 @@ static void parse_dep_file(void *map, size_t len)
 			/* Save this token/filename */
 			memcpy(s, m, p-m);
 			s[p - m] = 0;
+			/* Apply some Windows fixups */
+			if (s[0]>='a' && s[0]<='z' && s[1]==':')
+				s[0] = s[0]&~32;
+			slash = strchr(s, '\\');
+			while (slash) {
+				*slash = '/';
+				slash = strchr(slash, '\\');
+			}
 
 			/* Ignore certain dependencies */
 			if (strrcmp(s, "include/generated/autoconf.h") &&
@@ -367,6 +452,8 @@ static void parse_dep_file(void *map, size_t len)
 		 * "whitespace" character that follows this token.
 		 */
 		m = p + 1;
+		while (*m && (*m == '\r' || *m == '\n'))
+			++m;
 	}
 
 	if (!saw_any_target) {

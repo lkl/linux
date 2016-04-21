@@ -39,7 +39,21 @@ export srctree
 export CFLAGS += -Iinclude -Wall -g -O2 -Wextra -Wno-unused-parameter \
 	  -Wno-missing-field-initializers -fno-strict-aliasing
 
-OUTPUT_FORMAT = $(shell $(LD) -r -print-output-format)
+ifeq ($(LD), link)
+	OUTPUT_FORMAT =  pe-i386
+	WINDOWS_HOST = yes
+	# relplace binutils with MS Build utilities
+	HOSTLD = link
+	AR = lib
+	NM = dumpbin /export
+	RANLIB = echo
+	OBJCOPY = lib /extract
+	STRIP = echo
+	LIBSUF = .lib 
+else
+	OUTPUT_FORMAT = $(shell $(LD) -r -print-output-format)
+	LIBSUF = .a
+endif
 
 ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64 elf32-i386 elf64-x86-64-freebsd elf32-littlearm))
   OUTPUT_DEF = $(shell echo | $(CC) -dM -E -)
@@ -76,29 +90,29 @@ else
 endif
 
 ALL_PROGRAMS := lklfuse$(EXESUF) cptofs$(EXESUF) cpfromfs$(EXESUF) fs2tar$(EXESUF)
-ALL_LIBRARIES := liblkl.a liblkl$(SOSUF) liblkl-hijack$(SOSUF)
+ALL_LIBRARIES := liblkl$(LIBSUF) liblkl$(SOSUF) liblkl-hijack$(SOSUF)
 
-static: liblkl.a
+static: liblkl$(LIBSUF)
 shared: liblkl$(SOSUF)
 hijack: liblkl-hijack$(SOSUF)
 
 liblkl$(SOSUF): lib/lkl-in.o lib/lkl.o
 liblkl$(SOSUF): LDFLAGS += -shared
 
-liblkl-hijack$(SOSUF): lib/hijack/hijack-in.o liblkl.a
+liblkl-hijack$(SOSUF): lib/hijack/hijack-in.o liblkl$(LIBSUF)
 liblkl-hijack$(SOSUF): LDFLAGS += -shared -nodefaultlibs
 liblkl-hijack$(SOSUF): LDLIBS += -ldl
 
-lklfuse$(EXESUF): lklfuse-in.o liblkl.a
+lklfuse$(EXESUF): lklfuse-in.o liblkl$(LIBSUF)
 lklfuse$(EXESUF): LDLIBS += -lfuse
 
-fs2tar$(EXESUF): fs2tar-in.o liblkl.a
+fs2tar$(EXESUF): fs2tar-in.o liblkl$(LIBSUF)
 fs2tar$(EXESUF): LDLIBS += -larchive
 ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64-freebsd))
   fs2tar$(EXESUF): LDLIBS += -largp
 endif
 
-cptofs$(EXESUF): cptofs-in.o liblkl.a
+cptofs$(EXESUF): cptofs-in.o liblkl$(LIBSUF)
 ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64-freebsd))
   cptofs$(EXESUF): LDLIBS += -largp
 endif
@@ -106,8 +120,8 @@ endif
 
 TEST_TARGETS        := test valgrind gdb
 
-tests/boot: tests/boot-in.o liblkl.a
-tests/net-test: tests/net-test-in.o liblkl.a
+tests/boot: tests/boot-in.o liblkl$(LIBSUF)
+tests/net-test: tests/net-test-in.o liblkl$(LIBSUF)
 $(TEST_TARGETS): tests/boot tests/net-test
 
 # because of libdl, liblkl-hijack will not compile on windows
@@ -124,7 +138,7 @@ lib/lkl.o:
 	$(Q)$(MAKE) -C ../.. ARCH=lkl $(KOPT) defconfig
 	$(Q)$(MAKE) -C ../.. ARCH=lkl $(KOPT) install INSTALL_PATH=$(CURDIR)
 
-liblkl.a: lib/lkl-in.o lib/lkl.o
+liblkl$(LIBSUF): lib/lkl-in.o lib/lkl.o
 	$(QUIET_AR)$(AR) -rc $@ $^
 
 liblkl$(SOSUF) liblkl-hijack$(SOSUF) lklfuse$(EXESUF) fs2tar$(EXESUF) cptofs$(EXESUF) tests/boot tests/net-test:
@@ -149,7 +163,7 @@ endif
 clean:
 	$(call QUIET_CLEAN, objects)find . -name '*.o' -delete -o -name '\.*.cmd' -delete -o -name '\.*.d' -delete
 	$(call QUIET_CLEAN, headers)$(RM) -r include/lkl/
-	$(call QUIET_CLEAN, "host libraries")$(RM) liblkl.a liblkl$(SOSUF)
+	$(call QUIET_CLEAN, "host libraries")$(RM) liblkl$(LIBSUF) liblkl$(SOSUF)
 	$(call QUIET_CLEAN, "hijack library")$(RM) liblkl-hijack$(SOSUF)
 	$(call QUIET_CLEAN, programs)$(RM) lklfuse$(EXESUF) fs2tar$(EXESUF) cptofs$(EXESUF) cpfromfs$(EXESUF)
 	$(call QUIET_CLEAN, tests)$(RM) tests/boot tests/net-test
