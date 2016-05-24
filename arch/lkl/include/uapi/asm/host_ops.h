@@ -120,4 +120,13 @@ int lkl_start_kernel(struct lkl_host_operations *lkl_ops,
 		    unsigned long mem_size,
 		    const char *cmd_line, ...);
 
+/**
+ * Operations on the global single kernel lock.
+ * Any thread that goes into LKL kernel space must hold this lock.
+ */
+void lkl_init_kernel_lock(void);
+void lkl_lock_kernel(void);
+void lkl_unlock_kernel(void);
+void lkl_free_kernel_lock(void);
+
 #endif

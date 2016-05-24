@@ -1,8 +1,9 @@
 #include <uapi/asm/unistd.h>
 
 #define __NR_create_syscall_thread	__NR_arch_specific_syscall
-
+#define __NR_stop_deputy_thread	(__NR_create_syscall_thread + 1)
 __SYSCALL(__NR_create_syscall_thread, sys_create_syscall_thread)
+__SYSCALL(__NR_stop_deputy_thread, sys_stop_deputy_thread)
 
 #define __SC_ASCII(t, a) #t "," #a
 
