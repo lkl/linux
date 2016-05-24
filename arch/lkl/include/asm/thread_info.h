@@ -14,6 +14,7 @@ typedef struct {
 struct thread_exit_info {
 	bool dead;
 	void *sched_sem;
+	void *deputy_waken;
 };
 
 struct thread_info {
@@ -25,6 +26,22 @@ struct thread_info {
 	struct thread_exit_info *exit_info;
 	struct task_struct *prev_sched;
 	unsigned long stackend;
+/* This thread is not a deputy thread.*/
+#define LKL_DEPUTY_NONE 0
+/* The LKL deputy kernel thread is using this thread_info. */
+#define LKL_DEPUTY_KERNEL_THREAD 1
+/* The host thread is using this thread_info. */
+#define LKL_DEPUTY_HOST_THREAD 2
+	/* Can only be one of LKL_DEPUTY_NONE, LKL_DEPUTY_KERNEL_THREAD and
+	 * LKL_DEPUTY_HOST_THREAD.
+	 */
+	int deputy_state;
+	void *deputy_waken;
+	/* The original current task and irq flags when the host borrows this
+	 * thread_info.
+	 */
+	struct thread_info *ori_ti;
+	unsigned long ori_irq_flags;
 };
 
 #define INIT_THREAD_INFO(tsk)				\

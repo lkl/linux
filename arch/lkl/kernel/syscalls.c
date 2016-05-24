@@ -43,9 +43,19 @@ static struct syscall_thread_data {
 	struct list_head list;
 	bool stop;
 	struct completion stopped;
+	struct thread_info *ti;
 } default_syscall_thread_data;
 
 static LIST_HEAD(syscall_threads);
+
+static int host_syscall = true;
+static int __init setup_host_syscall(char *str)
+{
+	get_option(&str, &host_syscall);
+
+	return 1;
+}
+__setup("lkl_host_syscall=", setup_host_syscall);
 
 static struct syscall *dequeue_syscall(struct syscall_thread_data *data)
 {
@@ -188,6 +198,43 @@ static int lkl_syscall_wouldblock(struct syscall_thread_data *data)
 	return !lkl_ops->sem_get(data->mutex);
 }
 
+/* LKL syscall run by a host thread. */
+static long host_run_syscall(struct syscall_thread_data *data,
+			     struct syscall *s)
+{
+	long ret;
+
+	if (!data->ti) {
+		lkl_puts("lkl: no lkl deputy thread corresponds to host.\n");
+		return -EPERM;
+	}
+	lkl_lock_kernel();
+	/* Save the current task and irq flags. */
+	data->ti->ori_irq_flags = arch_local_save_flags();
+	data->ti->ori_ti = _current_thread_info;
+	arch_local_irq_restore(ARCH_IRQ_ENABLED);
+	_current_thread_info = data->ti;
+	_current_thread_info->deputy_state = LKL_DEPUTY_HOST_THREAD;
+	set_current_state(TASK_RUNNING);
+	ret = run_syscall(s);
+	set_current_state(TASK_UNINTERRUPTIBLE);
+
+	/* Restore the current task and irq flags. */
+	_current_thread_info = data->ti->ori_ti;
+	arch_local_irq_restore(data->ti->ori_irq_flags);
+	/* The idle thread may be in deep sleep (NO_HZ_IDLE), TIF_NEED_RESCHED
+	 * can force it to setup ticks again.
+	 */
+	set_thread_flag(TIF_NEED_RESCHED);
+	lkl_unlock_kernel();
+	/* The kernel may be in idle when the host thread jumps in. We need to
+	 * wake up the idle thread in case the syscall may change the state of
+	 * kernel.
+	 */
+	wakeup_cpu();
+	return ret;
+}
+
 static long __lkl_syscall(struct syscall_thread_data *data, long no,
 			  long *params)
 {
@@ -195,6 +242,9 @@ static long __lkl_syscall(struct syscall_thread_data *data, long no,
 
 	s.no = no;
 	s.params = params;
+
+	if (host_syscall && data != &default_syscall_thread_data)
+		return host_run_syscall(data, &s);
 
 	if (lkl_syscall_wouldblock(data))
 		lkl_puts("syscall would block");
@@ -237,6 +287,8 @@ static struct syscall_thread_data *__lkl_create_syscall_thread(void)
 		goto out_free;
 
 	lkl_ops->sem_down(data->completion);
+	if (host_syscall)
+		lkl_ops->sem_down(data->ti->deputy_waken);
 
 	return data;
 
@@ -260,7 +312,10 @@ int lkl_create_syscall_thread(void)
 static int kernel_stop_syscall_thread(struct syscall_thread_data *data)
 {
 	data->stop = true;
-	wake_up(&data->wqh);
+	if (host_syscall)
+		wake_up_process(data->ti->task);
+	else
+		wake_up(&data->wqh);
 	wait_for_completion(&data->stopped);
 
 	return 0;
@@ -325,13 +380,46 @@ long lkl_syscall(long no, long *params)
 	return __lkl_syscall(data, no, params);
 }
 
+static int deputy_kernel_thread(void *_data)
+{
+	struct syscall_thread_data *data;
+	static int count;
+	struct thread_info *ti = current_thread_info();
+
+	data = (struct syscall_thread_data *)_data;
+	data->ti = ti;
+	list_add(&data->list, &syscall_threads);
+	init_completion(&data->stopped);
+
+	snprintf(current->comm, sizeof(current->comm), "ksyscalld%d", count++);
+	pr_info("lkl: deputy thread %s initialized\n", current->comm);
+
+	lkl_ops->sem_up(data->completion);
+	while (!data->stop) {
+		ti->deputy_state = LKL_DEPUTY_KERNEL_THREAD;
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule();
+	}
+	list_del(&data->list);
+	complete(&data->stopped);
+	pr_info("lkl: exiting deputy thread %s\n", current->comm);
+	return 0;
+}
+
 static asmlinkage long
 sys_create_syscall_thread(struct syscall_thread_data *data)
 {
 	pid_t pid;
 
-	pid = kernel_thread(syscall_thread, data, CLONE_VM | CLONE_FS |
-			CLONE_FILES | CLONE_THREAD | CLONE_SIGHAND | SIGCHLD);
+	if (host_syscall) {
+		pid = kernel_thread(deputy_kernel_thread, data, CLONE_VM |
+				CLONE_FS | CLONE_FILES | CLONE_THREAD |
+				CLONE_SIGHAND | SIGCHLD);
+	} else {
+		pid = kernel_thread(syscall_thread, data, CLONE_VM | CLONE_FS |
+				CLONE_FILES | CLONE_THREAD | CLONE_SIGHAND |
+				SIGCHLD);
+	}
 	if (pid < 0)
 		return pid;
 
