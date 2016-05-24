@@ -43,6 +43,7 @@ int run_init_process(const char *init_filename)
 
 static void __init lkl_run_kernel(void *arg)
 {
+	lkl_lock_kernel();
 	/* Nobody will ever join us */
 	lkl_ops->thread_detach();
 
@@ -57,6 +58,7 @@ int __init lkl_start_kernel(struct lkl_host_operations *ops,
 	int ret;
 
 	lkl_ops = ops;
+	lkl_init_kernel_lock();
 	mem_size = _mem_size;
 
 	va_start(ap, fmt);
@@ -146,6 +148,8 @@ long lkl_sys_halt(void)
 		 * memory. */
 		free_mem();
 
+	lkl_free_kernel_lock();
+
 	return 0;
 }
 
@@ -157,12 +161,16 @@ void arch_cpu_idle(void)
 		/* Shutdown the clockevents source. */
 		tick_suspend_local();
 
+		lkl_unlock_kernel();
 		lkl_ops->sem_up(halt_sem);
 		lkl_ops->thread_exit();
 	}
 
+	lkl_unlock_kernel();
 	lkl_ops->sem_down(idle_sem);
+	lkl_lock_kernel();
 
+	lkl_run_irqs();
 	local_irq_enable();
 }
 
@@ -184,3 +192,24 @@ static int __init fs_setup(void)
 	return 0;
 }
 late_initcall(fs_setup);
+
+static struct lkl_mutex_t* kernel_lock;
+void lkl_init_kernel_lock(void)
+{
+	kernel_lock = lkl_ops->mutex_alloc();
+}
+
+void lkl_lock_kernel(void)
+{
+	lkl_ops->mutex_lock(kernel_lock);
+}
+
+void lkl_unlock_kernel(void)
+{
+	lkl_ops->mutex_unlock(kernel_lock);
+}
+
+void lkl_free_kernel_lock(void)
+{
+	lkl_ops->mutex_free(kernel_lock);
+}

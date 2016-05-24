@@ -36,7 +36,7 @@ int lkl_trigger_irq(int irq)
 	return 0;
 }
 
-static void run_irqs(void)
+void lkl_run_irqs(void)
 {
 	int i;
 	unsigned long status;
@@ -91,9 +91,6 @@ unsigned long arch_local_save_flags(void)
 
 void arch_local_irq_restore(unsigned long flags)
 {
-	if (flags == ARCH_IRQ_ENABLED && irqs_enabled == ARCH_IRQ_DISABLED &&
-	    !in_interrupt())
-		run_irqs();
 	irqs_enabled = flags;
 }
 

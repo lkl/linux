@@ -3097,6 +3097,46 @@ again:
 	BUG(); /* the idle class will always have a runnable task */
 }
 
+/**
+ * LKL specific schedule.
+ *
+ * If current thread is a host thread acting as the deputy LKL kernel thread, it
+ * can't run through __schedule(). lkl_host_schedule() provides __schedule()
+ * functionality to those threads.
+ */
+static inline int lkl_host_schedule(struct thread_info* ti) {
+	if (ti->deputy_state == LKL_DEPUTY_HOST_THREAD) {
+		/* The task can be in state TASK_RUNNING when calling
+		 * __schedule() (EX. socket backlog) in which case we don't need
+		 * to switch to other task but clear_tsk_need_resched.
+		 */
+		if (ti->task->state != TASK_RUNNING) {
+			unsigned long irq_flags = arch_local_save_flags();
+			/* Restore current irq flags and tasks. */
+			arch_local_irq_restore(ti->ori_irq_flags);
+			_current_thread_info = ti->ori_ti;
+			set_thread_flag(TIF_NEED_RESCHED);
+			lkl_unlock_kernel();
+			wakeup_cpu();
+			/* Wait until the deputy thread is unblocked. */
+			lkl_ops->sem_down(ti->deputy_waken);
+			lkl_lock_kernel();
+
+			ti->ori_ti = _current_thread_info;
+			ti->ori_irq_flags = arch_local_save_flags();
+
+			_current_thread_info = ti;
+			ti->deputy_state = LKL_DEPUTY_HOST_THREAD;
+			set_current_state(TASK_RUNNING);
+			arch_local_irq_restore(irq_flags);
+		}
+		/* To avoid dead loop */
+		clear_tsk_need_resched(ti->task);
+		return 1;
+	}
+	return 0;
+}
+
 /*
  * __schedule() is the main scheduler function.
  *
@@ -3142,6 +3182,10 @@ static void __sched notrace __schedule(bool preempt)
 	unsigned long *switch_count;
 	struct rq *rq;
 	int cpu;
+
+	if (lkl_host_schedule(current_thread_info())) {
+		return;
+	}
 
 	cpu = smp_processor_id();
 	rq = cpu_rq(cpu);

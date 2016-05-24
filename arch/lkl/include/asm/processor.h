@@ -1,5 +1,6 @@
 #ifndef _ASM_LKL_PROCESSOR_H
 #define _ASM_LKL_PROCESSOR_H
+#include <asm/irq.h>
 
 struct task_struct;
 
@@ -11,6 +12,7 @@ static inline void cpu_relax(void)
 	 * external condition (e.g. jiffies) lets run interrupts now to allow
 	 * the external condition to propagate */
 	local_irq_save(flags);
+	lkl_run_irqs();
 	local_irq_restore(flags);
 }
 
