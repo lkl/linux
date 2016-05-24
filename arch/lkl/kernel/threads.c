@@ -22,6 +22,14 @@ struct thread_info *alloc_thread_info_node(struct task_struct *task, int node)
 		return NULL;
 	}
 
+	ti->deputy_waken = lkl_ops->sem_alloc(0);
+	ti->deputy_state = LKL_DEPUTY_NONE;
+	if (!ti->deputy_waken) {
+		lkl_ops->sem_free(ti->sched_sem);
+		kfree(ti);
+		return NULL;
+	}
+
 	return ti;
 }
 
@@ -84,6 +92,7 @@ struct task_struct *__switch_to(struct task_struct *prev,
 	struct thread_exit_info ei = {
 		.dead = false,
 		.sched_sem = _prev->sched_sem,
+		.deputy_waken = _prev->deputy_waken,
 	};
 
 	_current_thread_info = task_thread_info(next);
@@ -91,6 +100,9 @@ struct task_struct *__switch_to(struct task_struct *prev,
 	abs_prev = prev;
 	_prev->exit_info = &ei;
 
+	lkl_unlock_kernel();
+	if (_prev->deputy_state == LKL_DEPUTY_KERNEL_THREAD)
+		lkl_ops->sem_up(_prev->deputy_waken);
 	lkl_ops->sem_up(_next->sched_sem);
 	/* _next may be already gone so use ei instead */
 	lkl_ops->sem_down(ei.sched_sem);
@@ -98,9 +110,13 @@ struct task_struct *__switch_to(struct task_struct *prev,
 	if (ei.dead) {
 		lkl_ops->sem_free(ei.sched_sem);
 		__sync_fetch_and_sub(&threads_counter, 1);
+		lkl_ops->sem_free(ei.deputy_waken);
 		lkl_ops->thread_exit();
 	}
 
+	lkl_lock_kernel();
+	if (_prev->deputy_state != LKL_DEPUTY_NONE)
+		_prev->deputy_state = LKL_DEPUTY_KERNEL_THREAD;
 	_prev->exit_info = NULL;
 
 	return abs_prev;
@@ -125,6 +141,7 @@ static void thread_bootstrap(void *_tba)
 	lkl_ops->thread_detach();
 
 	lkl_ops->sem_down(ti->sched_sem);
+	lkl_lock_kernel();
 	kfree(tba);
 	if (ti->prev_sched)
 		schedule_tail(ti->prev_sched);
@@ -176,18 +193,22 @@ static inline void pr_early(const char *str)
 int threads_init(void)
 {
 	struct thread_info *ti = &init_thread_union.thread_info;
-	int ret = 0;
 
 	ti->exit_info = NULL;
 	ti->prev_sched = NULL;
 
 	ti->sched_sem = lkl_ops->sem_alloc(0);
-	if (!ti->sched_sem) {
-		pr_early("lkl: failed to allocate init schedule semaphore\n");
-		ret = -ENOMEM;
-	}
+	ti->deputy_state = LKL_DEPUTY_NONE;
+	ti->deputy_waken = lkl_ops->sem_alloc(0);
 
-	return ret;
+	if (ti->sched_sem && ti->deputy_waken)
+		return 0;
+
+	pr_early("lkl: failed to allocate init schedule semaphore\n");
+	if (ti->sched_sem) lkl_ops->sem_free(ti->sched_sem);
+	if (ti->deputy_waken) lkl_ops->sem_free(ti->deputy_waken);
+
+	return -ENOMEM;
 }
 
 void threads_cleanup(void)
