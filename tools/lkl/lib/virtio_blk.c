@@ -67,9 +67,10 @@ static struct virtio_dev_ops blk_ops = {
 	.enqueue = blk_enqueue,
 };
 
+struct virtio_blk_dev *dev;
+
 int lkl_disk_add(union lkl_disk disk)
 {
-	struct virtio_blk_dev *dev;
 	unsigned long long capacity;
 	int ret;
 	static int count;
@@ -105,4 +106,13 @@ out_free:
 	lkl_host_ops.mem_free(dev);
 
 	return ret;
+}
+
+void lkl_disk_remove(union lkl_disk disk)
+{
+	if (!dev || dev->disk.fd != disk.fd)
+		return;
+
+	virtio_dev_cleanup(&dev->dev);
+	lkl_host_ops.mem_free(dev);
 }

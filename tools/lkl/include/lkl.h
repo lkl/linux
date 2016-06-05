@@ -91,6 +91,16 @@ union lkl_disk {
 int lkl_disk_add(union lkl_disk disk);
 
 /**
+ * lkl_disk_remove - remove a disk
+ *
+ * This function makes a cleanup of the @disk's virtio_dev structure
+ * that was initialized by lkl_disk_add before.
+ *
+ * @disk - the host disk handle
+ */
+void lkl_disk_remove(union lkl_disk disk);
+
+/**
  * lkl_mount_dev - mount a disk
  *
  * This functions creates a device file for the given disk, creates a mount

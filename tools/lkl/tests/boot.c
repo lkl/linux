@@ -821,6 +821,7 @@ int main(int argc, char **argv)
 
 	lkl_sys_halt();
 
+	lkl_disk_remove(disk);
 	close(disk.fd);
 
 	return g_test_pass;
