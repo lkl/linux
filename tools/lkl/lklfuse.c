@@ -585,7 +585,7 @@ int main(int argc, char **argv)
 
 	lklfuse.disk.fd = ret;
 
-	ret = lkl_disk_add(lklfuse.disk);
+	ret = lkl_disk_add(&lklfuse.disk);
 	if (ret < 0) {
 		fprintf(stderr, "can't add disk: %s\n", lkl_strerror(ret));
 		goto out_close_disk;
