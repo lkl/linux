@@ -12,6 +12,13 @@
 int lkl_trigger_irq(int irq);
 
 /**
+ * lkl_run_irqs - run all interrupts
+ *
+ * This function must be called in lkl kernel context and with irq disabled.
+ */
+void lkl_run_irqs(void);
+
+/**
  * lkl_get_free_irq - find and reserve a free IRQ number
  *
  * This function is called by the host device code to find an unused IRQ number

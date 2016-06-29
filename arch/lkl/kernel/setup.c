@@ -170,6 +170,7 @@ void arch_cpu_idle(void)
 	lkl_ops->sem_down(idle_sem);
 	lkl_lock_kernel();
 
+	lkl_run_irqs();
 	local_irq_enable();
 }
 
