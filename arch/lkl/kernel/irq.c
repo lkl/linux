@@ -12,12 +12,14 @@
 static unsigned long irq_status;
 static bool irqs_enabled;
 
-#define TEST_AND_CLEAR_IRQ_STATUS(x)	__sync_fetch_and_and(&irq_status, 0)
+#define TEST_AND_CLEAR(x)		__sync_fetch_and_and(&(x), 0)
 #define IRQ_BIT(x)			BIT(x-1)
 #define SET_IRQ_STATUS(x)		__sync_fetch_and_or(&irq_status, BIT(x - 1))
+#define INC_IRQ_CNT(x)			__sync_fetch_and_add(&irqs[x].cnt, 1)
 
 static struct irq_info {
 	const char *user;
+	unsigned long cnt;
 } irqs[NR_IRQS];
 
 /**
@@ -29,6 +31,7 @@ int lkl_trigger_irq(int irq)
 	if (!irq || irq > NR_IRQS)
 		return -EINVAL;
 
+	INC_IRQ_CNT(irq);
 	SET_IRQ_STATUS(irq);
 
 	wakeup_cpu();
@@ -41,13 +44,17 @@ static void run_irqs(void)
 	int i;
 	unsigned long status;
 
-	status = TEST_AND_CLEAR_IRQ_STATUS(IRQS_MASK);
+	status = TEST_AND_CLEAR(irq_status);
 
 	for (i = 1; i < NR_IRQS; i++) {
 		if (status & IRQ_BIT(i)) {
-			irq_enter();
-			generic_handle_irq(i);
-			irq_exit();
+			unsigned long cnt = TEST_AND_CLEAR(irqs[i].cnt);
+			while( cnt > 0 ) {
+				irq_enter();
+				generic_handle_irq(i);
+				irq_exit();
+				cnt--;
+			}
 		}
 	}
 }
