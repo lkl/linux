@@ -30,6 +30,9 @@
 #define __USE_GNU
 #include <dlfcn.h>
 
+#define _GNU_SOURCE
+#include <sched.h>
+
 /* Mount points are named after filesystem types so they should never
  * be longer than ~6 characters. */
 #define MAX_FSTYPE_LEN 50
@@ -177,6 +180,26 @@ void fixup_netdev_linux_fdnet_ops(void)
 	lkl_netdev_linux_fdnet_ops.eventfd = dlsym(RTLD_NEXT, "eventfd");
 }
 
+static void PinToCpus(const cpu_set_t* cpus) {
+	if (sched_setaffinity(0, sizeof(cpu_set_t), cpus)) {
+		perror("sched_setaffinity");
+	}
+}
+
+static void PinToFirstCpu(const cpu_set_t* cpus) {
+	int j;
+	cpu_set_t pinto;
+	CPU_ZERO(&pinto);
+	for (j = 0; j < CPU_SETSIZE; j++) {
+		if (CPU_ISSET(j, cpus)) {
+			printf("LKL: Pin To CPU %d\n", j);
+			CPU_SET(j, &pinto);
+			PinToCpus(&pinto);
+			return;
+		}
+	}
+}
+
 void __attribute__((constructor(102)))
 hijack_init(void)
 {
@@ -195,6 +218,17 @@ hijack_init(void)
 	char *mount = getenv("LKL_HIJACK_MOUNT");
 	struct lkl_netdev *nd = NULL;
 	char *arp_entries = getenv("LKL_HIJACK_NET_ARP");
+	char *single_cpu= getenv("LKL_HIJACK_SINGLE_CPU");
+	int should_pin_cpu = 0;
+	cpu_set_t ori_cpu;
+
+	if (single_cpu && strcmp(single_cpu, "0")) {
+		should_pin_cpu = 1;
+		if (sched_getaffinity(0, sizeof(cpu_set_t), &ori_cpu)) {
+			perror("sched_getaffinity");
+			should_pin_cpu = 0;
+		}
+	}
 
 	/* Must be run before lkl_netdev_tap_create */
 	fixup_netdev_linux_fdnet_ops();
@@ -243,11 +277,21 @@ hijack_init(void)
 	else
 		lkl_register_dbg_handler();
 
+	/* Pin to a single cpu before calling lkl_start_kernel so that all lkl
+	 * kernel threads will be pinned to the same cpu.
+	 */
+	if (should_pin_cpu)
+		PinToFirstCpu(&ori_cpu);
+
 	ret = lkl_start_kernel(&lkl_host_ops, 64 * 1024 * 1024, "");
 	if (ret) {
 		fprintf(stderr, "can't start kernel: %s\n", lkl_strerror(ret));
 		return;
 	}
+
+	/* restore cpu affinity */
+	if (should_pin_cpu)
+		PinToCpus(&ori_cpu);
 
 	/* fillup FDs up to LKL_FD_OFFSET */
 	ret = lkl_sys_mknod("/dev_null", LKL_S_IFCHR | 0600, LKL_MKDEV(1, 3));
