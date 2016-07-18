@@ -112,6 +112,60 @@ int test_getpid(char *str, int len)
 	return TEST_FAILURE;
 }
 
+#ifndef __MINGW32__
+int test_syscall_latency(char *str, int len)
+{
+	struct timespec start, stop;
+	static const int count = 1000;
+	int i;
+	long delta, min = 1000000000, max = -1, avg;
+	int tmp;
+
+	for(i = 0; i < count; i++) {
+		clock_gettime(CLOCK_MONOTONIC, &start);
+		lkl_sys_getpid();
+		clock_gettime(CLOCK_MONOTONIC, &stop);
+		delta = 1e9*(stop.tv_sec - start.tv_sec) +
+			(stop.tv_nsec - start.tv_nsec);
+		if (min > delta)
+			min = delta;
+		if (max < delta)
+			max = delta;
+		if (i == 0)
+			avg = delta;
+		else
+			avg = (avg + delta) / 2;
+	}
+
+	tmp = snprintf(str, len, "avg/min/max lkl_sys_getpid: %ld/%ld/%ld ",
+		       avg, min, max);
+	str += tmp;
+	len -= tmp;
+
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	for(i = 0; i < count; i++) {
+		clock_gettime(CLOCK_MONOTONIC, &start);
+		getpid();
+		clock_gettime(CLOCK_MONOTONIC, &stop);
+		delta = 1e9*(stop.tv_sec - start.tv_sec) +
+			(stop.tv_nsec - start.tv_nsec);
+		if (min > delta)
+			min = delta;
+		if (max < delta)
+			max = delta;
+		if (i == 0)
+			avg = delta;
+		else
+			avg = (avg + delta) / 2;
+	}
+	clock_gettime(CLOCK_MONOTONIC, &stop);
+
+	snprintf(str, len, "getpid: %ld/%ld/%ld\n", avg, min, max);
+
+	return TEST_SUCCESS;
+}
+#endif
+
 #define access_rights 0721
 
 int test_creat(char *str, int len)
@@ -814,9 +868,12 @@ int main(int argc, char **argv)
 	if (cla.tap_ifname)
 		TEST(netdev_add);
 #endif /* __MINGW32__ */
-	lkl_start_kernel(&lkl_host_ops, 16 * 1024 * 1024, "");
+	lkl_start_kernel(&lkl_host_ops, 16 * 1024 * 1024, "loglevel=8");
 
 	TEST(getpid);
+#ifndef __MINGW32__
+	TEST(syscall_latency);
+#endif
 	TEST(umask);
 	TEST(creat);
 	TEST(close);
