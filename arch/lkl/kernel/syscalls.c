@@ -358,7 +358,6 @@ out:
 
 void free_initial_syscall_thread(void)
 {
-	/* NB: .completion is freed in lkl_sys_halt, because it is
-	 * allocated in the LKL init routine. */
 	lkl_ops->sem_free(default_syscall_thread_data.mutex);
+	lkl_ops->sem_free(default_syscall_thread_data.completion);
 }

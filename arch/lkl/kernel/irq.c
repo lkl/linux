@@ -8,6 +8,7 @@
 #include <linux/tick.h>
 #include <asm/irqflags.h>
 #include <asm/host_ops.h>
+#include <asm/cpu.h>
 
 static unsigned long irq_status;
 static bool irqs_enabled;
@@ -26,12 +27,11 @@ static struct irq_info {
  */
 int lkl_trigger_irq(int irq)
 {
-	if (!irq || irq > NR_IRQS)
+	if (!irq || irq > NR_IRQS || lkl_cpu_is_shutdown())
 		return -EINVAL;
 
 	SET_IRQ_STATUS(irq);
-
-	wakeup_cpu();
+	lkl_cpu_wakeup();
 
 	return 0;
 }
