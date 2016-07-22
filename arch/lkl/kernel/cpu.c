@@ -80,12 +80,21 @@ void arch_cpu_idle(void)
 		lkl_ops->thread_exit();
 	}
 
+	/* enable irqs now to allow direct irqs to run */
+	local_irq_enable();
+
+	/* we may have run irqs and sofirqs, check if we need to reschedule */
+	if (need_resched())
+		return;
+
 	lkl_cpu_put();
 
 	lkl_ops->sem_down(idle_sem);
 
 	lkl_cpu_get();
 
+	/* since we've been waked up its highly likely we have pending irqs */
+	local_irq_disable();
 	local_irq_enable();
 }
 
