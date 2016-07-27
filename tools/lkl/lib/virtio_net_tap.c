@@ -21,14 +21,29 @@
 #include "virtio.h"
 #include "virtio_net_linux_fdnet.h"
 
-struct lkl_netdev *lkl_netdev_tap_create(const char *ifname)
+#define BIT(x) (1ULL << x)
+
+struct lkl_netdev *lkl_netdev_tap_create(const char *ifname, int offload)
 {
 	struct lkl_netdev_linux_fdnet *nd;
-	int fd, ret;
+	int fd, ret, tap_arg = 0;
+	int vnet_hdr_enabled = 0;
 
 	struct ifreq ifr = {
 		.ifr_flags = IFF_TAP | IFF_NO_PI,
 	};
+
+	if (offload & BIT(LKL_VIRTIO_NET_F_GUEST_CSUM))
+		tap_arg |= TUN_F_CSUM;
+	if (offload & (BIT(LKL_VIRTIO_NET_F_GUEST_TSO4) |
+	    BIT(LKL_VIRTIO_NET_F_MRG_RXBUF)))
+		tap_arg |= TUN_F_TSO4 | TUN_F_CSUM;
+
+	if (tap_arg || (offload & (BIT(LKL_VIRTIO_NET_F_CSUM) |
+	    BIT(LKL_VIRTIO_NET_F_HOST_TSO4)))) {
+		ifr.ifr_flags |= IFF_VNET_HDR;
+		vnet_hdr_enabled = 1;
+	}
 
 	strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
 
@@ -45,12 +60,17 @@ struct lkl_netdev *lkl_netdev_tap_create(const char *ifname)
 		close(fd);
 		return NULL;
 	}
-
+	if (tap_arg && ioctl(fd, TUNSETOFFLOAD, tap_arg) != 0) {
+		fprintf(stderr, "tap: failed to TUNSETOFFLOAD to %s: %s\n",
+			ifr.ifr_name, strerror(errno));
+		close(fd);
+		return NULL;
+	}
 	nd = lkl_register_netdev_linux_fdnet(fd);
 	if (!nd) {
 		perror("failed to register to.");
 		return NULL;
 	}
-
+	nd->dev.has_vnet_hdr = vnet_hdr_enabled;
 	return (struct lkl_netdev *)nd;
 }

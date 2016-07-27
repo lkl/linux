@@ -31,40 +31,35 @@ struct lkl_netdev_linux_fdnet_ops lkl_netdev_linux_fdnet_ops = {
 	#endif /* __NR_eventfd */
 };
 
-static int linux_fdnet_net_tx(struct lkl_netdev *nd, void *data, int len)
+static int linux_fdnet_net_tx(struct lkl_netdev *nd, struct iovec *iov, int cnt)
 {
 	int ret;
 	struct lkl_netdev_linux_fdnet *nd_fdnet =
 		container_of(nd, struct lkl_netdev_linux_fdnet, dev);
 
 	do {
-		ret = write(nd_fdnet->fd, data, len);
+		ret = writev(nd_fdnet->fd, iov, cnt);
 	} while (ret == -1 && errno == EINVAL);
-	if (ret > 0)
-		return 0;
+
 	if (ret < 0 && errno != EAGAIN)
 		perror("write to Linux fd netdev fails");
-
-	return -1;
+	return ret;
 }
 
-static int linux_fdnet_net_rx(struct lkl_netdev *nd, void *data, int *len)
+static int linux_fdnet_net_rx(struct lkl_netdev *nd, struct iovec *iov, int cnt)
 {
 	int ret;
 	struct lkl_netdev_linux_fdnet *nd_fdnet =
 		container_of(nd, struct lkl_netdev_linux_fdnet, dev);
 
 	do {
-		ret = read(nd_fdnet->fd, data, *len);
+		ret = readv(nd_fdnet->fd, iov, cnt);
 	} while (ret == -1 && errno == EINVAL);
-	if (ret > 0) {
-		*len = ret;
-		return 0;
-	}
+
 	if (ret < 0 && errno != EAGAIN)
 		perror("read from fdnet device fails");
 
-	return -1;
+	return ret;
 }
 
 static int linux_fdnet_net_poll(struct lkl_netdev *nd, int events)
