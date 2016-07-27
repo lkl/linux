@@ -8,11 +8,8 @@
 #define netdev_of(x) (container_of(x, struct virtio_net_dev, dev))
 #define BIT(x) (1ULL << x)
 
-/* We always have 2 queues on a netdev: one for tx, one for rx. */
-#define RX_QUEUE_IDX 0
-#define TX_QUEUE_IDX 1
 #define NUM_QUEUES (TX_QUEUE_IDX + 1)
-#define QUEUE_DEPTH 32
+#define QUEUE_DEPTH 128
 
 /* In fact, we'll hit the limit on the devs string below long before
  * we hit this, but it's good enough for now. */
@@ -59,51 +56,95 @@ static void net_release_queue(struct virtio_dev *dev, int queue_idx)
 	lkl_host_ops.mutex_unlock(netdev_of(dev)->queue_locks[queue_idx]);
 }
 
-static inline int is_rx_queue(struct virtio_dev *dev, struct virtio_queue *queue)
-{
-       return &dev->queue[RX_QUEUE_IDX] == queue;
-}
-
-static inline int is_tx_queue(struct virtio_dev *dev, struct virtio_queue *queue)
-{
-       return &dev->queue[TX_QUEUE_IDX] == queue;
-}
-
+/* The buffers passed through "req" from the virtio_net driver always
+ * starts with a vnet_hdr. We need to check the backend device if it
+ * expects vnet_hdr and adjust buffer offset accordingly.
+ */
 static int net_enqueue(struct virtio_dev *dev, struct virtio_req *req)
 {
 	struct lkl_virtio_net_hdr_v1 *header;
 	struct virtio_net_dev *net_dev;
-	int ret, len;
-	void *buf;
+	int ret, len, i, j;
+	struct iovec iov[VIRTIO_REQ_MAX_BUFS+1];
 
 	header = req->buf[0].addr;
 	net_dev = netdev_of(dev);
 	len = req->buf[0].len - sizeof(*header);
 
-	buf = &header[1];
+	/* We have to dedicate one vector iov[0] to hold the header.
+	 * The reason being two folded:
+	 * 1. the backend device may not expect a header
+	 * 2. even if it does expect a header, it may not expect the extra
+	 *    two bytes for "num_buffers" appended to the end of
+	 *    "struct virtio_net_hdr" as a result of VIRTIO_F_VERSION_1.
+	 */
+	iov[0].iov_base = req->buf[0].addr;
 
-	if (!len && req->buf_count > 1) {
-		buf = req->buf[1].addr;
-		len = req->buf[1].len;
+	/* tap device only supports lkl_virtio_net_hdr, two bytes short
+	 * of lkl_virtio_net_hdr_v1.
+	 */
+	iov[0].iov_len = sizeof(struct lkl_virtio_net_hdr);
+	i = 1;
+	if (len > 0) {
+		/* if there is space left after the header, we must use it */
+		iov[1].iov_base = &header[1];
+		iov[1].iov_len = len;
+		i++;
 	}
-
+	for (j = 1; j < req->buf_count; i++, j++) {
+		iov[i].iov_base = req->buf[j].addr;
+		iov[i].iov_len = req->buf[j].len;
+		len += iov[i].iov_len;
+	}
 	/* Pick which virtqueue to send the buffer(s) to */
 	if (is_tx_queue(dev, req->q)) {
-		ret = net_dev->ops->tx(net_dev->nd, buf, len);
+		if (net_dev->nd->has_vnet_hdr)
+			ret = net_dev->ops->tx(net_dev->nd, iov, i);
+		else
+			ret = net_dev->ops->tx(net_dev->nd, &iov[1], i-1);
 		if (ret < 0)
 			return -1;
 	} else if (is_rx_queue(dev, req->q)) {
-		header->num_buffers = 1;
-		ret = net_dev->ops->rx(net_dev->nd, buf, &len);
+		if (net_dev->nd->has_vnet_hdr) {
+			ret = net_dev->ops->rx(net_dev->nd, iov, i);
+
+			/* if the number of bytes returned exactly matches
+			 * the total space in the iov then there is a good
+			 * chance we did not supply a large enough buffer for
+			 * the whole pkt, i.e., pkt has been truncated.
+			 * This is only likely to happen under mergeable RX
+			 * buffer mode.
+			 */
+			if (len + sizeof(struct lkl_virtio_net_hdr) == (uint)ret)
+				lkl_printf("PKT is likely truncated! len=%d\n",
+				    len);
+			len = ret - sizeof(struct lkl_virtio_net_hdr) +
+				sizeof(struct lkl_virtio_net_hdr_v1);
+		} else {
+			ret = net_dev->ops->rx(net_dev->nd, &iov[1], i-1);
+			header->flags = 0;
+			header->gso_type = LKL_VIRTIO_NET_HDR_GSO_NONE;
+			len = ret + sizeof(struct lkl_virtio_net_hdr_v1);
+		}
 		if (ret < 0)
 			return -1;
+		/* Have to compute how many descriptors we've consumed (really
+		 * only matters to the the mergeable RX mode) and return it
+		 * through "num_buffers".
+		 */
+		for (i = 0, ret = len; ret > 0; i++)
+			ret -= req->buf[i].len;
+		header->num_buffers = i;
+		ret = req->buf_count = header->num_buffers;
+
+		if (dev->device_features & BIT(LKL_VIRTIO_NET_F_GUEST_CSUM))
+			header->flags = LKL_VIRTIO_NET_HDR_F_DATA_VALID;
 	} else {
 		bad_request("tried to push on non-existent queue");
 		return -1;
 	}
-
-	virtio_req_complete(req, len + sizeof(*header));
-	return 0;
+	virtio_req_complete(req, len);
+	return ret;
 }
 
 static struct virtio_dev_ops net_ops = {
@@ -174,7 +215,7 @@ static struct lkl_mutex **init_queue_locks(int num_queues)
 	return ret;
 }
 
-int lkl_netdev_add(struct lkl_netdev *nd, void *mac)
+int lkl_netdev_add(struct lkl_netdev *nd, void *mac, int offload)
 {
 	struct virtio_net_dev *dev;
 	int ret = -LKL_ENOMEM;
@@ -188,6 +229,7 @@ int lkl_netdev_add(struct lkl_netdev *nd, void *mac)
 	dev->dev.device_id = LKL_VIRTIO_ID_NET;
 	if (mac)
 		dev->dev.device_features |= BIT(LKL_VIRTIO_NET_F_MAC);
+	dev->dev.device_features |= offload;
 	dev->dev.config_data = &dev->config;
 	dev->dev.config_len = sizeof(dev->config);
 	dev->dev.ops = &net_ops;
@@ -199,7 +241,7 @@ int lkl_netdev_add(struct lkl_netdev *nd, void *mac)
 		goto out_free;
 
 	if (mac)
-		memcpy(dev->config.mac, mac, LKL_ETH_ALEN);
+		memcpy(dev->config.mac, mac, 6);
 
 	dev->rx_poll.event = LKL_DEV_NET_POLL_RX;
 	dev->rx_poll.dev = dev;

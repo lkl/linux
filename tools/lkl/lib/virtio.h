@@ -4,7 +4,20 @@
 #include <stdint.h>
 #include <lkl_host.h>
 
-#define VIRTIO_REQ_MAX_BUFS	4
+#define PAGE_SIZE		4096
+
+/* The following are copied from skbuff.h */
+#if (65536/PAGE_SIZE + 1) < 16
+#define MAX_SKB_FRAGS 16UL
+#else
+#define MAX_SKB_FRAGS (65536/PAGE_SIZE + 1)
+#endif
+
+#define VIRTIO_REQ_MAX_BUFS	(MAX_SKB_FRAGS + 2)
+
+/* We always have 2 queues on a netdev: one for tx, one for rx. */
+#define RX_QUEUE_IDX 0
+#define TX_QUEUE_IDX 1
 
 struct virtio_req {
 	struct virtio_dev *dev;
@@ -12,6 +25,7 @@ struct virtio_req {
 	uint16_t idx;
 	uint16_t buf_count;
 	struct lkl_dev_buf buf[VIRTIO_REQ_MAX_BUFS];
+	uint8_t is_mergeable_rx: 1;
 };
 
 struct virtio_dev_ops {
@@ -70,5 +84,16 @@ void virtio_process_queue(struct virtio_dev *dev, uint32_t qidx);
 
 #define container_of(ptr, type, member) \
 	(type *)((char *)(ptr) - __builtin_offsetof(type, member))
+
+
+static inline int is_rx_queue(struct virtio_dev *dev, struct virtio_queue *queue)
+{
+	return &dev->queue[RX_QUEUE_IDX] == queue;
+}
+
+static inline int is_tx_queue(struct virtio_dev *dev, struct virtio_queue *queue)
+{
+	return &dev->queue[TX_QUEUE_IDX] == queue;
+}
 
 #endif /* _LKL_LIB_VIRTIO_H */
