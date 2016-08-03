@@ -23,7 +23,6 @@ struct thread_info {
 	mm_segment_t addr_limit;
 	void *sched_sem;
 	struct thread_exit_info *exit_info;
-	struct task_struct *prev_sched;
 	unsigned long stackend;
 };
 

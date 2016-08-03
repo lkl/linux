@@ -14,7 +14,6 @@ struct thread_info *alloc_thread_info_node(struct task_struct *task, int node)
 		return NULL;
 
 	ti->exit_info = NULL;
-	ti->prev_sched = NULL;
 	ti->sched_sem = lkl_ops->sem_alloc(0);
 	ti->task = task;
 	if (!ti->sched_sem) {
@@ -58,23 +57,24 @@ void free_thread_info(struct thread_info *ti)
 
 struct thread_info *_current_thread_info = &init_thread_union.thread_info;
 
+/*
+ * schedule() expects the return of this function to be the task that we
+ * switched away from. Returning prev is not going to work because we
+ * are actually going to return the previous taks that was scheduled
+ * before the task we are going to wake up, and not the current task,
+ * e.g.:
+ *
+ * swapper -> init: saved prev on swapper stack is swapper
+ * init -> ksoftirqd0: saved prev on init stack is init
+ * ksoftirqd0 -> swapper: returned prev is swapper
+ */
+static struct task_struct *abs_prev = &init_task;
+
 struct task_struct *__switch_to(struct task_struct *prev,
 				struct task_struct *next)
 {
 	struct thread_info *_prev = task_thread_info(prev);
 	struct thread_info *_next = task_thread_info(next);
-	/*
-	 * schedule() expects the return of this function to be the task that we
-	 * switched away from. Returning prev is not going to work because we
-	 * are actually going to return the previous taks that was scheduled
-	 * before the task we are going to wake up, and not the current task,
-	 * e.g.:
-	 *
-	 * swapper -> init: saved prev on swapper stack is swapper
-	 * init -> ksoftirqd0: saved prev on init stack is init
-	 * ksoftirqd0 -> swapper: returned prev is swapper
-	 */
-	static struct task_struct *abs_prev = &init_task;
 	/*
 	 * We need to free the thread_info structure in free_thread_info to
 	 * avoid races between the dying thread and other threads. We also need
@@ -87,7 +87,6 @@ struct task_struct *__switch_to(struct task_struct *prev,
 	};
 
 	_current_thread_info = task_thread_info(next);
-	_next->prev_sched = prev;
 	abs_prev = prev;
 	_prev->exit_info = &ei;
 
@@ -126,8 +125,7 @@ static void thread_bootstrap(void *_tba)
 
 	lkl_ops->sem_down(ti->sched_sem);
 	kfree(tba);
-	if (ti->prev_sched)
-		schedule_tail(ti->prev_sched);
+	schedule_tail(abs_prev);
 
 	f(arg);
 	do_exit(0);
@@ -179,7 +177,6 @@ int threads_init(void)
 	int ret = 0;
 
 	ti->exit_info = NULL;
-	ti->prev_sched = NULL;
 
 	ti->sched_sem = lkl_ops->sem_alloc(0);
 	if (!ti->sched_sem) {
