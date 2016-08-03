@@ -78,5 +78,6 @@ struct lkl_netdev *lkl_netdev_tap_create(const char *ifname, int offload)
 		return NULL;
 	}
 	nd->dev.has_vnet_hdr = (vnet_hdr_sz != 0);
+	nd->dev.offload = offload;
 	return (struct lkl_netdev *)nd;
 }

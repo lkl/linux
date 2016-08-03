@@ -327,9 +327,9 @@ hijack_init(void)
 			fprintf(stderr, "failed to parse mac\n");
 			return;
 		} else if (ret > 0) {
-			ret = lkl_netdev_add(nd, mac, offload);
+			ret = lkl_netdev_add(nd, mac);
 		} else {
-			ret = lkl_netdev_add(nd, NULL, offload);
+			ret = lkl_netdev_add(nd, NULL);
 		}
 
 		if (ret < 0) {

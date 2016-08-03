@@ -202,7 +202,7 @@ static struct lkl_mutex **init_queue_locks(int num_queues)
 	return ret;
 }
 
-int lkl_netdev_add(struct lkl_netdev *nd, void *mac, int offload)
+int lkl_netdev_add(struct lkl_netdev *nd, void *mac)
 {
 	struct virtio_net_dev *dev;
 	int ret = -LKL_ENOMEM;
@@ -216,7 +216,7 @@ int lkl_netdev_add(struct lkl_netdev *nd, void *mac, int offload)
 	dev->dev.device_id = LKL_VIRTIO_ID_NET;
 	if (mac)
 		dev->dev.device_features |= BIT(LKL_VIRTIO_NET_F_MAC);
-	dev->dev.device_features |= offload;
+	dev->dev.device_features |= nd->offload;
 	dev->dev.config_data = &dev->config;
 	dev->dev.config_len = sizeof(dev->config);
 	dev->dev.ops = &net_ops;

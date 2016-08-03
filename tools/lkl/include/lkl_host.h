@@ -51,6 +51,7 @@ struct lkl_netdev {
 	struct lkl_dev_net_ops *ops;
 	lkl_thread_t rx_tid, tx_tid;
 	uint8_t has_vnet_hdr: 1;
+	unsigned int offload;
 };
 
 struct lkl_dev_net_ops {

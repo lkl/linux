@@ -255,7 +255,7 @@ struct lkl_netdev;
  * @returns a network device id (0 is valid) or a strictly negative value in
  * case of error
  */
-int lkl_netdev_add(struct lkl_netdev *nd, void *mac, int offload);
+int lkl_netdev_add(struct lkl_netdev *nd, void *mac);
 
 /**
 * lkl_netdevs_remove - destroy all network devices
