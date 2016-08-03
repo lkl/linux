@@ -90,6 +90,7 @@ typedef __s64			s64;
 #include <asm/siginfo.h>
 #include <linux/utime.h>
 #include <asm/socket.h>
+#include <linux/netlink.h>
 
 /* Define data structures used in system calls that are not defined in UAPI
  * headers */
