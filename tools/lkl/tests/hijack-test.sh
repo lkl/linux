@@ -101,7 +101,12 @@ echo "$ans" | tail -n 15 | grep "12:34:56:78:9a:bc"
 echo "$ans" | tail -n 15 | grep "12:34:56:78:9a:be"
 
 
-sh ${script_dir}/run_netperf.sh 192.168.13.1 1 0 TCP_STREAM
+# LKL_VIRTIO_NET_F_HOST_TSO4 && LKL_VIRTIO_NET_F_CSUM
+LKL_HIJACK_OFFLOAD=0x801 sh ${script_dir}/run_netperf.sh 192.168.13.1 1 0 TCP_STREAM
+# LKL_VIRTIO_NET_F_GUEST_TSO4 && LKL_VIRTIO_NET_F_GUEST_CSUM
+LKL_HIJACK_OFFLOAD=0x82 sh ${script_dir}/run_netperf.sh 192.168.13.1 1 0 TCP_MAERTS
+# LKL_VIRTIO_NET_F_MRG_RXBUF && LKL_VIRTIO_NET_F_GUEST_CSUM
+LKL_HIJACK_OFFLOAD=0x802 sh ${script_dir}/run_netperf.sh 192.168.13.1 1 0 TCP_MAERTS
 sh ${script_dir}/run_netperf.sh 192.168.13.1 1 0 TCP_RR
 
 echo "== VDE tests =="
