@@ -64,6 +64,8 @@ void lkl_cpu_wait_shutdown(void)
 	lkl_ops->sem_free(shutdown_sem);
 }
 
+static bool idle = false;
+
 void arch_cpu_idle(void)
 {
 	if (shutdown) {
@@ -87,11 +89,15 @@ void arch_cpu_idle(void)
 	if (need_resched())
 		return;
 
+	idle = true;
+
 	lkl_cpu_put();
 
 	lkl_ops->sem_down(idle_sem);
 
 	lkl_cpu_get();
+
+	idle = false;
 
 	/* since we've been waked up its highly likely we have pending irqs */
 	local_irq_disable();
@@ -101,4 +107,9 @@ void arch_cpu_idle(void)
 void lkl_cpu_wakeup(void)
 {
 	lkl_ops->sem_up(idle_sem);
+}
+
+bool lkl_cpu_preempted_idle(void)
+{
+	return idle;
 }

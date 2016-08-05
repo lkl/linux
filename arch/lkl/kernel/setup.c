@@ -12,7 +12,7 @@
 
 struct lkl_host_operations *lkl_ops;
 static char cmd_line[COMMAND_LINE_SIZE];
-static void *init_sem;
+static struct lkl_sem *init_sem;
 void (*pm_power_off)(void) = NULL;
 static unsigned long mem_size;
 

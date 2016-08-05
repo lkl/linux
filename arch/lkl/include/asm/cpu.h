@@ -9,5 +9,6 @@ void lkl_cpu_shutdown(void);
 bool lkl_cpu_is_shutdown(void);
 void lkl_cpu_wait_shutdown(void);
 void lkl_cpu_wakeup(void);
+bool lkl_cpu_preempted_idle(void);
 
 #endif /* _ASM_LKL_CPU_H */
