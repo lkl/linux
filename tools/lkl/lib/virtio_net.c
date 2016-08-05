@@ -207,7 +207,7 @@ int lkl_netdev_add(struct lkl_netdev *nd, struct lkl_netdev_args* args)
 	struct virtio_net_dev *dev;
 	int ret = -LKL_ENOMEM;
 
-	dev = lkl_host_ops.mem_alloc(sizeof(*dev));
+	dev = lkl_host_ops.mem_alloc(sizeof(struct virtio_net_dev));
 	if (!dev)
 		return -LKL_ENOMEM;
 
