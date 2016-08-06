@@ -47,9 +47,9 @@ static int linux_fdnet_net_tx(struct lkl_netdev *nd,
 
 	do {
 		ret = writev(nd_fdnet->fd, (struct iovec *)iov, cnt);
-	} while (ret == -1 && errno == EINTR);
+	} while (ret == -1 && (errno == EINTR || errno == EAGAIN));
 
-	if (ret < 0 && errno != EAGAIN)
+	if (ret < 0)
 		perror("write to Linux fd netdev fails");
 	return ret;
 }
