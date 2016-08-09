@@ -184,6 +184,36 @@ static void PinToFirstCpu(const cpu_set_t* cpus)
 	}
 }
 
+// Returns 0 on success.
+int wait_ipv6(const struct in6_addr *addr, unsigned int timeout_sec) {
+  struct sockaddr_in6 sock_addr;
+  int ret = -1;
+  int sockfd = lkl_sys_socket(LKL_AF_INET6, LKL_SOCK_STREAM, 0);
+  if (sockfd < 0) {
+	  return sockfd;
+  }
+  int ts = timeout_sec;
+
+  sock_addr.sin6_family = LKL_AF_INET6;
+  sock_addr.sin6_addr = *addr;
+  sock_addr.sin6_port = 0;
+  while (ts >= 0) {
+    ret = lkl_sys_bind(sockfd, (struct lkl_sockaddr*)&sock_addr, sizeof(sock_addr));
+    if (ret != 0 && ts >= 1) {
+      sleep(1);
+      ts--;
+      continue;
+    }
+    break;
+  }
+  lkl_sys_close(sockfd);
+  if (ret == 0)
+	  lkl_printf("LKL: IPV6 is ready.\n");
+  else
+	  fprintf(stderr, "Timeout waiting for ipv6 ready: %s\n", lkl_strerror(ret));
+  return ret;
+}
+
 int lkl_debug;
 
 void __attribute__((constructor(102)))
@@ -388,16 +418,18 @@ hijack_init(void)
 	}
 
 	if (nd_ifindex >= 0 && ipv6 && netmask6_len) {
-		char addr[16];
+		struct in6_addr addr;
 		unsigned int pflen = atoi(netmask6_len);
 
-		if (inet_pton(AF_INET6, ipv6, addr) != 1) {
+		if (inet_pton(AF_INET6, ipv6, &addr) != 1) {
 			fprintf(stderr, "Invalid ipv6 addr: %s\n", ipv6);
 		}  else {
-			ret = lkl_if_set_ipv6(nd_ifindex, addr, pflen);
+			ret = lkl_if_set_ipv6(nd_ifindex, &addr, pflen);
 			if (ret < 0)
 				fprintf(stderr, "failed to set IPv6address: %s\n",
 					lkl_strerror(ret));
+			else
+				wait_ipv6(&addr, 10);
 		}
 	}
 
