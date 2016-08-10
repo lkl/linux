@@ -33,6 +33,11 @@ static void sem_down(struct lkl_sem *sem)
 	WaitForSingleObject(sem->sem, INFINITE);
 }
 
+static int sem_try_down(struct lkl_sem *sem)
+{
+	return WaitForSingleObject(sem->sem, 0) == 0;
+}
+
 static void sem_free(struct lkl_sem *sem)
 {
 	CloseHandle(sem->sem);
@@ -216,6 +221,7 @@ struct lkl_host_operations lkl_host_ops = {
 	.sem_free = sem_free,
 	.sem_up = sem_up,
 	.sem_down = sem_down,
+	.sem_try_down = sem_try_down,
 	.mutex_alloc = mutex_alloc,
 	.mutex_free = mutex_free,
 	.mutex_lock = mutex_lock,

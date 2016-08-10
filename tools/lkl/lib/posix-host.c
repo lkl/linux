@@ -132,6 +132,25 @@ static void sem_down(struct lkl_sem *sem)
 #endif /* _POSIX_SEMAPHORES */
 }
 
+static int sem_try_down(struct lkl_sem *sem)
+{
+#ifdef _POSIX_SEMAPHORES
+	return sem_trywait(&sem->sem) == 0;
+#else
+	int ret;
+
+	WARN_PTHREAD(pthread_mutex_lock(&sem->lock));
+	if (sem->count <= 0) {
+		ret = 0;
+	} else {
+		ret = 1;
+		sem->count--;
+	}
+	WARN_PTHREAD(pthread_mutex_unlock(&sem->lock));
+	return ret;
+#endif /* _POSIX_SEMAPHORES */
+}
+
 static struct lkl_mutex *mutex_alloc(void)
 {
 	struct lkl_mutex *_mutex = malloc(sizeof(struct lkl_mutex));
@@ -289,6 +308,7 @@ struct lkl_host_operations lkl_host_ops = {
 	.sem_free = sem_free,
 	.sem_up = sem_up,
 	.sem_down = sem_down,
+	.sem_try_down = sem_try_down,
 	.mutex_alloc = mutex_alloc,
 	.mutex_free = mutex_free,
 	.mutex_lock = mutex_lock,

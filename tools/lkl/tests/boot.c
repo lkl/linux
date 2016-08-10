@@ -616,6 +616,24 @@ static int test_semaphore(char *str, int len)
 	lkl_host_ops.sem_up(sem);
 	lkl_host_ops.sem_free(sem);
 
+	sem = lkl_host_ops.sem_alloc(1);
+	if (!lkl_host_ops.sem_try_down(sem)) {
+		ret = TEST_FAILURE;
+		goto out;
+	}
+	if (lkl_host_ops.sem_try_down(sem)) {
+		ret = TEST_FAILURE;
+		goto out;
+	}
+
+	lkl_host_ops.sem_up(sem);
+	if (!lkl_host_ops.sem_try_down(sem)) {
+		ret = TEST_FAILURE;
+		goto out;
+	}
+	lkl_host_ops.sem_free(sem);
+
+out:
 	snprintf(str, len, "%ld", ret);
 
 	return ret;
