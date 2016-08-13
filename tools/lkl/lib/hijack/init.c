@@ -25,7 +25,6 @@
 #include <lkl_host.h>
 
 #include "xlate.h"
-#include "../virtio_net_linux_fdnet.h"
 
 #define __USE_GNU
 #include <dlfcn.h>
@@ -155,13 +154,6 @@ static void mount_cmds_exec(char *_cmds, int (*callback)(char*))
 	free(cmds);
 }
 
-void fixup_netdev_linux_fdnet_ops(void)
-{
-	/* It's okay if this is NULL, because then netdev close will
-	 * fall back onto an uncloseable implementation. */
-	lkl_netdev_linux_fdnet_ops.eventfd = dlsym(RTLD_NEXT, "eventfd");
-}
-
 static void PinToCpus(const cpu_set_t* cpus)
 {
 	if (sched_setaffinity(0, sizeof(cpu_set_t), cpus)) {
@@ -186,10 +178,12 @@ static void PinToFirstCpu(const cpu_set_t* cpus)
 
 int lkl_debug;
 
+static int nd_id = -1;
+
 void __attribute__((constructor(102)))
 hijack_init(void)
 {
-	int ret, i, dev_null, nd_id = -1, nd_ifindex = -1;
+	int ret, i, dev_null, nd_ifindex = -1;
 	/* OBSOLETE: should use IFTYPE and IFPARAMS */
 	char *tap = getenv("LKL_HIJACK_NET_TAP");
 	char *iftype = getenv("LKL_HIJACK_NET_IFTYPE");
@@ -260,9 +254,6 @@ hijack_init(void)
 	 */
 	if (single_cpu_mode == 2)
 		PinToFirstCpu(&ori_cpu);
-
-	/* Must be run before lkl_netdev_tap_create */
-	fixup_netdev_linux_fdnet_ops();
 
 	if (tap) {
 		fprintf(stderr,
@@ -440,6 +431,8 @@ hijack_fini(void)
 	for (i = 0; i < LKL_FD_OFFSET; i++)
 		lkl_sys_close(i);
 
+	if (nd_id >= 0)
+		lkl_netdev_remove(nd_id);
 
 	lkl_sys_halt();
 }

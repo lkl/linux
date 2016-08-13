@@ -19,15 +19,14 @@
 #include <sys/ioctl.h>
 
 #include "virtio.h"
-#include "virtio_net_linux_fdnet.h"
+#include "virtio_net_fd.h"
 
 #define BIT(x) (1ULL << x)
 
-struct lkl_netdev_linux_fdnet *lkl_netdev_tap_init(const char *path,
-						   int offload,
-						   struct ifreq *ifr)
+struct lkl_netdev_fd *lkl_netdev_tap_init(const char *path, int offload,
+					  struct ifreq *ifr)
 {
-	struct lkl_netdev_linux_fdnet *nd;
+	struct lkl_netdev_fd *nd;
 	int fd, ret, tap_arg = 0, vnet_hdr_sz = 0;
 
 	if (offload & BIT(LKL_VIRTIO_NET_F_GUEST_CSUM))
@@ -68,7 +67,8 @@ struct lkl_netdev_linux_fdnet *lkl_netdev_tap_init(const char *path,
 		close(fd);
 		return NULL;
 	}
-	nd = lkl_register_netdev_linux_fdnet(fd);
+
+	nd = lkl_register_netdev_fd(fd);
 	if (!nd) {
 		perror("failed to register to.");
 		close(fd);
@@ -81,6 +81,7 @@ struct lkl_netdev_linux_fdnet *lkl_netdev_tap_init(const char *path,
 
 struct lkl_netdev *lkl_netdev_tap_create(const char *ifname, int offload)
 {
+	struct lkl_netdev_fd *nd;
 	char *path = "/dev/net/tun";
 	struct ifreq ifr = {
 		.ifr_flags = IFF_TAP | IFF_NO_PI,
@@ -88,5 +89,9 @@ struct lkl_netdev *lkl_netdev_tap_create(const char *ifname, int offload)
 
 	strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
 
-	return (struct lkl_netdev *)lkl_netdev_tap_init(path, offload, &ifr);
+	nd = lkl_netdev_tap_init(path, offload, &ifr);
+	if (!nd)
+		return NULL;
+
+	return &nd->dev;
 }
