@@ -19,13 +19,18 @@
 #include <linux/if_tun.h>
 
 #include "virtio.h"
-#include "virtio_net_linux_fdnet.h"
+#include "virtio_net_fd.h"
 
 struct lkl_netdev *lkl_netdev_macvtap_create(const char *path, int offload)
 {
+	struct lkl_netdev_fd *nd;
 	struct ifreq ifr = {
 		.ifr_flags = IFF_TAP | IFF_NO_PI,
 	};
 
-	return (struct lkl_netdev *)lkl_netdev_tap_init(path, offload, &ifr);
+	nd = lkl_netdev_tap_init(path, offload, &ifr);
+	if (!nd)
+		return NULL;
+
+	return &nd->dev;
 }
