@@ -23,14 +23,9 @@
 
 struct lkl_netdev *lkl_netdev_macvtap_create(const char *path, int offload)
 {
-	struct lkl_netdev_fd *nd;
 	struct ifreq ifr = {
 		.ifr_flags = IFF_TAP | IFF_NO_PI,
 	};
 
-	nd = lkl_netdev_tap_init(path, offload, &ifr);
-	if (!nd)
-		return NULL;
-
-	return &nd->dev;
+	return lkl_netdev_tap_init(path, offload, &ifr);
 }
