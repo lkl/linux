@@ -4,11 +4,13 @@
 #undef s_addr
 #include <lkl_host.h>
 #include "iomem.h"
+#include "jmp_buf.h"
 
 #define DIFF_1601_TO_1970_IN_100NS (11644473600L * 10000000L)
 
 struct lkl_mutex {
-	HANDLE mutex;
+	int recursive;
+	HANDLE handle;
 };
 
 struct lkl_sem {
@@ -33,35 +35,47 @@ static void sem_down(struct lkl_sem *sem)
 	WaitForSingleObject(sem->sem, INFINITE);
 }
 
+static int sem_try_down(struct lkl_sem *sem)
+{
+	return WaitForSingleObject(sem->sem, 0) == 0;
+}
+
 static void sem_free(struct lkl_sem *sem)
 {
 	CloseHandle(sem->sem);
 	free(sem);
 }
 
-static struct lkl_mutex *mutex_alloc(void)
+static struct lkl_mutex *mutex_alloc(int recursive)
 {
 	struct lkl_mutex *_mutex = malloc(sizeof(struct lkl_mutex));
 	if (!_mutex)
 		return NULL;
 
-	_mutex->mutex = CreateMutex(0, FALSE, 0);
+	if (recursive)
+		_mutex->handle = CreateMutex(0, FALSE, 0);
+	else
+		_mutex->handle = CreateSemaphore(NULL, 1, 100, NULL);
+	_mutex->recursive = recursive;
 	return _mutex;
 }
 
 static void mutex_lock(struct lkl_mutex *mutex)
 {
-	WaitForSingleObject(mutex->mutex, INFINITE);
+	WaitForSingleObject(mutex->handle, INFINITE);
 }
 
 static void mutex_unlock(struct lkl_mutex *_mutex)
 {
-	ReleaseMutex(_mutex->mutex);
+	if (_mutex->recursive)
+		ReleaseMutex(_mutex->handle);
+	else
+		ReleaseSemaphore(_mutex->handle, 1, NULL);
 }
 
 static void mutex_free(struct lkl_mutex *_mutex)
 {
-	CloseHandle(_mutex->mutex);
+	CloseHandle(_mutex->handle);
 	free(_mutex);
 }
 
@@ -84,7 +98,7 @@ static void thread_exit(void)
 static int thread_join(lkl_thread_t tid)
 {
 	/* TODO: error handling */
-	WaitForSingleObject(tid, INFINITE);
+	WaitForSingleObject((void*)tid, INFINITE);
 	return 0;
 }
 
@@ -216,6 +230,7 @@ struct lkl_host_operations lkl_host_ops = {
 	.sem_free = sem_free,
 	.sem_up = sem_up,
 	.sem_down = sem_down,
+	.sem_try_down = sem_try_down,
 	.mutex_alloc = mutex_alloc,
 	.mutex_free = mutex_free,
 	.mutex_lock = mutex_lock,
@@ -235,6 +250,8 @@ struct lkl_host_operations lkl_host_ops = {
 	.iomem_access = lkl_iomem_access,
 	.virtio_devices = lkl_virtio_devs,
 	.gettid = gettid,
+	.jmp_buf_set = jmp_buf_set,
+	.jmp_buf_longjmp = jmp_buf_longjmp,
 };
 
 int handle_get_capacity(struct lkl_disk disk, unsigned long long *res)

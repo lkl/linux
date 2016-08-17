@@ -11,19 +11,14 @@ typedef struct {
 	unsigned long seg;
 } mm_segment_t;
 
-struct thread_exit_info {
-	bool dead;
-	void *sched_sem;
-};
-
 struct thread_info {
 	struct task_struct *task;
 	unsigned long flags;
 	int preempt_count;
 	mm_segment_t addr_limit;
-	void *sched_sem;
-	struct thread_exit_info *exit_info;
-	struct task_struct *prev_sched;
+	struct lkl_sem *sched_sem;
+	bool *dead;
+	struct lkl_jmp_buf *exit_jmpb;
 	unsigned long stackend;
 };
 
@@ -51,6 +46,11 @@ void free_thread_info(struct thread_info *);
 
 int threads_init(void);
 void threads_cleanup(void);
+
+void lkl_host_thread_enter(struct task_struct *task);
+struct lkl_jmp_buf;
+void lkl_host_thread_leave(struct lkl_jmp_buf *jmpb);
+void lkl_host_thread_exit(void);
 
 #define TIF_SYSCALL_TRACE		0
 #define TIF_NOTIFY_RESUME		1

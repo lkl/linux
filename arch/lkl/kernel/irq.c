@@ -8,6 +8,7 @@
 #include <linux/tick.h>
 #include <asm/irqflags.h>
 #include <asm/host_ops.h>
+#include <asm/cpu.h>
 
 static unsigned long irq_status;
 static bool irqs_enabled;
@@ -21,17 +22,48 @@ static struct irq_info {
 } irqs[NR_IRQS];
 
 /**
- * DO NOT run any linux calls (e.g. printk) here as they may race with the
- * existing linux threads.
+ * This function can be called from arbitrary host threads, so do not
+ * issue any Linux calls (e.g. prink) if lkl_cpu_get() was not issued
+ * before.
  */
 int lkl_trigger_irq(int irq)
 {
-	if (!irq || irq > NR_IRQS)
+	if (!irq || irq > NR_IRQS || lkl_cpu_is_shutdown())
 		return -EINVAL;
 
-	SET_IRQ_STATUS(irq);
+	if (lkl_cpu_try_get()) {
+		bool resched;
+		unsigned long flags;
 
-	wakeup_cpu();
+		/* since this can be called from Linux context
+		 * (e.g. lkl_trigger_irq -> IRQ -> softirq ->
+		 * lkl_trigger_irq) make sure we are actually allowed
+		 * to run irqs at this point */
+		if (!irqs_enabled) {
+			lkl_cpu_put();
+			goto delayed_irq;
+		}
+
+		/* interrupts handlers need to run with interrupts disabled */
+		local_irq_save(flags);
+		irq_enter();
+		generic_handle_irq(irq);
+		irq_exit();
+		local_irq_restore(flags);
+
+		resched = need_resched();
+
+		lkl_cpu_put();
+
+		if (resched)
+			lkl_cpu_wakeup();
+
+		return 0;
+	}
+
+delayed_irq:
+	SET_IRQ_STATUS(irq);
+	lkl_cpu_wakeup();
 
 	return 0;
 }

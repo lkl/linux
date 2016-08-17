@@ -13,8 +13,7 @@
 #include <asm/syscalls.h>
 #include <asm/syscalls_32.h>
 
-struct syscall_thread_data;
-static asmlinkage long sys_create_syscall_thread(struct syscall_thread_data *);
+static asmlinkage long sys_create_syscall_thread(struct task_struct **task);
 
 typedef long (*syscall_handler_t)(long arg1, ...);
 
@@ -30,264 +29,103 @@ syscall_handler_t syscall_table[__NR_syscalls] = {
 #endif
 };
 
-struct syscall {
-	long no, *params, ret;
-};
-
-static struct syscall_thread_data {
-	struct syscall *s;
-	void *mutex, *completion;
-	int irq;
-	/* to be accessed from Linux context only */
-	wait_queue_head_t wqh;
-	struct list_head list;
-	bool stop;
-	struct completion stopped;
-} default_syscall_thread_data;
-
 static LIST_HEAD(syscall_threads);
+static struct task_struct *default_syscall_thread;
 
-static struct syscall *dequeue_syscall(struct syscall_thread_data *data)
+int syscall_thread(void *arg)
 {
+	static int count;
 
-	return (struct syscall *)__sync_fetch_and_and((long *)&data->s, 0);
+	snprintf(current->comm, sizeof(current->comm), "ksyscalld%d", count++);
+	pr_info("lkl: syscall thread %s initialized\n", current->comm);
+	lkl_host_thread_exit();
+	return 0;
 }
 
-static long run_syscall(struct syscall *s)
+static unsigned int syscall_thread_key;
+
+static long __lkl_syscall(struct task_struct *task, long no, long *params)
 {
-	int ret;
+	long ret;
+	struct lkl_jmp_buf jmpb;
 
-	if (s->no < 0 || s->no >= __NR_syscalls)
-		ret = -ENOSYS;
-	else {
-		ret = syscall_table[s->no](s->params[0], s->params[1],
-					   s->params[2], s->params[3],
-					   s->params[4], s->params[5]);
-	}
-	s->ret = ret;
+	if (no < 0 || no >= __NR_syscalls)
+		return -ENOSYS;
 
+	lkl_host_thread_enter(task);
+	ret = syscall_table[no](params[0], params[1], params[2], params[3],
+				params[4], params[5]);
 	task_work_run();
+	lkl_ops->jmp_buf_set(&jmpb, lkl_host_thread_leave);
 
 	return ret;
 }
 
-static irqreturn_t syscall_irq_handler(int irq, void *dev_id)
+static void lkl_task_exit(struct lkl_jmp_buf *jmpb)
 {
-	struct syscall_thread_data *data = (struct syscall_thread_data *)dev_id;
+	struct task_struct *task = jmpb->arg;
 
-	wake_up(&data->wqh);
-
-	return IRQ_HANDLED;
+	lkl_host_thread_enter(task);
+	pr_info("lkl: stopping syscall thread %s\n", current->comm);
+	task_thread_info(task)->exit_jmpb = jmpb;
+	do_exit(0);
 }
 
-static int __lkl_stop_syscall_thread(struct syscall_thread_data *data,
-				     bool host);
-int syscall_thread(void *_data)
+static void __lkl_stop_syscall_thread(struct task_struct *task)
 {
-	struct syscall_thread_data *data;
-	struct syscall *s;
-	int ret;
-	static int count;
+	struct lkl_jmp_buf jmpb = {
+		.arg = task
+	};
 
-	data = (struct syscall_thread_data *)_data;
-	init_waitqueue_head(&data->wqh);
-	list_add(&data->list, &syscall_threads);
-	init_completion(&data->stopped);
-
-	snprintf(current->comm, sizeof(current->comm), "ksyscalld%d", count++);
-
-	data->irq = lkl_get_free_irq("syscall");
-	if (data->irq < 0) {
-		pr_err("lkl: %s: failed to allocate irq: %d\n", __func__,
-		       data->irq);
-		return data->irq;
-	}
-
-	ret = request_irq(data->irq, syscall_irq_handler, 0, current->comm,
-			  data);
-	if (ret) {
-		pr_err("lkl: %s: failed to request irq %d: %d\n", __func__,
-		       data->irq, ret);
-		lkl_put_irq(data->irq, "syscall");
-		data->irq = -1;
-		return ret;
-	}
-
-	pr_info("lkl: syscall thread %s initialized (irq%d)\n", current->comm,
-		data->irq);
-
-	/* system call thread is ready */
-	lkl_ops->sem_up(data->completion);
-
-	while (1) {
-		wait_event(data->wqh,
-			   (s = dequeue_syscall(data)) != NULL || data->stop);
-
-		if (data->stop || s->no == __NR_reboot)
-			break;
-
-		run_syscall(s);
-
-		lkl_ops->sem_up(data->completion);
-	}
-
-	if (data == &default_syscall_thread_data) {
-		struct syscall_thread_data *i = NULL, *aux;
-
-		list_for_each_entry_safe(i, aux, &syscall_threads, list) {
-			if (i == &default_syscall_thread_data)
-				continue;
-			__lkl_stop_syscall_thread(i, false);
-		}
-	}
-
-	pr_info("lkl: exiting syscall thread %s\n", current->comm);
-
-	list_del(&data->list);
-
-	free_irq(data->irq, data);
-	lkl_put_irq(data->irq, "syscall");
-
-	if (data->stop) {
-		complete(&data->stopped);
-	} else {
-		s->ret = 0;
-		lkl_ops->sem_up(data->completion);
-	}
-
-	return 0;
+	lkl_ops->jmp_buf_set(&jmpb, lkl_task_exit);
 }
 
-static unsigned int syscall_thread_data_key;
-
-static int syscall_thread_data_init(struct syscall_thread_data *data,
-				    void *completion)
+static struct task_struct *__lkl_create_syscall_thread(void)
 {
-	data->mutex = lkl_ops->sem_alloc(1);
-	if (!data->mutex)
-		return -ENOMEM;
-
-	if (!completion)
-		data->completion = lkl_ops->sem_alloc(0);
-	else
-		data->completion = completion;
-	if (!data->completion) {
-		lkl_ops->sem_free(data->mutex);
-		data->mutex = NULL;
-		return -ENOMEM;
-	}
-
-	return 0;
-}
-
-static long __lkl_syscall(struct syscall_thread_data *data, long no,
-			  long *params)
-{
-	struct syscall s;
-
-	s.no = no;
-	s.params = params;
-
-	lkl_ops->sem_down(data->mutex);
-	data->s = &s;
-	lkl_trigger_irq(data->irq);
-	lkl_ops->sem_down(data->completion);
-	lkl_ops->sem_up(data->mutex);
-
-	return s.ret;
-}
-
-static struct syscall_thread_data *__lkl_create_syscall_thread(void)
-{
-	struct syscall_thread_data *data;
-	long params[6], ret;
+	struct task_struct *task = NULL;
+	long params[6] = { (long)&task, };
+	long ret;
 
 	if (!lkl_ops->tls_set)
 		return ERR_PTR(-ENOTSUPP);
 
-	data = lkl_ops->mem_alloc(sizeof(*data));
-	if (!data)
-		return ERR_PTR(-ENOMEM);
-
-	memset(data, 0, sizeof(*data));
-
-	ret = syscall_thread_data_init(data, NULL);
-	if (ret < 0)
-		goto out_free;
-
-	ret = lkl_ops->tls_set(syscall_thread_data_key, data);
-	if (ret < 0)
-		goto out_free;
-
-	params[0] = (long)data;
-	ret = __lkl_syscall(&default_syscall_thread_data,
+	ret = __lkl_syscall(default_syscall_thread,
 			    __NR_create_syscall_thread, params);
 	if (ret < 0)
-		goto out_free;
+		return ERR_PTR(ret);
 
-	lkl_ops->sem_down(data->completion);
+	ret = lkl_ops->tls_set(syscall_thread_key, task);
+	if (ret < 0) {
+		__lkl_stop_syscall_thread(task);
+		return ERR_PTR(-ENOTSUPP);
+	}
 
-	return data;
-
-out_free:
-	lkl_ops->sem_free(data->completion);
-	lkl_ops->sem_free(data->mutex);
-	lkl_ops->mem_free(data);
-
-	return ERR_PTR(ret);
+	return task;
 }
 
 int lkl_create_syscall_thread(void)
 {
-	struct syscall_thread_data *data = __lkl_create_syscall_thread();
+	struct task_struct *task = __lkl_create_syscall_thread();
 
-	if (IS_ERR(data))
-		return PTR_ERR(data);
+	if (IS_ERR(task))
+		return PTR_ERR(task);
 	return 0;
 }
 
-static int kernel_stop_syscall_thread(struct syscall_thread_data *data)
-{
-	data->stop = true;
-	wake_up(&data->wqh);
-	wait_for_completion(&data->stopped);
-
-	return 0;
-}
-
-static int __lkl_stop_syscall_thread(struct syscall_thread_data *data,
-				     bool host)
-{
-	long ret, params[6];
-
-	if (host)
-		ret = __lkl_syscall(data, __NR_reboot, params);
-	else
-		ret = kernel_stop_syscall_thread(data);
-	if (ret)
-		return ret;
-
-	lkl_ops->sem_free(data->completion);
-	lkl_ops->sem_free(data->mutex);
-	lkl_ops->mem_free(data);
-
-	return 0;
-}
 
 int lkl_stop_syscall_thread(void)
 {
-	struct syscall_thread_data *data = NULL;
-	int ret;
+	struct task_struct *task = NULL;
 
 	if (lkl_ops->tls_get)
-		data = lkl_ops->tls_get(syscall_thread_data_key);
-	if (!data)
+		task = lkl_ops->tls_get(syscall_thread_key);
+	if (!task)
 		return -EINVAL;
+	if (lkl_ops->tls_get)
+		lkl_ops->tls_set(syscall_thread_key, NULL);
 
-	ret = __lkl_stop_syscall_thread(data, true);
-	if (!ret && lkl_ops->tls_set)
-		lkl_ops->tls_set(syscall_thread_data_key, NULL);
-	return ret;
+	__lkl_stop_syscall_thread(task);
+	return 0;
 }
 
 static int auto_syscall_threads = true;
@@ -299,66 +137,69 @@ static int __init setup_auto_syscall_threads(char *str)
 }
 __setup("lkl_auto_syscall_threads=", setup_auto_syscall_threads);
 
-
 long lkl_syscall(long no, long *params)
 {
-	struct syscall_thread_data *data = NULL;
+	struct task_struct *task = NULL;
 
 	if (auto_syscall_threads && lkl_ops->tls_get) {
-		data = lkl_ops->tls_get(syscall_thread_data_key);
-		if (!data) {
-			data = __lkl_create_syscall_thread();
-			if (!data)
+		task = lkl_ops->tls_get(syscall_thread_key);
+		if (!task) {
+			task = __lkl_create_syscall_thread();
+			if (IS_ERR(task)) {
+				task = NULL;
 				lkl_puts("failed to create syscall thread\n");
+			}
 		}
 	}
-	if (!data || no == __NR_reboot)
-		data = &default_syscall_thread_data;
+	if (!task || no == __NR_reboot)
+		task = default_syscall_thread;
 
-	return __lkl_syscall(data, no, params);
+	return __lkl_syscall(task, no, params);
 }
 
 static asmlinkage long
-sys_create_syscall_thread(struct syscall_thread_data *data)
+sys_create_syscall_thread(struct task_struct **task)
 {
 	pid_t pid;
 
-	pid = kernel_thread(syscall_thread, data, CLONE_VM | CLONE_FS |
-			CLONE_FILES | CLONE_THREAD | CLONE_SIGHAND | SIGCHLD);
+	pid = kernel_thread(syscall_thread, NULL, CLONE_VM | CLONE_FS |
+			    CLONE_FILES | CLONE_THREAD | CLONE_SIGHAND |
+			    SIGCHLD);
 	if (pid < 0)
 		return pid;
+
+	rcu_read_lock();
+	*task = find_task_by_pid_ns(pid, &init_pid_ns);
+	rcu_read_unlock();
 
 	return 0;
 }
 
-int initial_syscall_thread(void *sem)
+int initial_syscall_thread(struct lkl_sem *sem)
 {
 	int ret = 0;
 
-	if (lkl_ops->tls_alloc)
-		ret = lkl_ops->tls_alloc(&syscall_thread_data_key);
+	default_syscall_thread = current;
+
+	if (lkl_ops->tls_alloc) {
+		ret = lkl_ops->tls_alloc(&syscall_thread_key);
+		if (!ret)
+			ret = lkl_ops->tls_set(syscall_thread_key, current);
+	}
 	if (ret)
 		return ret;
 
 	init_pid_ns.child_reaper = 0;
 
-	ret = syscall_thread_data_init(&default_syscall_thread_data, sem);
-	if (ret)
-		goto out;
+	lkl_ops->sem_up(sem);
 
-	ret = syscall_thread(&default_syscall_thread_data);
-
-out:
-	if (lkl_ops->tls_free)
-		lkl_ops->tls_free(syscall_thread_data_key);
-
+	syscall_thread(NULL);
 
 	return ret;
 }
 
 void free_initial_syscall_thread(void)
 {
-	/* NB: .completion is freed in lkl_sys_halt, because it is
-	 * allocated in the LKL init routine. */
-	lkl_ops->sem_free(default_syscall_thread_data.mutex);
+	if (lkl_ops->tls_free)
+		lkl_ops->tls_free(syscall_thread_key);
 }

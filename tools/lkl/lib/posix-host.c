@@ -16,6 +16,7 @@
 #include <poll.h>
 #include <lkl_host.h>
 #include "iomem.h"
+#include "jmp_buf.h"
 
 /* Let's see if the host has semaphore.h */
 #include <unistd.h>
@@ -132,7 +133,27 @@ static void sem_down(struct lkl_sem *sem)
 #endif /* _POSIX_SEMAPHORES */
 }
 
-static struct lkl_mutex *mutex_alloc(void)
+
+static int sem_try_down(struct lkl_sem *sem)
+{
+#ifdef _POSIX_SEMAPHORES
+	return sem_trywait(&sem->sem) == 0;
+#else
+	int ret;
+
+	WARN_PTHREAD(pthread_mutex_lock(&sem->lock));
+	if (sem->count <= 0) {
+		ret = 0;
+	} else {
+		ret = 1;
+		sem->count--;
+	}
+	WARN_PTHREAD(pthread_mutex_unlock(&sem->lock));
+	return ret;
+#endif /* _POSIX_SEMAPHORES */
+}
+
+static struct lkl_mutex *mutex_alloc(int recursive)
 {
 	struct lkl_mutex *_mutex = malloc(sizeof(struct lkl_mutex));
 	pthread_mutex_t *mutex = NULL;
@@ -148,8 +169,12 @@ static struct lkl_mutex *mutex_alloc(void)
 	 * but has some overhead, so we provide an option to turn it
 	 * off. */
 #ifdef DEBUG
-	WARN_PTHREAD(pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK));
+	if (!recursive)
+		WARN_PTHREAD(pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK));
 #endif /* DEBUG */
+
+	if (recursive)
+		WARN_PTHREAD(pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE));
 
 	WARN_PTHREAD(pthread_mutex_init(mutex, &attr));
 
@@ -293,6 +318,7 @@ struct lkl_host_operations lkl_host_ops = {
 	.sem_free = sem_free,
 	.sem_up = sem_up,
 	.sem_down = sem_down,
+	.sem_try_down = sem_try_down,
 	.mutex_alloc = mutex_alloc,
 	.mutex_free = mutex_free,
 	.mutex_lock = mutex_lock,
@@ -312,6 +338,8 @@ struct lkl_host_operations lkl_host_ops = {
 	.iomem_access = lkl_iomem_access,
 	.virtio_devices = lkl_virtio_devs,
 	.gettid = _gettid,
+	.jmp_buf_set = jmp_buf_set,
+	.jmp_buf_longjmp = jmp_buf_longjmp,
 };
 
 static int fd_get_capacity(struct lkl_disk disk, unsigned long long *res)

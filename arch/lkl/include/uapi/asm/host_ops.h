@@ -5,6 +5,10 @@
 struct lkl_mutex;
 struct lkl_sem;
 typedef unsigned long lkl_thread_t;
+struct lkl_jmp_buf {
+	void *arg;
+	unsigned long buf[32];
+};
 
 /**
  * lkl_host_operations - host operations used by the Linux kernel
@@ -24,8 +28,10 @@ typedef unsigned long lkl_thread_t;
  * @sem_free - free a host semaphore
  * @sem_up - perform an up operation on the semaphore
  * @sem_down - perform a down operation on the semaphore
+ * @sem_try_down - try to perform a down operation; returns non-zero if succesul
  *
- * @mutex_alloc - allocate and initialize a host mutex
+ * @mutex_alloc - allocate and initialize a host mutex; the recursive parameter
+ * determines if the mutex is recursive or not
  * @mutex_free - free a host mutex
  * @mutex_lock - acquire the mutex
  * @mutex_unlock - release the mutex
@@ -74,8 +80,9 @@ struct lkl_host_operations {
 	void (*sem_free)(struct lkl_sem *sem);
 	void (*sem_up)(struct lkl_sem *sem);
 	void (*sem_down)(struct lkl_sem *sem);
+	int (*sem_try_down)(struct lkl_sem *sem);
 
-	struct lkl_mutex *(*mutex_alloc)(void);
+	struct lkl_mutex *(*mutex_alloc)(int recursive);
 	void (*mutex_free)(struct lkl_mutex *mutex);
 	void (*mutex_lock)(struct lkl_mutex *mutex);
 	void (*mutex_unlock)(struct lkl_mutex *mutex);
@@ -104,6 +111,10 @@ struct lkl_host_operations {
 			    int write);
 
 	long (*gettid)(void);
+
+	void (*jmp_buf_set)(struct lkl_jmp_buf *jmpb,
+			    void (*f)(struct lkl_jmp_buf *jmpb));
+	void (*jmp_buf_longjmp)(struct lkl_jmp_buf *jmpb);
 };
 
 /**

@@ -17,5 +17,6 @@ static int do_test(char *name, int (*fn)(char *, int))
 	result = fn(str, sizeof(str));
 	printf("%-20s %s [%s]\n", name,
 		result == TEST_SUCCESS ? "passed" : "failed", str);
+	fflush(stdout);
 	return result;
 }
