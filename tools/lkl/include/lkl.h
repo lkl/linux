@@ -111,7 +111,7 @@ int lkl_disk_add(struct lkl_disk *disk);
  *
  * @disk - the host disk handle
  */
-void lkl_disk_remove(struct lkl_disk disk);
+int lkl_disk_remove(struct lkl_disk disk);
 
 /**
  * lkl_mount_dev - mount a disk
