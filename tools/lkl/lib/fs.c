@@ -276,6 +276,30 @@ struct lkl_dir *lkl_opendir(const char *path, int *err)
 	return dir;
 }
 
+struct lkl_dir *lkl_fdopendir(int fd, int *err)
+{
+	struct lkl_dir *dir = lkl_host_ops.mem_alloc(sizeof(struct lkl_dir));
+
+	if (!dir) {
+		*err = -LKL_ENOMEM;
+		return NULL;
+	}
+
+	dir->fd = fd;
+
+	dir->len = 0;
+	dir->pos = NULL;
+
+	return dir;
+}
+
+void lkl_rewinddir(struct lkl_dir *dir)
+{
+	lseek(dir->fd, 0, SEEK_SET);
+	dir->len = 0;
+	dir->pos = NULL;
+}
+
 int lkl_closedir(struct lkl_dir *dir)
 {
 	int ret;
