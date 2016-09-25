@@ -81,6 +81,15 @@ static void __cpu_try_get_unlock(void)
 	__sync_fetch_and_sub(&cpu.shutdown_gate, 1);
 }
 
+void lkl_cpu_change_owner(lkl_thread_t owner)
+{
+	lkl_ops->mutex_lock(cpu.lock);
+	if (cpu.count > 1)
+		lkl_bug("bad count while changing owner\n");
+	cpu.owner = owner;
+	lkl_ops->mutex_unlock(cpu.lock);
+}
+
 int lkl_cpu_get(void)
 {
 	int ret;
