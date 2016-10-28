@@ -16,6 +16,7 @@
 
 struct syscall_thread_data;
 static asmlinkage long sys_create_syscall_thread(struct syscall_thread_data *);
+void do_signal(struct pt_regs *regs);
 static asmlinkage long sys_virtio_mmio_device_add(long base, long size,
 						  unsigned int irq);
 
@@ -70,6 +71,7 @@ static long run_syscall(struct syscall *s)
 	s->ret = ret;
 
 	task_work_run();
+	do_signal(NULL);
 
 	return ret;
 }
