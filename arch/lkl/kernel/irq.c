@@ -142,12 +142,49 @@ void arch_local_irq_restore(unsigned long flags)
 	irqs_enabled = flags;
 }
 
+static int lkl_irq_request_resource(struct irq_data *data)
+{
+	if (!lkl_ops->irq_request)
+		return 0;
+
+	return lkl_ops->irq_request(data);
+}
+
+static void lkl_irq_release_resource(struct irq_data *data)
+{
+	if (!lkl_ops->irq_release)
+		return;
+
+	return lkl_ops->irq_release(data);
+}
+
+static void noop(struct irq_data *data) { }
+static unsigned int noop_ret(struct irq_data *data)
+{
+	return 0;
+}
+
+struct irq_chip dummy_lkl_irq_chip = {
+	.name		= "lkl_dummy",
+	.irq_startup	= noop_ret,
+	.irq_shutdown	= noop,
+	.irq_enable	= noop,
+	.irq_disable	= noop,
+	.irq_ack	= noop,
+	.irq_mask	= noop,
+	.irq_unmask	= noop,
+	.irq_request_resources = lkl_irq_request_resource,
+	.irq_release_resources = lkl_irq_release_resource,
+	.flags		= IRQCHIP_SKIP_SET_WAKE,
+};
+
 void init_IRQ(void)
 {
 	int i;
 
 	for (i = 0; i < NR_IRQS; i++)
-		irq_set_chip_and_handler(i, &dummy_irq_chip, handle_simple_irq);
+		irq_set_chip_and_handler(i, &dummy_lkl_irq_chip,
+					 handle_simple_irq);
 
 	pr_info("lkl: irqs initialized\n");
 }
