@@ -22,6 +22,7 @@ struct thread_info {
 	lkl_thread_t tid;
 	struct task_struct *prev_sched;
 	unsigned long stackend;
+	void *rump_client;	/* for syscall proxy */
 };
 
 #define INIT_THREAD_INFO(tsk)				\
