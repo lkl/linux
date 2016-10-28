@@ -85,7 +85,7 @@ int lkl_get_virtio_blkdev(int disk_id, uint32_t *pdevid)
 	int opendir_ret;
 	char *virtio_name = NULL;
 	char *disk_name = NULL;
-	uint32_t device_id;
+	uint32_t device_id = 0xFFFFFFFF;
 
 	if (disk_id < 0)
 		return -LKL_EINVAL;
