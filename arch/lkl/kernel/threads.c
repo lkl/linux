@@ -95,7 +95,7 @@ struct task_struct *__switch_to(struct task_struct *prev,
 	lkl_ops->sem_down(_prev->sched_sem);
 
 	if (_prev->dead) {
-		__sync_fetch_and_sub(&threads_counter, 1);
+		lkl__sync_fetch_and_sub((int *)&threads_counter, 1);
 		lkl_ops->thread_exit();
 	}
 
@@ -144,7 +144,7 @@ int copy_thread(unsigned long clone_flags, unsigned long esp,
 		return -ENOMEM;
 	}
 
-	__sync_fetch_and_add(&threads_counter, 1);
+	lkl__sync_fetch_and_add((int *)&threads_counter, 1);
 
 	return 0;
 }

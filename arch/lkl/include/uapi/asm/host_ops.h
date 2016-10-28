@@ -127,4 +127,11 @@ int lkl_start_kernel(struct lkl_host_operations *lkl_ops,
  */
 int lkl_is_running(void);
 
+/* atomic ops */
+int lkl__sync_fetch_and_sub(int *ptr, int value);
+int lkl__sync_fetch_and_add(int *ptr, int value);
+long lkl__sync_fetch_and_or(long *ptr, long value);
+long lkl__sync_fetch_and_and(long *ptr, long value);
+void lkl__sync_synchronize(void);
+
 #endif
