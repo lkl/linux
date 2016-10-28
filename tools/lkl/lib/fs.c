@@ -69,6 +69,12 @@ static char *get_node_with_prefix(const char *path, const char *prefix,
 	return result;
 }
 
+/* rumprun doesn't build virtio.o (of lkl) so stub it */
+uint32_t __attribute__((weak)) virtio_get_num_bootdevs(void)
+{
+	return 0;
+}
+
 int lkl_get_virtio_blkdev(int disk_id, uint32_t *pdevid)
 {
 	char sysfs_path[LKL_PATH_MAX];

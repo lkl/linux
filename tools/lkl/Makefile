@@ -134,6 +134,12 @@ else
   CFLAGS += -I$(RUMP_INCLUDE) -DRUMPUSER -DLIBRUMPUSER -D_KERNEL
   CFLAGS += -UCONFIG_AUTO_LKL_POSIX_HOST
 
+# if rumprun=yes, then skip virtio-host build
+ifeq ($(rumprun),yes)
+  CFLAGS += -DRUMPRUN
+  export CONFIG_AUTO_LKL_VIRTIO=n
+  export CONFIG_AUTO_LKL_VIRTIO_NET=n
+endif
 endif
 
 TEST_TARGETS        := test valgrind gdb
