@@ -39,6 +39,9 @@ config 64BIT
 config BIG_ENDIAN
        def_bool n
 
+config KALLSYMS_BASE_RELATIVE
+       def_bool n
+
 config TTY
        def_bool n
 
