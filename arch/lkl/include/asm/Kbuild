@@ -73,5 +73,7 @@ generic-y += topology.h
 generic-y += trace_clock.h
 generic-y += uaccess.h
 generic-y += unaligned.h
+generic-y += vga.h
 generic-y += word-at-a-time.h
 generic-y += xor.h
+header-y += syscalls.h

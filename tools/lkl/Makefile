@@ -10,6 +10,10 @@ else
   Q = @
 endif
 
+OUTPUT_FORMAT=$(shell $(LD) -r -print-output-format)
+RUMP_PREFIX?=$(abspath ../../../rumpobj/)
+RUMP_LIB=$(RUMP_PREFIX)/rump/lib
+RUMP_INCLUDE?=$(RUMP_PREFIX)/
 # default target
 all:
 
@@ -37,8 +41,8 @@ export srctree
 # Target build configuration
 
 export CFLAGS += -I$(OUTPUT)/include -Iinclude -Wall -g -O2 -Wextra \
-	 -Wno-unused-parameter \
-	 -Wno-missing-field-initializers -fno-strict-aliasing
+	 -Wno-missing-field-initializers -fno-strict-aliasing \
+	 -Wno-unused-parameter -U_FORTIFY_SOURCE -fno-stack-protector
 
 OUTPUT_FORMAT = $(shell $(LD) -r -print-output-format)
 
@@ -49,6 +53,8 @@ ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64 elf32-i386 elf64-x86-64-freebsd e
     LDLIBS   += -lrt -lpthread
   endif
   export CONFIG_AUTO_LKL_POSIX_HOST=y
+  export CONFIG_AUTO_LKL_VIRTIO=y
+  export CONFIG_AUTO_LKL_VIRTIO_NET=y
   CFLAGS += -DCONFIG_AUTO_LKL_POSIX_HOST
 
   # Intel DPDK configuration
@@ -73,6 +79,8 @@ else ifneq (,$(filter $(OUTPUT_FORMAT),pe-i386))
   EXESUF   := .exe
   SOSUF    := .dll
   export CONFIG_AUTO_LKL_NT_HOST=y
+  export CONFIG_AUTO_LKL_VIRTIO=y
+  export CONFIG_AUTO_LKL_VIRTIO_NET=n
   CFLAGS += -DCONFIG_AUTO_LKL_NT_HOST
 else
   $(error Unrecognized platform: $(OUTPUT_FORMAT))
@@ -113,6 +121,19 @@ ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64-freebsd))
   $(OUTPUT)cptofs$(EXESUF): LDLIBS += -largp
 endif
 
+# if there is no rumpuser.h, then skip build
+ifeq (,$(wildcard $(RUMP_INCLUDE)/rump/rumpuser.h))
+else
+  buildrump=yes
+  KOPT+="buildrump="$(buildrump)
+  export CONFIG_AUTO_LKL_RUMP_HOST=y
+  export CONFIG_AUTO_LKL_POSIX_HOST=n
+  export CONFIG_AUTO_LKL_VIRTIO=y
+  export CONFIG_AUTO_LKL_VIRTIO_NET=y
+  CFLAGS += -I$(RUMP_INCLUDE) -DRUMPUSER -DLIBRUMPUSER -D_KERNEL
+  CFLAGS += -UCONFIG_AUTO_LKL_POSIX_HOST
+
+endif
 
 TEST_TARGETS        := test valgrind gdb
 
@@ -146,13 +167,18 @@ $(OUTPUT)cpfromfs$(EXESUF): cptofs$(EXESUF)
 # because of libdl, liblkl-hijack will not compile on windows
 # arm-android neither for the moment
 ifneq (,$(filter $(OUTPUT_FORMAT),pe-i386))
-  all: $(filter-out liblkl-hijack$(SOSUF), $(ALL_LIBRARIES))
-else ifneq (,$(filter $(OUTPUT_DEF),__ANDROID__))
-  all: $(filter-out liblkl-hijack$(SOSUF), $(ALL_LIBRARIES))
-else ifneq (,$(filter $(OUTPUT_FORMAT),elf32-littlearm))
-  all: $(filter-out liblkl-hijack$(SOSUF), $(ALL_LIBRARIES)) $(ALL_PROGRAMS)
+  all: $(ALL_LIBRARIES)
+  install: headers_install libraries_install programs_install
+else ifneq (,$(wildcard $(RUMP_INCLUDE)))
+  all: $(ALL_LIBRARIES)
+  install: headers_install libraries_install
+else ifneq (,$(filter $(OUTPUT_DEF),__ANDROID__ __ARMEL__))
+  all: $(ALL_LIBRARIES)
+  install: headers_install libraries_install programs_install
 else
+  ALL_LIBRARIES := $(ALL_LIBRARIES) $(OUTPUT)liblkl-hijack$(SOSUF)
   all: $(ALL_PROGRAMS) $(ALL_LIBRARIES)
+  install: headers_install libraries_install programs_install
 endif
 
 clean:
@@ -184,9 +210,7 @@ programs_install: $(ALL_PROGRAMS)
 	    install -d $(DESTDIR)$(PREFIX)/bin ; \
 	    install -m 755 $(ALL_PROGRAMS) $(DESTDIR)$(PREFIX)/bin
 
-install: headers_install libraries_install programs_install
-
-
 FORCE: ;
 .PHONY: all clean $(TEST_TARGETS) FORCE
 .PHONY: headers_install libraries_install programs_install install
+.NOTPARALLEL : lib/lkl.o

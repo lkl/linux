@@ -1,9 +1,11 @@
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
 #include <lkl_host.h>
-
 #include "virtio.h"
+
+#ifdef RUMPUSER
+#include "rump.h"
+#endif
 
 #define MAX_FSTYPE_LEN 50
 int lkl_mount_fs(char *fstype)
