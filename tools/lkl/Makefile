@@ -23,7 +23,7 @@ all:
 # cross toolchain does not use prefixed names
 CC    := $(CROSS_COMPILE)gcc
 LD    := $(CROSS_COMPILE)$(LD)
-AR    := $(CROSS_COMPILE)$(AR)
+AR    := $(CROSS_COMPILE)ar
 export CC LD AR
 
 EXESUF   := 
@@ -45,11 +45,12 @@ export CFLAGS += -I$(OUTPUT)/include -Iinclude -Wall -g -O2 -Wextra \
 	 -Wno-unused-parameter -U_FORTIFY_SOURCE -fno-stack-protector
 
 OUTPUT_FORMAT = $(shell $(LD) -r -print-output-format)
+OUTPUT_DEF = $(shell echo | $(CC) -dM -E -)
 
 ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64 elf32-i386 elf64-x86-64-freebsd elf32-littlearm))
-  OUTPUT_DEF = $(shell echo | $(CC) -dM -E -)
-  CFLAGS   += -fPIC -pthread
-  ifeq (,$(filter $(OUTPUT_DEF),__ANDROID__))
+  CFLAGS   += -fPIC
+  ifeq (,$(filter $(OUTPUT_DEF),__ANDROID__ __ARMEL__))
+    CFLAGS   += -pthread
     LDLIBS   += -lrt -lpthread
   endif
   export CONFIG_AUTO_LKL_POSIX_HOST=y

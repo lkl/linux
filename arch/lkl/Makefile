@@ -14,6 +14,11 @@ else
 $(error Unrecognized platform: $(OUTPUT_FORMAT))
 endif
 
+ifeq ($(OUTPUT_FORMAT),elf32-littlearm)
+CFLAGS_ABI      :=-mabi=aapcs-linux -mno-thumb-interwork -mfpu=vfp
+KBUILD_CFLAGS += $(CFLAGS_ABI)
+endif
+
 ifneq (,$(filter $(OUTPUT_FORMAT),elf64-x86-64-freebsd))
 NPROC=$(shell sysctl -n hw.ncpu)
 else
