@@ -66,7 +66,7 @@ static int __cpu_try_get_lock(int n)
 {
 	lkl_thread_t self;
 
-	if (__sync_fetch_and_add(&cpu.shutdown_gate, n) >= MAX_THREADS)
+	if (lkl__sync_fetch_and_add(&cpu.shutdown_gate, n) >= MAX_THREADS)
 		return -2;
 
 	lkl_ops->mutex_lock(cpu.lock);
@@ -89,7 +89,7 @@ static void __cpu_try_get_unlock(int lock_ret, int n)
 {
 	if (lock_ret >= -1)
 		lkl_ops->mutex_unlock(cpu.lock);
-	__sync_fetch_and_sub(&cpu.shutdown_gate, n);
+	lkl__sync_fetch_and_sub(&cpu.shutdown_gate, n);
 }
 
 void lkl_cpu_change_owner(lkl_thread_t owner)
@@ -173,7 +173,7 @@ int lkl_cpu_try_run_irq(int irq)
 
 void lkl_cpu_shutdown(void)
 {
-	__sync_fetch_and_add(&cpu.shutdown_gate, MAX_THREADS);
+	lkl__sync_fetch_and_add(&cpu.shutdown_gate, MAX_THREADS);
 }
 
 void lkl_cpu_wait_shutdown(void)
@@ -184,7 +184,7 @@ void lkl_cpu_wait_shutdown(void)
 
 static void lkl_cpu_cleanup(bool shutdown)
 {
-	while (__sync_fetch_and_add(&cpu.shutdown_gate, 0) > MAX_THREADS)
+	while (lkl__sync_fetch_and_add(&cpu.shutdown_gate, 0) > MAX_THREADS)
 		;
 
 	if (shutdown)
