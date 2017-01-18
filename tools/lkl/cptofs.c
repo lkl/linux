@@ -493,6 +493,9 @@ int copy_one(const char *src, const char *mpoint, const char *dst)
 		snprintf(dst_path, sizeof(dst_path),  "%s", dst);
 	}
 
+	if (strcmp(src, "/") == 0)
+		return searchdir(src_path, dst, NULL);
+
 	src_path_dir = dirname(strdup(src_path));
 	src_path_base = basename(strdup(src_path));
 
