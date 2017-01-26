@@ -5,7 +5,7 @@
 #include <asm/cpu.h>
 #include <asm/sched.h>
 
-static volatile int threads_counter;
+static int threads_counter;
 
 static int init_ti(struct thread_info *ti)
 {
@@ -123,7 +123,7 @@ struct task_struct *__switch_to(struct task_struct *prev,
 	}
 
 	if (_prev->dead) {
-		__sync_fetch_and_sub(&threads_counter, 1);
+		lkl__sync_fetch_and_sub(&threads_counter, 1);
 		lkl_ops->thread_exit();
 	}
 
@@ -193,7 +193,7 @@ int copy_thread(unsigned long clone_flags, unsigned long esp,
 		return -ENOMEM;
 	}
 
-	__sync_fetch_and_add(&threads_counter, 1);
+	lkl__sync_fetch_and_add(&threads_counter, 1);
 
 	return 0;
 }
@@ -220,7 +220,7 @@ void threads_init(void)
 
 void threads_cnt_dec(void)
 {
-	__sync_fetch_and_sub(&threads_counter, 1);
+	lkl__sync_fetch_and_sub(&threads_counter, 1);
 }
 
 void threads_cleanup(void)

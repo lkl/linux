@@ -27,14 +27,14 @@ static inline unsigned long test_and_clear_irq_index_status(void)
 {
 	if (!irq_index_status)
 		return 0;
-	return __sync_fetch_and_and(&irq_index_status, 0);
+	return lkl__sync_fetch_and_and(&irq_index_status, 0);
 }
 
 static inline unsigned long test_and_clear_irq_status(int index)
 {
 	if (!&irq_status[index])
 		return 0;
-	return __sync_fetch_and_and(&irq_status[index], 0);
+	return lkl__sync_fetch_and_and(&irq_status[index], 0);
 }
 
 void set_irq_pending(int irq)
@@ -42,8 +42,8 @@ void set_irq_pending(int irq)
 	int index = irq / IRQ_STATUS_BITS;
 	int bit = irq % IRQ_STATUS_BITS;
 
-	__sync_fetch_and_or(&irq_status[index], BIT(bit));
-	__sync_fetch_and_or(&irq_index_status, BIT(index));
+	lkl__sync_fetch_and_or(&irq_status[index], BIT(bit));
+	lkl__sync_fetch_and_or(&irq_index_status, BIT(index));
 }
 
 static struct irq_info {

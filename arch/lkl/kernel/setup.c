@@ -35,6 +35,7 @@ void __init setup_arch(char **cl)
 
 static void __init lkl_run_kernel(void *arg)
 {
+	atomic_ops_init();
 	threads_init();
 	lkl_cpu_get();
 	start_kernel();
@@ -126,6 +127,7 @@ long lkl_sys_halt(void)
 
 	syscalls_cleanup();
 	threads_cleanup();
+	atomic_ops_cleanup();
 	/* Shutdown the clockevents source. */
 	tick_suspend_local();
 	free_mem();
