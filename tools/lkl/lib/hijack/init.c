@@ -219,6 +219,7 @@ hijack_init(void)
 	char *offload1 = getenv("LKL_HIJACK_OFFLOAD");
 	int offload = 0;
 	char boot_cmdline[256] = "\0";
+	char *sysctls = getenv("LKL_HIJACK_SYSCTL");
 
 	memset(&nd_args, 0, sizeof(struct lkl_netdev_args));
 	if (!debug) {
@@ -428,6 +429,9 @@ hijack_init(void)
 
 	if (mount)
 		mount_cmds_exec(mount, lkl_mount_fs);
+
+	if (sysctls)
+		lkl_sysctl_parse_write(sysctls);
 
 	if (nd_ifindex >=0 && neigh_entries)
 		add_neighbor(nd_ifindex, neigh_entries);

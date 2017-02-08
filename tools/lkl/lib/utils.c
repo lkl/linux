@@ -1,5 +1,6 @@
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 #include <lkl_host.h>
 
 static const char * const lkl_err_strings[] = {
@@ -204,4 +205,57 @@ void lkl_bug(const char *fmt, ...)
 	va_end(args);
 
 	lkl_host_ops.panic();
+}
+
+int lkl_sysctl(char *path, char *value)
+{
+	int ret;
+	int fd;
+	char *delim, *p;
+	char full_path[256];
+
+	lkl_mount_fs("proc");
+
+	p = path;
+	while((delim = strstr(p, "."))) {
+		*delim = '/';
+		p = delim + 1;
+	}
+
+	snprintf(full_path, sizeof(full_path), "/proc/sys/%s", path);
+	fd = lkl_sys_open(full_path, LKL_O_WRONLY | LKL_O_CREAT, 0);
+	if (fd < 0) {
+		lkl_printf("lkl_sys_open %s: %s\n",
+			   full_path, lkl_strerror(fd));
+		return -1;
+	}
+	ret = lkl_sys_write(fd, value, strlen(value));
+	if (ret < 0) {
+		lkl_printf("lkl_sys_write %s: %s\n",
+			full_path, lkl_strerror(fd));
+	}
+
+	lkl_sys_close(fd);
+
+	return 0;
+}
+
+/* Configure sysctl parameters as the form of "key|value;key|value;..." */
+void lkl_sysctl_parse_write(char* sysctls)
+{
+	char *token = NULL;
+	char *key = NULL, *value = NULL;
+	int ret = 0;
+
+	for (token = strtok(sysctls, ";"); token; token = strtok(NULL, ";")) {
+		key = strtok(token, "|");
+		value = strtok(NULL, "|");
+		ret = lkl_sysctl(key, value);
+		if (ret) {
+			lkl_printf("Failed to configure sysctl entries: %s\n",
+				   lkl_strerror(ret));
+			return;
+		}
+	}
+	return;
 }
