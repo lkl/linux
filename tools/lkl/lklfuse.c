@@ -25,9 +25,9 @@ struct lklfuse {
 	int disk_id;
 	int part;
 	int ro;
-	int mb;
+	char *mb;
 } lklfuse = {
-	.mb = 64,
+	.mb = "64M",
 };
 
 #define LKLFUSE_OPT(t, p, v) { t, offsetof(struct lklfuse, p), v }
@@ -40,7 +40,7 @@ enum {
 static struct fuse_opt lklfuse_opts[] = {
 	LKLFUSE_OPT("log=%s", log, 0),
 	LKLFUSE_OPT("type=%s", type, 0),
-	LKLFUSE_OPT("mb=%d", mb, 0),
+	LKLFUSE_OPT("mb=%sM", mb, 0),
 	LKLFUSE_OPT("opts=%s", opts, 0),
 	LKLFUSE_OPT("part=%d", part, 0),
 	FUSE_OPT_KEY("-h", KEY_HELP),
@@ -509,7 +509,7 @@ static int start_lkl(void)
 	long ret;
 	char mpoint[32];
 
-	ret = lkl_start_kernel(&lkl_host_ops, lklfuse.mb * 1024 * 1024, "");
+	ret = lkl_start_kernel(&lkl_host_ops, lklfuse.mb, "");
 	if (ret) {
 		fprintf(stderr, "can't start kernel: %s\n", lkl_strerror(ret));
 		goto out;

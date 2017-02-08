@@ -232,6 +232,13 @@ are the list of those variable for your environment.
 ```
      $ LKL_HIJACK_OFFLOAD=0x8002 lkl-hijack.sh ./netserver -D -f
 ```
+* LKL_HIJACK_MEM
+
+  Specify the memory size of booted kernel via the hijack library.  The number
+  you can specify is potentially suffixed with K, M, G, T, P, E (lib/cmdline.c).
+```
+     $ LKL_HIJACK_MEM=1G lkl-hijack.sh ip address show
+```
 
 FAQ
 ===

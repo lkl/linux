@@ -41,14 +41,22 @@ static void __init lkl_run_kernel(void *arg)
 }
 
 int __init lkl_start_kernel(struct lkl_host_operations *ops,
-			unsigned long _mem_size,
+			const char *_mem_size,
 			const char *fmt, ...)
 {
 	va_list ap;
 	int ret;
 
 	lkl_ops = ops;
-	mem_size = _mem_size;
+	mem_size = memparse(_mem_size, NULL);
+	if (mem_size < 16 * 1024 * 1024) {
+		if (lkl_ops->print) {
+			char buf[32];
+			sprintf(buf, "memsize failure %s (=%lu)\n", _mem_size, mem_size);
+			lkl_ops->print(buf, sizeof(buf));
+		}
+		lkl_ops->panic();
+	}
 
 	va_start(ap, fmt);
 	ret = vsnprintf(boot_command_line, COMMAND_LINE_SIZE, fmt, ap);
