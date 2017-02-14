@@ -958,6 +958,7 @@ int main(int argc, char **argv)
 	TEST(lo_ifup);
 	TEST(gettid);
 	TEST(syscall_thread);
+	TEST(syscall_thread);
 	/*
 	 * Wine has an issue where the FlsCallback is not called when the thread
 	 * terminates which makes testing the automatic syscall threads cleanup
