@@ -43,7 +43,9 @@ fi
 if ! [ -z $DST ]; then
     echo "== RAW socket (LKL net) tests =="
     sudo ip link set dev ${IFNAME} promisc on
-    sudo ./net-test raw ${IFNAME} ${DST} dhcp
+    sudo ./net-test raw ${IFNAME} ${DST} dhcp &
+    sleep 5
+    sudo killall -q net-test && (echo "killed, skipped")
     sudo ip link set dev ${IFNAME} promisc off
 
     echo "== macvtap (LKL net) tests =="
@@ -51,7 +53,9 @@ if ! [ -z $DST ]; then
     if ls /dev/tap* > /dev/null 2>&1 ; then
 	sudo ip link set dev lkl_vtap0 up
 	sudo chown ${USER} `ls /dev/tap*`
-	./net-test macvtap `ls /dev/tap*` $DST dhcp
+	./net-test macvtap `ls /dev/tap*` $DST dhcp &
+	sleep 5
+	sudo killall -q net-test && (echo "killed, skipped")
     fi
 fi
 
