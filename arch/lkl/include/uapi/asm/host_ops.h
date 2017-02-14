@@ -5,6 +5,7 @@
 struct lkl_mutex;
 struct lkl_sem;
 struct lkl_tls_key;
+struct irq_data;
 typedef unsigned long lkl_thread_t;
 struct lkl_jmp_buf {
 	unsigned long buf[32];
@@ -123,6 +124,11 @@ struct lkl_host_operations {
 	int (*iomem_access)(const volatile void *addr, void *val, int size,
 			    int write);
 
+	int (*irq_request)(struct irq_data *data);
+	void (*irq_release)(struct irq_data *data);
+
+	int (*getparam)(const char *name, void *buf, int buflen);
+
 	long (*gettid)(void);
 
 	void (*jmp_buf_set)(struct lkl_jmp_buf *jmpb, void (*f)(void));
@@ -148,5 +154,14 @@ int lkl_is_running(void);
 
 int lkl_printf(const char *, ...);
 void lkl_bug(const char *, ...);
+
+/* atomic ops */
+int lkl__sync_fetch_and_sub(int *ptr, int value);
+int lkl__sync_fetch_and_add(int *ptr, int value);
+long lkl__sync_fetch_and_or(long *ptr, long value);
+long lkl__sync_fetch_and_and(long *ptr, long value);
+void lkl__sync_synchronize(void);
+void atomic_ops_init(void);
+void atomic_ops_cleanup(void);
 
 #endif

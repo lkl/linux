@@ -89,4 +89,7 @@ void virtio_set_queue_max_merge_len(struct virtio_dev *dev, int q, int len);
 #define container_of(ptr, type, member) \
 	(type *)((char *)(ptr) - __builtin_offsetof(type, member))
 
+/* XXX: must be provided by another way */
+void franken_recv_thread(int fd, void *thrid);
+
 #endif /* _LKL_LIB_VIRTIO_H */

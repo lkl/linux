@@ -258,6 +258,21 @@ int lkl_netdev_add(struct lkl_netdev *nd, struct lkl_netdev_args* args)
 	if (dev->poll_tid == 0)
 		goto out_cleanup_dev;
 
+	/* XXX: only for rump: need to use this semantics for franken_poll(2) */
+#ifdef LIBRUMPUSER
+	{
+		struct lkl_netdev_rumpfd {
+			struct lkl_netdev dev;
+			/* TAP device */
+			int fd;
+		};
+
+		struct lkl_netdev_rumpfd *nd_rumpfd =
+			container_of(nd, struct lkl_netdev_rumpfd, dev);
+		franken_recv_thread(nd_rumpfd->fd, (void *)dev->poll_tid);
+	}
+#endif /* LIBRUMPUSER */
+
 	ret = dev_register(dev);
 	if (ret < 0)
 		goto out_cleanup_dev;

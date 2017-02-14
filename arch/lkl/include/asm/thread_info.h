@@ -22,6 +22,7 @@ struct thread_info {
 	bool dead;
 	lkl_thread_t tid;
 	struct task_struct *prev_sched;
+	void *rump_client;	/* for syscall proxy */
 	unsigned long stackend;
 };
 

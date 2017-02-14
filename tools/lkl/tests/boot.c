@@ -180,7 +180,7 @@ int test_creat(char *str, int len)
 
 	snprintf(str, len, "%ld", ret);
 
-	if (ret == 0)
+	if (ret == 3)		/* 0/1/2 are already opened */
 		return TEST_SUCCESS;
 
 	return TEST_FAILURE;

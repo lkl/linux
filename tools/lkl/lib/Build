@@ -8,15 +8,22 @@ lkl-y += net.o
 lkl-y += jmp_buf.o
 lkl-$(CONFIG_AUTO_LKL_POSIX_HOST) += posix-host.o
 lkl-$(CONFIG_AUTO_LKL_NT_HOST) += nt-host.o
+lkl-$(CONFIG_AUTO_LKL_RUMP_HOST) += rump.o
+lkl-$(CONFIG_AUTO_LKL_RUMP_HOST) += rump-host.o
 lkl-y += utils.o
-lkl-y += virtio_blk.o
-lkl-y += virtio.o
-lkl-y += dbg.o
-lkl-y += dbg_handler.o
-lkl-$(CONFIG_AUTO_LKL_POSIX_HOST) += virtio_net.o
+lkl-$(CONFIG_AUTO_LKL_VIRTIO) += virtio_blk.o
+lkl-$(CONFIG_AUTO_LKL_VIRTIO) += virtio.o
+lkl-$(CONFIG_AUTO_LKL_POSIX_HOST) += dbg.o
+lkl-$(CONFIG_AUTO_LKL_POSIX_HOST) += dbg_handler.o
+lkl-$(CONFIG_AUTO_LKL_VIRTIO_NET) += virtio_net.o
 lkl-$(CONFIG_AUTO_LKL_POSIX_HOST) += virtio_net_fd.o
 lkl-$(CONFIG_AUTO_LKL_POSIX_HOST) += virtio_net_tap.o
 lkl-$(CONFIG_AUTO_LKL_POSIX_HOST) += virtio_net_raw.o
 lkl-$(CONFIG_AUTO_LKL_POSIX_HOST) += virtio_net_macvtap.o
 lkl-$(CONFIG_AUTO_LKL_VIRTIO_NET_DPDK) += virtio_net_dpdk.o
 lkl-$(CONFIG_AUTO_LKL_VIRTIO_NET_VDE) += virtio_net_vde.o
+
+# for frankenlibc
+CFLAGS_rump-host.o = -I$(RUMP_PREFIX)/../platform/include \
+		   -I$(RUMP_PREFIX)/../franken/include \
+		   -DCONFIG_AUTO_LKL_POSIX_HOST

@@ -1,10 +1,12 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
 #include <lkl_host.h>
-
 #include "virtio.h"
+
+#ifdef RUMPUSER
+#include "rump.h"
+#endif
 
 #define MAX_FSTYPE_LEN 50
 int lkl_mount_fs(char *fstype)
@@ -72,6 +74,12 @@ static int get_node_with_prefix(const char *path, const char *prefix,
 	lkl_closedir(dir);
 
 	return ret;
+}
+
+/* rumprun doesn't build virtio.o (of lkl) so stub it */
+uint32_t __attribute__((weak)) virtio_get_num_bootdevs(void)
+{
+	return 0;
 }
 
 static int encode_dev_from_sysfs(const char *sysfs_path, uint32_t *pdevid)

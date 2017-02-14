@@ -41,6 +41,12 @@ config 64BIT
 config BIG_ENDIAN
        def_bool n
 
+config KALLSYMS_BASE_RELATIVE
+       def_bool n
+
+config TTY
+       def_bool n
+
 config GENERIC_CSUM
        def_bool y
 
@@ -52,6 +58,12 @@ config NO_IOPORT_MAP
 
 config RWSEM_GENERIC_SPINLOCK
 	bool
+	default y
+
+config PCI
+	bool "PCI support"
+	select NO_GENERIC_PCI_IOPORT_MAP
+	select GENERIC_PCI_IOMAP
 	default y
 
 source init/Kconfig
