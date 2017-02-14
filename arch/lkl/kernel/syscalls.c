@@ -54,6 +54,8 @@ static long run_syscall(long no, long *params)
 
 static int host_task_id;
 static struct task_struct *host0;
+/* all host_tasks in userspace mod */
+static LIST_HEAD(all_flying_host_tasks);
 
 static int new_host_task(struct task_struct **task)
 {
@@ -75,26 +77,27 @@ static int new_host_task(struct task_struct **task)
 
 	return 0;
 }
-static void exit_task(void)
+
+static int get_host_task(struct task_struct **task)
 {
-	do_exit(0);
+	struct thread_info *ti;
+
+	if (list_empty(&all_flying_host_tasks))
+		return new_host_task(task);
+
+	ti = list_first_entry(&all_flying_host_tasks, struct thread_info,
+			      flying_host_task);
+	list_del(&ti->flying_host_task);
+	*task = ti->task;
+	return 0;
 }
 
-static void del_host_task(void *arg)
+static void put_host_task(struct task_struct *task)
 {
-	struct task_struct *task = (struct task_struct *)arg;
 	struct thread_info *ti = task_thread_info(task);
 
-	if (lkl_cpu_get() < 0)
-		return;
-
-	switch_to_host_task(task);
-	host_task_id--;
-	set_ti_thread_flag(ti, TIF_SCHED_JB);
-	lkl_ops->jmp_buf_set(&ti->sched_jb, exit_task);
+	list_add(&ti->flying_host_task, &all_flying_host_tasks);
 }
-
-static struct lkl_tls_key *task_key;
 
 long lkl_syscall(long no, long *params)
 {
@@ -105,15 +108,9 @@ long lkl_syscall(long no, long *params)
 	if (ret < 0)
 		return ret;
 
-	if (lkl_ops->tls_get) {
-		task = lkl_ops->tls_get(task_key);
-		if (!task) {
-			ret = new_host_task(&task);
-			if (ret)
-				goto out;
-			lkl_ops->tls_set(task_key, task);
-		}
-	}
+	ret = get_host_task(&task);
+	if (ret)
+		goto out;
 
 	switch_to_host_task(task);
 
@@ -124,6 +121,7 @@ long lkl_syscall(long no, long *params)
 		return ret;
 	}
 
+	put_host_task(task);
 out:
 	lkl_cpu_put();
 
@@ -136,19 +134,11 @@ int syscalls_init(void)
 	set_thread_flag(TIF_HOST_THREAD);
 	host0 = current;
 
-	if (lkl_ops->tls_alloc) {
-		task_key = lkl_ops->tls_alloc(del_host_task);
-		if (!task_key)
-			return -1;
-	}
-
 	return 0;
 }
 
 void syscalls_cleanup(void)
 {
-	if (lkl_ops->tls_free)
-		lkl_ops->tls_free(task_key);
 }
 
 SYSCALL_DEFINE3(virtio_mmio_device_add, long, base, long, size, unsigned int,
