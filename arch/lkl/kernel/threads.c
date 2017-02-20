@@ -171,6 +171,7 @@ int copy_thread(unsigned long clone_flags, unsigned long esp,
 	struct thread_bootstrap_arg *tba;
 
 	if (!esp) {
+		ti->tid = lkl_ops->thread_self();
 		set_ti_thread_flag(ti, TIF_HOST_THREAD);
 		return 0;
 	}
