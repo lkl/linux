@@ -305,6 +305,38 @@ int test_fstat(char *str, int len)
 	return TEST_FAILURE;
 }
 
+int test_lfs(char *str, int len)
+{
+	long long fd;
+	long long ret;
+	int result = TEST_FAILURE;
+
+	ret = lkl_sys_open("/largefile", LKL_O_CREAT | LKL_O_WRONLY, 0);
+	if (ret < 0) {
+		snprintf(str, len, "open: %s", lkl_strerror(ret));
+		return TEST_FAILURE;
+	}
+	fd = ret;
+
+	lkl_loff_t nearly_3gb = (3 * 1024LL * 1024 * 1024 * 1024) - 1;
+
+	ret = lkl_sys_pwrite64(fd, "x", 1, nearly_3gb);
+	if (ret < 0) {
+		snprintf(str, len, "pwrite: %s", lkl_strerror(ret));
+		goto out;
+	}
+	snprintf(str, len, "%lld", ret);
+	result = TEST_SUCCESS;
+
+out:
+	ret = lkl_sys_close(fd);
+	if (ret < 0) {
+		snprintf(str, len, "close: %s", lkl_strerror(ret));
+		result = TEST_FAILURE;
+	}
+	return result;
+}
+
 int test_mkdir(char *str, int len)
 {
 	long ret;
@@ -932,6 +964,7 @@ int main(int argc, char **argv)
 	TEST(lseek);
 	TEST(read);
 	TEST(fstat);
+	TEST(lfs);
 	TEST(mkdir);
 	TEST(stat);
 #ifndef __MINGW32__
