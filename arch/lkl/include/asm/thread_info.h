@@ -23,6 +23,7 @@ struct thread_info {
 	lkl_thread_t tid;
 	struct task_struct *prev_sched;
 	unsigned long stackend;
+	struct list_head flying_host_task;
 };
 
 #define INIT_THREAD_INFO(tsk)				\
