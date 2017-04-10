@@ -253,6 +253,11 @@ static void *mem_alloc(unsigned long size)
 	return malloc(size);
 }
 
+static void *mem_calloc(unsigned long nmemb, unsigned long size)
+{
+	return calloc(nmemb, size);
+}
+
 struct lkl_host_operations lkl_host_ops = {
 	.panic = panic,
 	.thread_create = thread_create,
@@ -280,6 +285,7 @@ struct lkl_host_operations lkl_host_ops = {
 	.print = print,
 	.mem_alloc = mem_alloc,
 	.mem_free = free,
+	.mem_calloc = mem_calloc,
 	.ioremap = lkl_ioremap,
 	.iomem_access = lkl_iomem_access,
 	.virtio_devices = lkl_virtio_devs,

@@ -338,6 +338,7 @@ struct lkl_host_operations lkl_host_ops = {
 	.print = print,
 	.mem_alloc = malloc,
 	.mem_free = free,
+	.mem_calloc = calloc,
 	.ioremap = lkl_ioremap,
 	.iomem_access = lkl_iomem_access,
 	.virtio_devices = lkl_virtio_devs,
