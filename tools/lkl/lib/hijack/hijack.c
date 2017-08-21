@@ -304,7 +304,7 @@ int select(int nfds, fd_set *r, fd_set *w, fd_set *e, struct timeval *t)
 	return lkl_call(__lkl__NR_select, 5, nfds, r, w, e, t);
 }
 
-HOOK_CALL_USE_HOST_BEFORE_START(epoll_create);
+HOST_CALL(epoll_create);
 int epoll_create(int flags)
 {
 	int res;

@@ -33,9 +33,14 @@ static char *ealargs[4] = {
 /* XXX: disable cache due to no thread-safe on mempool cache. */
 #define MEMPOOL_CACHE_SZ        0
 /* for TSO pkt */
-#define MAX_PACKET_SZ           (65535 \
+//For ixgbe and vmxnet3 drivers
+/*#define MAX_PACKET_SZ           (65535 \*/
+/*	- (sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM))*/
+//For Intel i350 NIC (igb driver)
+#define MAX_PACKET_SZ           (16383 \
 	- (sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM))
-#define MBUF_NUM                (512*2) /* vmxnet3 requires 1024 */
+//#define MBUF_NUM                (512*2) /* vmxnet3 requires 1024 */
+#define MBUF_NUM                4096 /* Intel i350 NIC (igb driver): 4096 */
 #define MBUF_SIZ        \
 	(MAX_PACKET_SZ + sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM)
 #define NUMDESC         512	/* nb_min on vmxnet3 is 512 */
