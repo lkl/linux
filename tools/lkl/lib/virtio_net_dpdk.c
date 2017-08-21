@@ -33,11 +33,10 @@ static char *ealargs[4] = {
 /* XXX: disable cache due to no thread-safe on mempool cache. */
 #define MEMPOOL_CACHE_SZ        0
 /* for TSO pkt */
+/* default recommended for ixgbe and vmxnet3 drivers */
 #define MAX_PACKET_SZ           (65535 \
 	- (sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM))
 #define MBUF_NUM                (512*2) /* vmxnet3 requires 1024 */
-#define MBUF_SIZ        \
-	(MAX_PACKET_SZ + sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM)
 #define NUMDESC         512	/* nb_min on vmxnet3 is 512 */
 #define NUMQUEUE        1
 
@@ -332,6 +331,47 @@ struct lkl_dev_net_ops dpdk_net_ops = {
 	.free = dpdk_net_free,
 };
 
+/*
+ * this function assumes strtok was called with on a non-NULL string and
+ * the max_packet_sz or p_mbuf_num (or both) are eventually in the remaining
+ * string to be read here.
+ */
+static int read_maxpacketsz_mbufnum(int *p_max_packet_sz, int *p_mbuf_num)
+{
+
+	int idx;
+	char *pch;
+
+	for (idx = 0; idx < 2; idx++) {
+		pch = strtok(NULL, "= ");
+		if (pch == 0)
+			break;
+
+		if (strcmp(pch, "max_packet_sz") == 0) {
+			pch = strtok(NULL, " ,");
+			if (pch != 0)
+				*p_max_packet_sz = atoi(pch);
+			else
+				return 0;
+		} else if (strcmp(pch, "mbuf_num") == 0) {
+			pch = strtok(NULL, " ,");
+			if (pch != 0)
+				*p_mbuf_num = atoi(pch);
+			else {
+				/*
+				 * dpdk: value absent for indicated flag in
+				 * LKL_HIJACK_NET_IFPARAMS
+				 */
+				return 0;
+			}
+		} else {
+			return 0;
+		}
+	}
+
+	return 1;
+
+}
 
 static int dpdk_init;
 struct lkl_netdev *lkl_netdev_dpdk_create(const char *ifparams, int offload,
@@ -345,6 +385,12 @@ struct lkl_netdev *lkl_netdev_dpdk_create(const char *ifparams, int offload,
 	char poolname[RTE_MEMZONE_NAMESIZE];
 	char *debug = getenv("LKL_HIJACK_DEBUG");
 	int lkl_debug = 0;
+	int max_packet_sz = MAX_PACKET_SZ;
+	int mbuf_num = MBUF_NUM;
+	int mbuf_size = 0;
+	int ifparams_len = 0;
+	char *ifparams_local = NULL;
+	char *ifparams_first_token = NULL;
 
 	if (!dpdk_init) {
 		if (debug)
@@ -369,10 +415,29 @@ struct lkl_netdev *lkl_netdev_dpdk_create(const char *ifparams, int offload,
 	/* we always enable big_packet mode with dpdk. */
 	nd->offload = offload;
 
-	snprintf(poolname, RTE_MEMZONE_NAMESIZE, "%s%s", "tx-", ifparams);
+	ifparams_len = strlen(ifparams);
+	ifparams_local = (char *)alloca(ifparams_len + 1);
+	strcpy(ifparams_local, ifparams);
+
+	/* isolate the first token */
+	ifparams_first_token = strtok(ifparams_local, ",=");
+
+	if (read_maxpacketsz_mbufnum(&max_packet_sz, &mbuf_num) == 0) {
+		lkl_printf(
+			"dpdk: failed to read max_packet_sz or mbuf_num\n");
+		free(nd);
+		return NULL;
+	}
+
+	snprintf(poolname, RTE_MEMZONE_NAMESIZE, "%s%s", "tx-",
+		ifparams_first_token);
+
+	mbuf_size = (max_packet_sz + sizeof(struct rte_mbuf) +
+		RTE_PKTMBUF_HEADROOM);
+
 	nd->txpool =
 		rte_mempool_create(poolname,
-				   MBUF_NUM, MBUF_SIZ, MEMPOOL_CACHE_SZ,
+				   mbuf_num, mbuf_size, MEMPOOL_CACHE_SZ,
 				   sizeof(struct rte_pktmbuf_pool_private),
 				   rte_pktmbuf_pool_init, NULL,
 				   rte_pktmbuf_init, NULL, 0, 0);
@@ -383,10 +448,11 @@ struct lkl_netdev *lkl_netdev_dpdk_create(const char *ifparams, int offload,
 		return NULL;
 	}
 
+	snprintf(poolname, RTE_MEMZONE_NAMESIZE, "%s%s", "rx-",
+		ifparams_first_token);
 
-	snprintf(poolname, RTE_MEMZONE_NAMESIZE, "%s%s", "rx-", ifparams);
 	nd->rxpool =
-		rte_mempool_create(poolname, MBUF_NUM, MBUF_SIZ, 0,
+		rte_mempool_create(poolname, mbuf_num, mbuf_size, 0,
 				   sizeof(struct rte_pktmbuf_pool_private),
 				   rte_pktmbuf_pool_init, NULL,
 				   rte_pktmbuf_init, NULL, 0, 0);
