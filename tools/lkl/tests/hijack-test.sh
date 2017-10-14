@@ -20,6 +20,8 @@ function clear_work_dir {
     rm -rf ${work_dir}
     sudo ip link set dev lkl_ptt0 down &> /dev/null || true
     sudo ip tuntap del dev lkl_ptt0 mode tap &> /dev/null || true
+    sudo ip link set dev lkl_ptt1 down &> /dev/null || true
+    sudo ip tuntap del dev lkl_ptt1 mode tap &> /dev/null || true
 }
 
 trap clear_work_dir EXIT
@@ -43,10 +45,14 @@ ${hijack_script} ./ping6 -c 1 ::1
 rm ./ping6
 
 echo "== Mount/dump tests =="
+cfgjson=${work_dir}/hijack-test.conf
+echo " {" \
+	"\"mount\":\"proc,sysfs\"," \
+	"\"dump\":\"/sysfs/class/net/lo/mtu,/sysfs/class/net/lo/dev_id\"," \
+	"\"debug\":\"1\"" \
+	"}" > ${cfgjson}
 # Need to say || true because ip -h returns < 0
-ans=$(LKL_HIJACK_MOUNT=proc,sysfs\
-  LKL_HIJACK_DUMP=/sysfs/class/net/lo/mtu,/sysfs/class/net/lo/dev_id\
-  LKL_HIJACK_DEBUG=1\
+ans=$(LKL_HIJACK_CONFIG_FILE=$cfgjson\
   ${hijack_script} ip -h) || true
 # Need to grab the end because something earlier on prints out this
 # number
@@ -62,8 +68,11 @@ fi
 
 # boot_cmdline test
 echo "== boot command line tests =="
-ans=$(LKL_HIJACK_DEBUG=1\
-  LKL_HIJACK_BOOT_CMDLINE="mem=100M" ${hijack_script} ip ad)
+echo " {" \
+	"\"debug\":\"1\"," \
+	"\"boot_cmdline\":\"mem=100M\"" \
+	"}" > ${cfgjson}
+ans=$(LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ip ad)
 if [ -z ${CROSS_COMPILE} ] ; then
 echo "$ans" | grep "100752k"
 elif [ "${CROSS_COMPILE}" = "arm-linux-androideabi-" ] ; then
@@ -78,15 +87,6 @@ if [ ! -c /dev/net/tun ]; then
     exit 0
 fi
 
-export LKL_HIJACK_NET_IFTYPE=tap
-export LKL_HIJACK_NET_IFPARAMS=lkl_ptt0
-export LKL_HIJACK_NET_IP=192.168.13.2
-export LKL_HIJACK_NET_NETMASK_LEN=24
-export LKL_HIJACK_NET_GATEWAY=192.168.13.1
-export LKL_HIJACK_NET_IPV6=fc03::2
-export LKL_HIJACK_NET_NETMASK6_LEN=64
-export LKL_HIJACK_NET_GATEWAY6=fc03::1
-
 # Set up the TAP device we'd like to use
 sudo ip tuntap del dev lkl_ptt0 mode tap || true
 sudo ip tuntap add dev lkl_ptt0 mode tap user $USER
@@ -94,9 +94,25 @@ sudo ip link set dev lkl_ptt0 up
 sudo ip addr add dev lkl_ptt0 192.168.13.1/24
 sudo ip -6 addr add dev lkl_ptt0 fc03::1/64
 
+echo \
+"{" \
+"\"gateway\":\"192.168.13.1\"," \
+"\"gateway6\":\"fc03::1\"," \
+"\"interfaces\":[" \
+	"{" \
+		"\"type\":\"tap\"," \
+		"\"param\":\"lkl_ptt0\"," \
+		"\"ip\":\"192.168.13.2\"," \
+		"\"masklen\":\"24\"," \
+		"\"ipv6\":\"fc03::2\"," \
+		"\"masklen6\":\"64\"" \
+	"}" \
+	"]" \
+"}" > ${cfgjson}
+
 # Make sure our device has the addresses we expect
-addr=$(LKL_HIJACK_DEBUG=1\
-  LKL_HIJACK_NET_MAC="aa:bb:cc:dd:ee:ff" ${hijack_script} ip addr)
+addr=$(LKL_HIJACK_DEBUG=1 LKL_HIJACK_NET_MAC="aa:bb:cc:dd:ee:ff" \
+	LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ip addr)
 echo "$addr" | grep eth0
 echo "$addr" | grep 192.168.13.2
 echo "$addr" | grep "aa:bb:cc:dd:ee:ff"
@@ -108,8 +124,8 @@ cp `which ping` .
 cp `which ping6` .
 
 # Make sure we can ping the host from inside LKL
-${hijack_script} ./ping 192.168.13.1 -c 1
-${hijack_script} ./ping6 fc03::1 -c 1
+LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ./ping 192.168.13.1 -c 1
+LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ./ping6 fc03::1 -c 1
 rm ./ping ./ping6
 
 # Now let's check that the host can see LKL.
@@ -117,38 +133,235 @@ sudo ip -6 neigh del fc03::2 dev lkl_ptt0
 sudo ip neigh del 192.168.13.2 dev lkl_ptt0
 sudo ping -i 0.01 -c 65 192.168.13.2 &
 sudo ping6 -i 0.01 -c 65 fc03::2 &
-${hijack_script} sleep 3
+LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} sleep 3
+
+neigh1="192.168.13.100|12:34:56:78:9a:bc"
+neigh2="fc03::100|12:34:56:78:9a:be"
+echo \
+"{" \
+"\"gateway\":\"192.168.13.1\"," \
+"\"gateway6\":\"fc03::1\"," \
+"\"interfaces\":[" \
+	"{" \
+		"\"type\":\"tap\"," \
+		"\"param\":\"lkl_ptt0\"," \
+		"\"ip\":\"192.168.13.2\"," \
+		"\"masklen\":\"24\"," \
+		"\"ipv6\":\"fc03::2\"," \
+		"\"masklen6\":\"64\"," \
+		"\"neigh\":\"${neigh1};${neigh2}\"" \
+	"}" \
+	"]" \
+"}" > ${cfgjson}
 
 # add neighbor entries
-ans=$(LKL_HIJACK_NET_NEIGHBOR="192.168.13.100|12:34:56:78:9a:bc;fc03::100|12:34:56:78:9a:be"\
-  ${hijack_script} ip neighbor show) || true
+ans=$(LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ip neighbor show) || true
 echo "$ans" | tail -n 15 | grep "12:34:56:78:9a:bc"
 echo "$ans" | tail -n 15 | grep "12:34:56:78:9a:be"
 
 # gateway
-ans=$(${hijack_script} ip route show) || true
+ans=$(LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ip route show) || true
 echo "$ans" | tail -n 15 | grep "192.168.13.1"
 
 # gateway v6
-ans=$(${hijack_script} ip -6 route show) || true
+ans=$(LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ip -6 route show) || true
 echo "$ans" | tail -n 15 | grep "fc03::1"
 
+# offload
 # LKL_VIRTIO_NET_F_HOST_TSO4 && LKL_VIRTIO_NET_F_GUEST_TSO4
 # LKL_VIRTIO_NET_F_CSUM && LKL_VIRTIO_NET_F_GUEST_CSUM
-LKL_HIJACK_OFFLOAD=0x883 sh ${script_dir}/run_netperf.sh 192.168.13.1 1 0 TCP_STREAM
-LKL_HIJACK_OFFLOAD=0x883 sh ${script_dir}/run_netperf.sh 192.168.13.1 1 0 TCP_MAERTS
+echo \
+"{" \
+"\"gateway\":\"192.168.13.1\"," \
+"\"gateway6\":\"fc03::1\"," \
+"\"interfaces\":[" \
+	"{" \
+		"\"offload\":\"0x883\"" \
+		"\"type\":\"tap\"" \
+		"\"param\":\"lkl_ptt0\"" \
+		"\"ip\":\"192.168.13.2\"" \
+		"\"masklen\":\"24\"" \
+		"\"ipv6\":\"fc03::2\"" \
+		"\"masklen6\":\"64\"" \
+	"}" \
+	"]" \
+"}" > ${cfgjson}
+LKL_HIJACK_CONFIG_FILE=$cfgjson sh \
+	${script_dir}/run_netperf.sh 192.168.13.1 1 0 TCP_STREAM
+LKL_HIJACK_CONFIG_FILE=$cfgjson sh \
+	${script_dir}/run_netperf.sh 192.168.13.1 1 0 TCP_MAERTS
 
+# offload
 # LKL_VIRTIO_NET_F_HOST_TSO4 && LKL_VIRTIO_NET_F_MRG_RXBUF
 # LKL_VIRTIO_NET_F_CSUM && LKL_VIRTIO_NET_F_GUEST_CSUM
-LKL_HIJACK_OFFLOAD=0x8803 sh ${script_dir}/run_netperf.sh 192.168.13.1 1 0 TCP_MAERTS
-sh ${script_dir}/run_netperf.sh 192.168.13.1 1 0 TCP_RR
-sh ${script_dir}/run_netperf.sh fc03::1 1 0 TCP_STREAM
+echo \
+"{" \
+"\"gateway\":\"192.168.13.1\"," \
+"\"gateway6\":\"fc03::1\"," \
+"\"interfaces\":[" \
+	"{" \
+		"\"offload\":\"0x8803\"" \
+		"\"type\":\"tap\"" \
+		"\"param\":\"lkl_ptt0\"" \
+		"\"ip\":\"192.168.13.2\"" \
+		"\"masklen\":\"24\"" \
+		"\"ipv6\":\"fc03::2\"" \
+		"\"masklen6\":\"64\"" \
+	"}" \
+	"]" \
+"}" > ${cfgjson}
+
+LKL_HIJACK_CONFIG_FILE=$cfgjson sh \
+	${script_dir}/run_netperf.sh 192.168.13.1 1 0 TCP_MAERTS
+
+echo \
+"{" \
+"\"gateway\":\"192.168.13.1\"," \
+"\"gateway6\":\"fc03::1\"," \
+"\"interfaces\":[" \
+	"{" \
+		"\"type\":\"tap\"" \
+		"\"param\":\"lkl_ptt0\"" \
+		"\"ip\":\"192.168.13.2\"" \
+		"\"masklen\":\"24\"" \
+		"\"ipv6\":\"fc03::2\"" \
+		"\"masklen6\":\"64\"" \
+	"}" \
+	"]" \
+"}" > ${cfgjson}
+LKL_HIJACK_CONFIG_FILE=$cfgjson sh \
+	${script_dir}/run_netperf.sh 192.168.13.1 1 0 TCP_RR
+LKL_HIJACK_CONFIG_FILE=$cfgjson sh \
+	${script_dir}/run_netperf.sh fc03::1 1 0 TCP_STREAM
 
 # QDISC test
-qdisc=$(LKL_HIJACK_NET_QDISC="root|fq" ${hijack_script} tc -s -d qdisc show)
+echo \
+"{" \
+"\"gateway\":\"192.168.13.1\"," \
+"\"gateway6\":\"fc03::1\"," \
+"\"interfaces\":[" \
+	"{" \
+		"\"type\":\"tap\"" \
+		"\"param\":\"lkl_ptt0\"" \
+		"\"ip\":\"192.168.13.2\"" \
+		"\"masklen\":\"24\"" \
+		"\"ipv6\":\"fc03::2\"" \
+		"\"masklen6\":\"64\"" \
+		"\"mac\":\"aa:bb:cc:dd:ee:ff\"" \
+		"\"qdisc\":\"root|fq\"" \
+	"}" \
+	"]" \
+"}" > ${cfgjson}
+qdisc=$(LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} tc -s -d qdisc show)
 echo "$qdisc"
 echo "$qdisc" | grep "qdisc fq" > /dev/null
 echo "$qdisc" | grep throttled > /dev/null
+
+echo "== Multiple interfaces with TAP tests=="
+# Set up 2nd TAP device we'd like to use
+sudo ip tuntap del dev lkl_ptt1 mode tap || true
+sudo ip tuntap add dev lkl_ptt1 mode tap user $USER
+sudo ip link set dev lkl_ptt1 up
+sudo ip addr add dev lkl_ptt1 192.168.14.1/24
+sudo ip -6 addr add dev lkl_ptt1 fc04::1/64
+
+echo \
+"{" \
+"\"gateway\":\"192.168.13.1\"," \
+"\"gateway6\":\"fc03::1\"," \
+"\"interfaces\":[" \
+	"{" \
+		"\"type\":\"tap\"" \
+		"\"param\":\"lkl_ptt0\"" \
+		"\"ip\":\"192.168.13.2\"" \
+		"\"masklen\":\"24\"" \
+		"\"ipv6\":\"fc03::2\"" \
+		"\"masklen6\":\"64\"" \
+		"\"mac\":\"aa:bb:cc:dd:ee:ff\"" \
+	"}," \
+	"{" \
+		"\"type\":\"tap\"" \
+		"\"param\":\"lkl_ptt1\"" \
+		"\"ip\":\"192.168.14.2\"" \
+		"\"masklen\":\"24\"" \
+		"\"ipv6\":\"fc04::2\"" \
+		"\"masklen6\":\"64\"" \
+		"\"mac\":\"aa:bb:cc:dd:ee:aa\"" \
+	"}" \
+	"]" \
+"}" > ${cfgjson}
+
+# Make sure our device has the addresses we expect
+addr=$(LKL_HIJACK_DEBUG=1 \
+	LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ip addr)
+echo "$addr" | grep eth0
+echo "$addr" | grep 192.168.13.2
+echo "$addr" | grep "aa:bb:cc:dd:ee:ff"
+echo "$addr" | grep "fc03::2"
+echo "$addr" | grep eth1
+echo "$addr" | grep 192.168.14.2
+echo "$addr" | grep "aa:bb:cc:dd:ee:aa"
+echo "$addr" | grep "fc04::2"
+! echo "$addr" | grep "WARN: failed to free"
+
+# Copy ping so we're allowed to run it under LKL
+cp `which ping` .
+cp `which ping6` .
+
+# Make sure we can ping the host from inside LKL
+LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ./ping 192.168.13.1 -c 1
+LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ./ping6 fc03::1 -c 1
+LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ./ping 192.168.14.1 -c 1
+LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ./ping6 fc04::1 -c 1
+rm ./ping ./ping6
+
+neigh1="192.168.13.100|12:34:56:78:9a:bc"
+neigh2="fc03::100|12:34:56:78:9a:be"
+neigh3="192.168.14.100|12:34:56:78:9a:bd"
+neigh4="fc04::100|12:34:56:78:9a:bf"
+
+echo \
+"{" \
+"\"gateway\":\"192.168.13.1\"," \
+"\"gateway6\":\"fc03::1\"," \
+"\"interfaces\":[" \
+	"{" \
+		"\"type\":\"tap\"" \
+		"\"param\":\"lkl_ptt0\"" \
+		"\"ip\":\"192.168.13.2\"" \
+		"\"masklen\":\"24\"" \
+		"\"ipv6\":\"fc03::2\"" \
+		"\"masklen6\":\"64\"" \
+		"\"mac\":\"aa:bb:cc:dd:ee:ff\"" \
+		"\"neigh\":\"${neigh1};${neigh2}\"" \
+	"}," \
+	"{" \
+		"\"type\":\"tap\"" \
+		"\"param\":\"lkl_ptt1\"" \
+		"\"ip\":\"192.168.14.2\"" \
+		"\"masklen\":\"24\"" \
+		"\"ipv6\":\"fc04::2\"" \
+		"\"masklen6\":\"64\"" \
+		"\"mac\":\"aa:bb:cc:dd:ee:aa\"" \
+		"\"neigh\":\"${neigh3};${neigh4}\"" \
+	"}" \
+	"]" \
+"}" > ${cfgjson}
+
+# add neighbor entries
+ans=$(LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ip neighbor show) || true
+echo "$ans" | tail -n 15 | grep "12:34:56:78:9a:bc"
+echo "$ans" | tail -n 15 | grep "12:34:56:78:9a:be"
+echo "$ans" | tail -n 15 | grep "12:34:56:78:9a:bd"
+echo "$ans" | tail -n 15 | grep "12:34:56:78:9a:bf"
+
+# gateway
+ans=$(LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ip route show) || true
+echo "$ans" | tail -n 15 | grep "192.168.13.1"
+
+# gateway v6
+ans=$(LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ip -6 route show) || true
+echo "$ans" | tail -n 15 | grep "fc03::1"
 
 if [ -z "`printenv CONFIG_AUTO_LKL_VIRTIO_NET_VDE`" ]; then
     exit 0
@@ -161,10 +374,23 @@ if [ ! -x "$(which vde_switch)" ]; then
 fi
 VDESWITCH=${work_dir}/vde_switch
 
-export LKL_HIJACK_NET_IFTYPE=vde
-export LKL_HIJACK_NET_IFPARAMS=${VDESWITCH}
-export LKL_HIJACK_NET_IP=192.168.13.2
-export LKL_HIJACK_NET_NETMASK_LEN=24
+echo \
+"{" \
+"\"gateway\":\"192.168.13.1\"," \
+"\"gateway6\":\"fc03::1\"," \
+"\"interfaces\":[" \
+	"{" \
+		"\"type\":\"vde\"" \
+		"\"param\":\"${VDESWITCH}\"" \
+		"\"ip\":\"192.168.13.2\"" \
+		"\"masklen\":\"24\"" \
+		"\"ipv6\":\"fc03::2\"" \
+		"\"masklen6\":\"64\"" \
+		"\"mac\":\"aa:bb:cc:dd:ee:ff\"" \
+		"\"neigh\":\"${neigh1};${neigh2}\"" \
+	"}" \
+	"]" \
+"}" > ${cfgjson}
 
 sudo ip link set dev lkl_ptt0 down &> /dev/null || true
 sudo ip link del dev lkl_ptt0 &> /dev/null || true
@@ -176,7 +402,7 @@ sleep 2
 vde_switch -d -t lkl_ptt0 -s ${VDESWITCH} -p ${VDESWITCH}.pid
 
 # Make sure our device has the addresses we expect
-addr=$(LKL_HIJACK_NET_MAC="aa:bb:cc:dd:ee:ff" ${hijack_script} ip addr) 
+addr=$(LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ip addr)
 echo "$addr" | grep eth0
 echo "$addr" | grep 192.168.13.2
 echo "$addr" | grep "aa:bb:cc:dd:ee:ff"
@@ -185,10 +411,10 @@ echo "$addr" | grep "aa:bb:cc:dd:ee:ff"
 cp $(which ping) .
 
 # Make sure we can ping the host from inside LKL
-${hijack_script} ./ping 192.168.13.1 -c 1
+LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} ./ping 192.168.13.1 -c 1
 rm ./ping
 
 # Now let's check that the host can see LKL.
 sudo arp -d 192.168.13.2
 sudo ping -i 0.01 -c 65 192.168.13.2 &
-${hijack_script} sleep 3
+LKL_HIJACK_CONFIG_FILE=$cfgjson ${hijack_script} sleep 3
