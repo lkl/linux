@@ -124,6 +124,10 @@ lkl_test_exec()
     fi
 
     $SUDO $WRAPPER $file "$@"
+
+    if [ -n "$VALGRIND" ] && [ -a "valgrind-$(basename $file)-$$.xml" ]; then
+        $basedir/tests/valgrind2xunit.py valgrind-$(basename $file)-$$.xml
+    fi
 }
 
 lkl_test_cmd()
