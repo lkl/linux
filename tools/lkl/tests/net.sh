@@ -58,10 +58,6 @@ setup_backend()
     "loopback")
         ;;
     "pipe")
-        if [ -n "$VALGRIND" ]; then
-            echo "pipe test with valgrind takes so long: skip"
-            return $TEST_SKIP
-        fi
         if [ -z $(lkl_test_cmd which mkfifo) ]; then
             echo "no mkfifo command"
             return $TEST_SKIP
@@ -126,14 +122,38 @@ run_tests()
         lkl_test_exec $script_dir/net-test --backend pipe \
                       --ifname "$fifo1|$fifo2" \
                       --ip $(ip_host) --netmask-len $TEST_IP_NETMASK \
-                      --sleep 30 >/dev/null &
+                      --sleep 1800 >/dev/null &
         cp $script_dir/net-test $script_dir/net-test2
+
+        cat > hijack-test2.conf << EOF
+    {
+        "interfaces":
+        [
+            {
+                "type":"pipe",
+                "param":"${fifo2}|${fifo1}",
+                "ip":"$(ip_lkl)",
+                "masklen":"$TEST_IP_NETMASK",
+            }
+        ]
+    }
+EOF
+
+        # check if net-test server is online or not
+        cp `which ping` ./
+        until lkl_test_cmd LKL_HIJACK_CONFIG_FILE=hijack-test2.conf \
+                           $basedir/bin/lkl-hijack.sh \
+                           ./ping -q -c 1 -w 10 $(ip_host) \
+                           > /dev/null 2>&1; do :; done
+        rm -f ping
+
         lkl_test_exec $script_dir/net-test2 --backend pipe \
                       --ifname "$fifo2|$fifo1" \
                       --ip $(ip_lkl) --netmask-len $TEST_IP_NETMASK \
                       --dst $(ip_host)
         rm -f $script_dir/net-test2
-        wait
+        kill $!
+        wait $! 2>/dev/null
         ;;
     "tap")
         lkl_test_exec $script_dir/net-test --backend tap \
