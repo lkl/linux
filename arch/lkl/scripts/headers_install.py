@@ -138,6 +138,11 @@ if 'LKL_INSTALL_ADDITIONAL_HEADERS' in os.environ:
 
 new_headers = set()
 
+# Create symlink of gsed as sed on FreeBSD
+if 'freebsd' in sys.platform:
+    print('Creating symlink of gsed as sed')
+    os.system('ln -sf `which gsed` '+srctree+'/tools/lkl/bin/sed')
+
 for h in headers:
     dir = os.path.dirname(h)
     copyfromdir = os.path.dirname(relpath2abspath(h))
