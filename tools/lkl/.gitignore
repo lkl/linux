@@ -1,0 +1,14 @@
+tests/boot
+fs2tar
+cptofs
+cpfromfs
+lklfuse
+tests/valgrind*.xml
+*.exe
+*.dll
+tests/net-test
+tests/disk
+Makefile.conf
+include/lkl_autoconf.h
+tests/autoconf.sh
+*.pyc

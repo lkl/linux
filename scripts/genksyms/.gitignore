@@ -1,0 +1,4 @@
+*.lex.c
+*.tab.c
+*.tab.h
+genksyms

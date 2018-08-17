@@ -1,0 +1,177 @@
+version: 2
+general:
+  artifacts:
+
+do_steps: &do_steps
+ steps:
+  - run: echo "$CROSS_COMPILE" > ~/_cross_compile
+  - restore_cache:
+      key: code-tree-shallow-{{ .Environment.CACHE_VERSION }}
+  - run:
+      name: checkout build tree
+      command: |
+        mkdir -p ~/.ssh/
+        ssh-keyscan -H github.com >> ~/.ssh/known_hosts
+        if ! [ -d .git ]; then
+          git clone --depth=1 $CIRCLE_REPOSITORY_URL .;
+        fi
+        if [[ $CIRCLE_BRANCH == pull/* ]]; then
+           git fetch --depth=1 origin $CIRCLE_BRANCH/head;
+        else
+           git fetch --depth=1 origin $CIRCLE_BRANCH;
+        fi
+        git reset --hard $CIRCLE_SHA1
+  - save_cache:
+      key: code-tree-shallow-{{ .Environment.CACHE_VERSION }}-{{ epoch }}
+      paths:
+        - /home/ubuntu/project/.git
+  - run:
+      name: clean
+      command: |
+        make mrproper
+        cd tools/lkl && make clean-conf
+        rm -rf ~/junit
+  - run: mkdir -p /home/ubuntu/.ccache
+  - restore_cache:
+      key: compiler-cache-{{ checksum "~/_cross_compile" }}-{{ .Environment.CACHE_VERSION }}
+  - run:
+      name: build DPDK
+      command: |
+        if [ "$MKARG" = "dpdk=yes" ]; then
+          sudo apt-get update
+          if ! sudo apt-get install -y linux-headers-$(uname -r) ; then
+             cd /lib/modules && sudo ln -sf 4.4.0-97-generic `uname -r` && \
+               cd /home/ubuntu/project
+          fi
+          cd tools/lkl && ./scripts/dpdk-sdk-build.sh;
+        fi
+  - run:
+      name: copy mingw binutils
+      command: |
+        if [ "$CROSS_COMPILE" = "i686-w64-mingw32-" ]; then
+          sudo cp tools/lkl/bin/i686-w64-mingw32-* /usr/bin;
+        fi
+  - run:
+      name: start emulator
+      command: |
+        if [[ $CROSS_COMPILE == *android* ]]; then
+          emulator -avd Nexus5_API24 -no-window -no-audio -no-boot-anim;
+        elif [[ $CROSS_COMPILE == *freebsd* ]]; then
+          cd /home/ubuntu && $QEMU
+        fi
+      background: true
+  - run: cd tools/lkl && make -j8 ${MKARG}
+  - run: mkdir -p ~/destdir && cd tools/lkl && make DESTDIR=~/destdir
+  - save_cache:
+     paths:
+       - /home/ubuntu/.ccache
+     key: compiler-cache-{{ checksum "~/_cross_compile" }}-{{ .Environment.CACHE_VERSION }}-{{ epoch }}
+  - run:
+      name: wait emulator to boot
+      command: |
+        if [[ $CROSS_COMPILE == *android* ]]; then
+          /home/ubuntu/circle-android.sh wait-for-boot;
+        elif [[ $CROSS_COMPILE == *freebsd* ]]; then
+          while ! $MYSSH -o ConnectTimeout=1 exit 2> /dev/null
+          do
+             sleep 5
+          done
+        fi
+  - run:
+      name: run tests
+      command: |
+        mkdir -p ~/junit
+        make -C tools/lkl run-tests tests="--junit-dir ~/junit"
+        find ./tools/lkl/ -type f -name "*.xml" -exec mv {} ~/junit/ \;
+      no_output_timeout: "90m"
+  - store_test_results:
+      path: ~/junit
+  - store_artifacts:
+      path: ~/junit
+
+## Customize the test machine
+jobs:
+  x86_64:
+   docker:
+     - image: lkldocker/circleci-x86_64:0.7
+   environment:
+     CROSS_COMPILE: ""
+     MKARG: "dpdk=yes"
+   <<: *do_steps
+
+  mingw32:
+   docker:
+     - image: lkldocker/circleci-mingw:0.6
+   environment:
+     CROSS_COMPILE: "i686-w64-mingw32-"
+   <<: *do_steps
+
+  android-arm32:
+   docker:
+     - image: lkldocker/circleci-android-arm32:0.6
+   environment:
+     CROSS_COMPILE: "arm-linux-androideabi-"
+     LKL_ANDROID_TEST: 1
+     ANDROID_SDK_ROOT: /home/ubuntu/android-sdk
+   <<: *do_steps
+
+  android-aarch64:
+   docker:
+     - image: lkldocker/circleci-android-arm64:0.6
+   environment:
+     CROSS_COMPILE: "aarch64-linux-android-"
+     LKL_ANDROID_TEST: 1
+     ANDROID_SDK_ROOT: /home/ubuntu/android-sdk
+   <<: *do_steps
+
+  freebsd11_x86_64:
+   docker:
+     - image: lkldocker/circleci-freebsd11-x86_64:0.4
+   environment:
+     CROSS_COMPILE: "x86_64-pc-freebsd11-"
+   <<: *do_steps
+
+  x86_64_valgrind:
+   docker:
+     - image: lkldocker/circleci-x86_64:0.7
+   environment:
+     CROSS_COMPILE: ""
+     MKARG: "dpdk=yes"
+     VALGRIND: 1
+   <<: *do_steps
+
+  checkpatch:
+   docker:
+     - image: lkldocker/circleci:0.5
+   environment:
+   steps:
+     - restore_cache:
+        key: code-tree-full-history-{{ .Environment.CACHE_VERSION }}
+     - checkout
+     - run: tools/lkl/scripts/checkpatch.sh
+     - save_cache:
+        key: code-tree-full-history-{{ .Environment.CACHE_VERSION }}-{{ epoch }}
+        paths:
+          - /home/ubuntu/project/.git
+        when: always
+
+workflows:
+  version: 2
+  build:
+    jobs:
+     - x86_64
+     - mingw32
+     - android-arm32
+     - android-aarch64
+     - freebsd11_x86_64
+     - checkpatch
+  nightly:
+    triggers:
+      - schedule:
+          cron: "0 0 * * *"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - x86_64_valgrind

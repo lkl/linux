@@ -1,0 +1,97 @@
+config LKL
+       def_bool y
+       depends on !SMP && !MMU && !COREDUMP && !SECCOMP && !UPROBES && !COMPAT && !USER_RETURN_NOTIFIER
+       select ARCH_THREAD_STACK_ALLOCATOR
+       select RWSEM_GENERIC_SPINLOCK
+       select GENERIC_ATOMIC64
+       select GENERIC_HWEIGHT
+       select FLATMEM
+       select FLAT_NODE_MEM_MAP
+       select GENERIC_CLOCKEVENTS
+       select GENERIC_CPU_DEVICES
+       select NO_HZ_IDLE
+       select NO_PREEMPT
+       select ARCH_WANT_FRAME_POINTERS
+       select HAS_DMA
+       select DMA_DIRECT_OPS
+       select PHYS_ADDR_T_64BIT if 64BIT
+       select 64BIT if OUTPUT_FORMAT = "elf64-x86-64"
+	   select 64BIT if OUTPUT_FORMAT = "pe-x86-64"
+       select HAVE_UNDERSCORE_SYMBOL_PREFIX if OUTPUT_FORMAT = "pe-i386"
+       select 64BIT if OUTPUT_FORMAT = "elf64-x86-64-freebsd"
+       select 64BIT if OUTPUT_FORMAT = "elf64-littleaarch64"
+       select NET
+       select MULTIUSER
+       select INET
+       select IPV6
+       select IP_PNP
+       select IP_PNP_DHCP
+       select TCP_CONG_ADVANCED
+       select TCP_CONG_BBR
+       select HIGH_RES_TIMERS
+       select NET_SCHED
+       select NET_SCH_FQ
+       select IP_MULTICAST
+       select IPV6_MULTICAST
+       select IP_MULTIPLE_TABLES
+       select IPV6_MULTIPLE_TABLES
+       select IP_ROUTE_MULTIPATH
+       select IPV6_ROUTE_MULTIPATH
+       select IP_ADVANCED_ROUTER
+       select IPV6_ADVANCED_ROUTER
+       select ARCH_NO_COHERENT_DMA_MMAP
+
+config OUTPUTFORMAT
+       string
+       option env="OUTPUT_FORMAT"
+
+config OUTPUT_FORMAT
+       string "Output format"
+       default OUTPUTFORMAT
+
+config ARCH_DMA_ADDR_T_64BIT
+       def_bool 64BIT
+
+config 64BIT
+       def_bool n
+
+config BIG_ENDIAN
+       def_bool n
+
+config GENERIC_CSUM
+       def_bool y
+
+config GENERIC_HWEIGHT
+       def_bool y
+
+config NO_IOPORT_MAP
+       def_bool y
+
+config RWSEM_GENERIC_SPINLOCK
+	bool
+	default y
+
+source init/Kconfig
+
+source net/Kconfig
+
+source drivers/Kconfig
+
+source fs/Kconfig
+
+source mm/Kconfig
+
+source kernel/Kconfig.preempt
+
+source kernel/Kconfig.locks
+
+source kernel/Kconfig.hz
+
+source security/Kconfig
+
+source crypto/Kconfig
+
+source lib/Kconfig
+
+source lib/Kconfig.debug
+
