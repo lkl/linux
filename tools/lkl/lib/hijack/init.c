@@ -463,6 +463,14 @@ hijack_init(void)
 	if (single_cpu_mode == 2)
 		PinToFirstCpu(&ori_cpu);
 
+	ret = lkl_start_kernel(&lkl_host_ops, cfg->boot_cmdline);
+	if (ret) {
+		fprintf(stderr, "can't start kernel: %s\n", lkl_strerror(ret));
+		return;
+	}
+
+	lkl_running = 1;
+
 	for (ifidx = 0; ifidx < cfg->ifnum; ifidx++) {
 		ret = lkl_hijack_netdev_create(cfg, ifidx);
 		if (ret < 0)
@@ -482,14 +490,6 @@ hijack_init(void)
 		exit(1);
 	}
 #endif
-
-	ret = lkl_start_kernel(&lkl_host_ops, cfg->boot_cmdline);
-	if (ret) {
-		fprintf(stderr, "can't start kernel: %s\n", lkl_strerror(ret));
-		return;
-	}
-
-	lkl_running = 1;
 
 	/* initialize epoll manage list */
 	memset(dual_fds, -1, sizeof(int) * LKL_FD_OFFSET);
