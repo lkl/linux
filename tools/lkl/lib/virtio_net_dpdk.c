@@ -7,12 +7,13 @@
  */
 
 //#define DEBUG
-
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include <errno.h>
 #include <sys/queue.h>
+#include <pthread.h>
 
 #include <rte_eal.h>
 #include <rte_ethdev.h>
@@ -402,8 +403,9 @@ struct lkl_netdev *lkl_netdev_dpdk_create(const char *ifparams, int offload,
 	if (offload & (BIT(LKL_VIRTIO_NET_F_GUEST_TSO4) |
 			BIT(LKL_VIRTIO_NET_F_GUEST_TSO6) |
 			BIT(LKL_VIRTIO_NET_F_MRG_RXBUF))) {
-		portconf.rxmode.enable_lro = 1;
-		portconf.rxmode.hw_strip_crc = 1;
+		// TODO check rx_offload_capa before applying this
+		portconf.rxmode.offloads |= DEV_RX_OFFLOAD_TCP_LRO;
+		portconf.rxmode.offloads |= ~DEV_RX_OFFLOAD_KEEP_CRC;
 	}
 
 	ret = rte_eth_dev_configure(nd->portid, NUMQUEUE, NUMQUEUE,
@@ -424,11 +426,12 @@ struct lkl_netdev *lkl_netdev_dpdk_create(const char *ifparams, int offload,
 		return NULL;
 	}
 
-	dev_info.default_txconf.txq_flags = 0;
+	dev_info.default_txconf.offloads = 0;
 
-	dev_info.default_txconf.txq_flags |= ETH_TXQ_FLAGS_NOXSUMSCTP;
-	dev_info.default_txconf.txq_flags |= ETH_TXQ_FLAGS_NOVLANOFFL;
-
+	// TODO check capabilities before applying this
+	dev_info.default_txconf.offloads |= DEV_TX_OFFLOAD_MULTI_SEGS;
+	dev_info.default_txconf.offloads |= DEV_TX_OFFLOAD_UDP_CKSUM;
+	dev_info.default_txconf.offloads |= DEV_TX_OFFLOAD_TCP_CKSUM;
 
 	ret = rte_eth_tx_queue_setup(nd->portid, 0, NUMDESC, 0,
 				     &dev_info.default_txconf);

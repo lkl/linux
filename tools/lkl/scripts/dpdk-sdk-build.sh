@@ -1,6 +1,6 @@
 #!/bin/sh
 
-dpdk_version="17.02"
+dpdk_version="19.02"
 
 git clone -b v${dpdk_version} git://dpdk.org/dpdk dpdk-${dpdk_version}
 

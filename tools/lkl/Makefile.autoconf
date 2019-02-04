@@ -27,7 +27,7 @@ endef
 
 define virtio_net_dpdk
   $(call set_autoconf_var,VIRTIO_NET_DPDK,y)
-  RTE_SDK ?= $(OUTPUT)/dpdk-17.02
+  RTE_SDK ?= $(OUTPUT)/dpdk-19.02
   RTE_TARGET ?= build
   DPDK_LIBS = -lrte_pmd_vmxnet3_uio -lrte_pmd_ixgbe -lrte_pmd_e1000
   DPDK_LIBS += -lrte_pmd_virtio
