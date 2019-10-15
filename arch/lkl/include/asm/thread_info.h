@@ -13,16 +13,16 @@ typedef struct {
 } mm_segment_t;
 
 struct thread_info {
-	struct task_struct *task;
-	unsigned long flags;
-	int preempt_count;
-	mm_segment_t addr_limit;
-	struct lkl_sem *sched_sem;
 	struct lkl_jmp_buf sched_jb;
-	bool dead;
-	lkl_thread_t tid;
+	struct task_struct *task;
 	struct task_struct *prev_sched;
+	struct lkl_sem *sched_sem;
+	unsigned long flags;
 	unsigned long stackend;
+	mm_segment_t addr_limit;
+	lkl_thread_t tid;
+	int preempt_count;
+	bool dead;
 };
 
 #define INIT_THREAD_INFO(tsk)				\
