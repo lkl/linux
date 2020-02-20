@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <linux/sockios.h>
 #undef st_atime
 #undef st_mtime
 #undef st_ctime
