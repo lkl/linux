@@ -58,6 +58,8 @@ do_steps: &do_steps
           emulator -avd Nexus5_API24 -no-window -no-audio -no-boot-anim;
         elif [[ $CROSS_COMPILE == *freebsd* ]]; then
           cd /home/ubuntu && $QEMU
+        elif [[ "$VFIO_PCI" == "yes" ]]; then
+          cd tools/lkl/tests && ./vfio-pci.sh prepenv
         fi
       background: true
   - run: cd tools/lkl && make -j8 ${MKARG}
@@ -76,6 +78,8 @@ do_steps: &do_steps
           do
              sleep 5
           done
+        elif [[ "$VFIO_PCI" == "yes" ]]; then
+          cd tools/lkl/tests && ./vfio-pci.sh wait_guest
         fi
   - run:
       name: run tests
@@ -97,6 +101,7 @@ jobs:
    environment:
      CROSS_COMPILE: ""
      MKARG: "dpdk=no"
+     VFIO_PCI: "yes"
    <<: *do_steps
 
   i386:
