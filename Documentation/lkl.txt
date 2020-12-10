@@ -147,7 +147,6 @@ for the configuration file.  You can also use the old-style configuration with
 environmental variables (e.g., LKL_HIJACK_NET_IFTYPE) but those are overridden
 if a json file is specified.
 
-```
      $ cat conf.json
      {
        "gateway":"192.168.0.1",
@@ -184,7 +183,6 @@ if a json file is specified.
        ]
      }
      $ LKL_HIJACK_CONFIG_FILE="conf.json" lkl-hijack.sh ip addr s
-```
 
 The following are the list of keys to describe a JSON file.
 
@@ -194,9 +192,8 @@ The following are the list of keys to describe a JSON file.
   value type: string
 
   the gateway IPv4 address of LKL network stack.
-```
-     "gateway":"192.168.0.1"
-```
+
+      "gateway":"192.168.0.1"
 
 * IPv6 gateway address
 
@@ -204,9 +201,8 @@ The following are the list of keys to describe a JSON file.
   value type: string
 
   the gateway IPv6 address of LKL network stack.
-```
-     "gateway6":"2001:db8:0:f101::1"
-```
+
+      "gateway6":"2001:db8:0:f101::1"
 
 * Debug
 
@@ -219,9 +215,8 @@ The following are the list of keys to describe a JSON file.
   E.g., setting it to "0x100" will cause the LKL kernel to pause after
   the hijack'ed app exits. This allows one to debug or collect info from
   the LKL kernel before it quits.
-```
-     "debug":"1"
-```
+
+      "debug":"1"
 
 * Single CPU pinning
 
@@ -231,9 +226,8 @@ The following are the list of keys to describe a JSON file.
   Pin LKL kernel threads on to a single host cpu. value "1" pins
   only LKL kernel threads while value "2" also pins polling
   threads.
-```
-     "singlecpu":"1"
-```
+
+      "singlecpu":"1"
 
 * SYSCTL
 
@@ -242,9 +236,8 @@ The following are the list of keys to describe a JSON file.
 
   Configure sysctl values of the booted kernel via the hijack library. Multiple
   entries can be specified.
-```
-     "sysctl":"net.ipv4.tcp_wmem=4096 87380 2147483647"
-```
+
+      "sysctl":"net.ipv4.tcp_wmem=4096 87380 2147483647"
 
 * Boot command line
 
@@ -254,18 +247,15 @@ The following are the list of keys to describe a JSON file.
   Specify the command line to the kernel boot so that change the configuration
   on a kernel instance.  For instance, you can change the memory size with
   below.
-```
-     "boot_cmdline": "mem=1G"
-```
+
+      "boot_cmdline": "mem=1G"
 
 * Mount
 
   key: "mount"
   value type: string
 
-```
-     "mount": "proc,sysfs"
-```
+      "mount": "proc,sysfs"
 
 * Network Interface Configuration
 
@@ -273,10 +263,8 @@ The following are the list of keys to describe a JSON file.
   value type: array of objects
 
   This key takes a set of sub-keys to configure a single interface. Each key is defined as follows.
-  ```
-       "interfaces":[{....},{....}]
-  ```
 
+      "interfaces":[{....},{....}]
 
 	* Interface type
 
@@ -285,9 +273,8 @@ The following are the list of keys to describe a JSON file.
 
 	  The interface type in host operating system to connect to LKL.
 	  The following example specifies a tap interface.
-	```
-	     "type":"tap"
-	```
+
+	      "type":"tap"
 
 	* Interface parameter
 
@@ -296,10 +283,9 @@ The following are the list of keys to describe a JSON file.
 
 	  Additional configuration parameters for the interface specified by Interface type (type).
 	  The parameters depend on the interface type.
-	```
-	     "type":"tap",
-	     "param":"tap0"
-	```
+
+	      "type":"tap",
+	      "param":"tap0"
 
 	* Interface MTU size
 
@@ -307,9 +293,8 @@ The following are the list of keys to describe a JSON file.
 	  value type: string
 
 	  the MTU size of the interface.
-	```
-	     "mtu":"1280"
-	```
+
+	      "mtu":"1280"
 
 	* Interface IPv4 address
 
@@ -319,12 +304,9 @@ The following are the list of keys to describe a JSON file.
 	  the IPv4 address of the interface.
 	  If you want to use DHCP for the IP address assignment,
 	  use "boot_cmdline" with "ip=dhcp" option.
-	```
-	     "ip":"192.168.0.2"
-	```
-	```
-	     "boot_cmdline":"ip=dhcp"
-	```
+
+	      "ip":"192.168.0.2"
+	      "boot_cmdline":"ip=dhcp"
 
 	* Interface IPv4 netmask length
 
@@ -332,10 +314,9 @@ The following are the list of keys to describe a JSON file.
 	  value type: string
 
 	  the network mask length of the interface.
-	```
-	     "ip":"192.168.0.2",
-	     "masklen":"24"
-	```
+
+	      "ip":"192.168.0.2",
+	      "masklen":"24"
 
 	* Interface IPv4 gateway on routing policy table
 
@@ -348,11 +329,9 @@ The following are the list of keys to describe a JSON file.
 	  Table id is 2 * (interface index).
 	  This parameter could be used to configure LKL for mptcp, for example.
 
-	```
-	     "ip":"192.168.0.2",
-	     "masklen":"24",
-	     "ifgateway":"192.168.0.1"
-	```
+	      "ip":"192.168.0.2",
+	      "masklen":"24",
+	      "ifgateway":"192.168.0.1"
 
 	* Interface IPv6 address
 
@@ -360,9 +339,8 @@ The following are the list of keys to describe a JSON file.
 	  value type: string
 
 	  the IPv6 address of the interface.
-	```
-	     "ipv6":"2001:db8:0:f101::2"
-	```
+
+	      "ipv6":"2001:db8:0:f101::2"
 
 	* Interface IPv6 netmask length
 
@@ -370,10 +348,9 @@ The following are the list of keys to describe a JSON file.
 	  value type: string
 
 	  the network mask length of the interface.
-	```
-	     "ipv6":"2001:db8:0:f101::2",
-	     "masklen":"64"
-	```
+
+	      "ipv6":"2001:db8:0:f101::2",
+	      "masklen":"64"
 
 	* Interface IPv6 gateway on routing policy table
 
@@ -385,11 +362,10 @@ The following are the list of keys to describe a JSON file.
 	  Table SELECTOR is "from" and PREFIX is address you assigned to this interface.
 	  Table id is 2 * (interface index) + 1.
 	  This parameter could be used to configure LKL for mptcp, for example.
-	```
-	     "ipv6":"2001:db8:0:f101::2",
-	     "masklen":"64"
-	     "ifgateway6":"2001:db8:0:f101::1",
-	```
+
+	      "ipv6":"2001:db8:0:f101::2",
+	      "masklen":"64"
+	      "ifgateway6":"2001:db8:0:f101::1",
 
 	* Interface MAC address
 
@@ -397,19 +373,17 @@ The following are the list of keys to describe a JSON file.
 	  value type: string
 
 	  the MAC address of the interface.
-	```
-	     "mac":"12:34:56:78:9a:bc"
-	```
 
-	* Interfac neighbor entries
+	      "mac":"12:34:56:78:9a:bc"
+
+	* Interface neighbor entries
 
 	  key: "neigh"
 	  value type: string
 
 	  Add a list of permanent neighbor entries in the form of "ip|mac;ip|mac;...". ipv6 are supported
-	```
-	     "neigh":"192.168.0.1|12:34:56:78:9a:bc;2001:db8:0:f101::1|12:34:56:78:9a:be"
-	```
+
+	      "neigh":"192.168.0.1|12:34:56:78:9a:bc;2001:db8:0:f101::1|12:34:56:78:9a:be"
 
 	* Interface qdisc entries
 
@@ -417,9 +391,8 @@ The following are the list of keys to describe a JSON file.
 	  value type: string
 
 	  Add a qdisc entry in the form of "root|type;root|type;...".
-	```
-	     "qdisc":"root|fq"
-	```
+
+	      "qdisc":"root|fq"
 
 	* Interface offload
 
@@ -431,9 +404,8 @@ The following are the list of keys to describe a JSON file.
 	  "guest csum" (LKL_VIRTIO_NET_F_GUEST_CSUM) device features, simply set
 	  it to 0x8002.
 	  See virtio_net.h for a list of offload features and their bit masks.
-	```
-	     "offload":"0x8002"
-	```
+
+	      "offload":"0x8002"
 
 * Delay
 
@@ -445,9 +417,8 @@ The following are the list of keys to describe a JSON file.
   amount of time before accepting a request from application, such as
   delivery of address assignment to an network interface.  This parameter
   is used in such case.  The value is described as a microsecond value.
-```
-     "delay_main":"500000"
-```
+
+      "delay_main":"500000"
 
 FAQ
 ===
