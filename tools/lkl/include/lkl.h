@@ -954,6 +954,16 @@ int lkl_qdisc_add(int ifindex, const char *root, const char *type);
 void lkl_qdisc_parse_add(int ifindex, const char *entries);
 
 /**
+ * lkl_sysctl_get - read a sysctl value
+ *
+ * @path - the path to an sysctl entry (e.g., "net.ipv4.tcp_wmem");
+ * @buffer - pointer to the buffer to store sysctl attribute
+ * @size - size of buffer (should be sufficient to store desired
+ *				 attribute value)
+ */
+int lkl_sysctl_get(const char *path, char *buffer, int size);
+
+/**
  * lkl_sysctl - write a sysctl value
  *
  * @path - the path to an sysctl entry (e.g., "net.ipv4.tcp_wmem");
