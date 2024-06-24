@@ -36,8 +36,8 @@ void __init bootmem_init(unsigned long mem_sz)
 	 * Give all the memory to the bootmap allocator, tell it to put the
 	 * boot mem_map at the start of memory.
 	 */
-	max_low_pfn = virt_to_pfn(memory_end);
-	min_low_pfn = virt_to_pfn(memory_start);
+	max_low_pfn = virt_to_pfn((const void*)memory_end);
+	min_low_pfn = virt_to_pfn((const void*)memory_start);
 	memblock_add(memory_start, mem_size);
 
 	empty_zero_page = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
