@@ -169,6 +169,7 @@ define do_autoconf_llvm
   $(eval LLVM_SUFFIX := $(if $(filter -%,$(LLVM)),$(LLVM)))
   export CLANG_TARGET_FLAGS_lkl := $(CROSS_COMPILE)
   export CC := $(LLVM_PREFIX)clang$(LLVM_SUFFIX)
+  export CXX := $(LLVM_PREFIX)clang++$(LLVM_SUFFIX)
   export LD := $(LLVM_PREFIX)ld.lld$(LLVM_SUFFIX)
   export AR := $(LLVM_PREFIX)llvm-ar$(LLVM_SUFFIX)
   $(eval LD := $(LLVM_PREFIX)ld.lld$(LLVM_SUFFIX))
@@ -185,6 +186,7 @@ define do_autoconf_fuzzing
   $(eval kasan := yes)
   $(call set_kernel_config,LKL_FUZZING,y)
   $(if $(LKL_LINE_COV),$(call set_kernel_config,LKL_LINE_COV,y))
+  $(if $(MMU),$(call set_kernel_config,ANDROID_BINDER_IPC,y))
 endef
 
 define mmu_test_enable

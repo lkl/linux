@@ -1,0 +1,17 @@
+ifeq ($(PROTOBUF_MUTATOR_DIR),)
+$(error No PROTOBUF_MUTATOR_DIR provided for Binder fuzzer. \
+    Refer to documentation at tools/lkl/fuzzers/binder/README.md)
+endif
+
+LIBPROTOBUF_MUTATOR_INCLUDES := -I$(PROTOBUF_MUTATOR_DIR)
+LIBPROTOBUF_MUTATOR_INCLUDES += \
+    -I$(PROTOBUF_MUTATOR_DIR)/build/external.protobuf/include
+
+BINDER_PB_GEN_CPP := $(OUTPUT)fuzzers/binder/binder.pb.cpp
+BINDER_PB_GEN_H := $(OUTPUT)fuzzers/binder/binder.bp.h
+
+CXXFLAGS_binder.pb.o += -DNDEBUG $(LIBPROTOBUF_MUTATOR_INCLUDES)
+CXXFLAGS_binder-fuzzer.o += $(LIBPROTOBUF_MUTATOR_INCLUDES)
+
+binder-fuzzer-y += binder-fuzzer.o binder.o binder.pb.o
+
