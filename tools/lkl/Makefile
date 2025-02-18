@@ -48,6 +48,8 @@ export CFLAGS += -I$(OUTPUT)/include -Iinclude -Wall -g -O2 -Wextra \
 	 -Wno-unused-parameter \
 	 -Wno-missing-field-initializers -fno-strict-aliasing
 
+export CXXFLAGS += $(CFLAGS) -Wno-address-of-temporary
+
 -include Targets
 
 # Expand targets to output location and suffix but preserve special
@@ -106,6 +108,15 @@ $(OUTPUT)liblkl.a: $(OUTPUT)lib/liblkl-in.o $(OUTPUT)lib/lkl.o
 $(OUTPUT)%$(EXESUF): $(OUTPUT)%-in.o $(OUTPUT)liblkl.a
 	$(QUIET_LINK)$(CC) $(LDFLAGS) $(LDFLAGS_$*-y) -o $@ $^ $(LDLIBS) $(LDLIBS_$*-y)
 
+# Binder fuzzer is special: built with C++ toolchain and linked with libprotobuf-mutator
+$(OUTPUT)fuzzers/binder%$(EXESUF): $(OUTPUT)fuzzers/binder%-in.o $(OUTPUT)liblkl.a
+	$(QUIET_LINK)$(CXX) $(LDFLAGS) $(LDFLAGS_$*-y) -o $@ $^ $(LDLIBS) $(LDLIBS_$*-y)
+
+$(OUTPUT)fuzzers/binder/binder-fuzzer-in.o: gen_proto_files
+
+gen_proto_files: FORCE
+	$(Q)fuzzers/binder/compile_proto.sh
+
 # rule to build objects
 $(OUTPUT)%-in.o: $(OUTPUT)lib/lkl.o FORCE
 	$(Q)$(MAKE) -f $(srctree)/tools/build/Makefile.build dir=$(patsubst %/,%,$(dir $*)) obj=$(notdir $*)
@@ -120,7 +131,8 @@ clean:
 	 -delete -o -name '\.*.d' -delete
 	$(call QUIET_CLEAN, headers)$(RM) -r $(OUTPUT)/include/lkl/
 	$(call QUIET_CLEAN, liblkl.a)$(RM) $(OUTPUT)/liblkl.a
-	$(call QUIET_CLEAN, targets)$(RM) $(TARGETS) bin/stat
+	$(call QUIET_CLEAN, targets)$(RM) $(TARGETS) $(FUZZ_TARGETS) bin/stat
+	$(call QUIET_CLEAN, gen_protos)$(RM) $(OUTPUT)/fuzzers/binder/binder.pb.*
 
 mrproper: clean
 	$(call QUIET_CLEAN, vmlinux)$(MAKE) -C ../.. ARCH=lkl $(KOPT) mrproper
