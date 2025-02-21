@@ -1,0 +1,5 @@
+CXXFLAGS_binder.pb.o += -DNDEBUG $(LIBPROTOBUF_MUTATOR_INCLUDES_DIR)
+CXXFLAGS_binder-fuzzer.o += $(LIBPROTOBUF_MUTATOR_INCLUDES_DIR)
+
+binder-fuzzer-y += binder-fuzzer.o binder.o binder.pb.o
+
