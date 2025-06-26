@@ -555,7 +555,7 @@ static int lkl_test_join(void)
 
 static const char *boot_log;
 
-#ifdef LKL_HOST_CONFIG_KASAN_TEST
+#ifdef LKL_CONFIG_KASAN_KUNIT_TEST
 
 #define KASAN_CMD_LINE "kunit.filter_glob=kasan* "
 
@@ -563,22 +563,26 @@ static int lkl_test_kasan(void)
 {
 	char *log = strdup(boot_log);
 	char *line = NULL;
-	char c, d;
+	int p, f, s, t;
+	int num_lines, result = TEST_FAILURE;
 
 	line = strtok(log, "\n");
-	while (line) {
-		if (sscanf(line, "[ %*f] ok %*d kasa%c%c", &c, &d) == 1 &&
-			   c == 'n') {
+	for (num_lines = 0; line; num_lines++) {
+		if (sscanf(line,
+			   "[ %*f] # kasan: pass:%d fail:%d skip:%d total:%d",
+			   &p, &f, &s, &t) == 4) {
 			lkl_test_logf("%s", line);
-			return TEST_SUCCESS;
+			result = (f == 0 ? TEST_SUCCESS : TEST_FAILURE);
+			goto out;
 		}
 
 		line = strtok(NULL, "\n");
 	}
 
+	lkl_test_logf("no kasan test output in %d log lines\n", num_lines);
+out:
 	free(log);
-
-	return TEST_FAILURE;
+	return result;
 }
 #else
 #define KASAN_CMD_LINE
@@ -707,7 +711,7 @@ struct lkl_test tests[] = {
 	LKL_TEST(semaphore),
 	LKL_TEST(join),
 	LKL_TEST(start_kernel),
-#ifdef LKL_HOST_CONFIG_KASAN_TEST
+#ifdef LKL_CONFIG_KASAN_KUNIT_TEST
 	LKL_TEST(kasan),
 #endif
 	LKL_TEST(getpid),

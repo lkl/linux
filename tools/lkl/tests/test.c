@@ -90,7 +90,7 @@ int lkl_test_run(const struct lkl_test *tests, int nr, const char *fmt, ...)
 
 		start = clock();
 
-		ret = t->fn(t->arg1, t->arg2, t->arg3);
+		ret = t->fn();
 
 		stop = clock();
 

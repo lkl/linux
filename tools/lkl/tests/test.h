@@ -9,16 +9,14 @@
 
 struct lkl_test {
 	const char *name;
-	int (*fn)();
-	void *arg1, *arg2, *arg3;
+	int (*fn)(void);
 };
 
 /**
  * Simple wrapper to initialize a test entry.
- * @name - test name, it assume test function is named test_@name
- * @vargs - arguments to be passed to the function
+ * @name - test name; assume existing test function named lkl_test_@name
  */
-#define LKL_TEST(name, ...) { #name, lkl_test_##name, __VA_ARGS__ }
+#define LKL_TEST(name) { #name, lkl_test_##name }
 
 /**
  * lkl_test_run - run a test suite

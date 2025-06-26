@@ -111,14 +111,12 @@ define nt_host
 endef
 
 define kasan_test_enable
-  $(call set_autoconf_var,KASAN_TEST,y)
   $(call set_kernel_config,KUNIT,y)
   $(call set_kernel_config,BUILTIN_CMDLINE,\"kunit.filter_glob=\")
   $(call set_kernel_config,KASAN_KUNIT_TEST,y)
 endef
 
 define kasan_enable
-  $(call set_autoconf_var,KASAN,y)
   $(call set_kernel_config,KASAN,y)
   $(if $(filter yes,$(kasan_test)), $(call kasan_test_enable))
 endef

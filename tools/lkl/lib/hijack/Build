@@ -9,3 +9,6 @@ liblkl-zpoline-y += hijack.o
 liblkl-zpoline-y += init.o
 liblkl-zpoline-y += xlate.o
 liblkl-zpoline-y += dbg_handler.o
+
+# -std=gnu23/c23 fails due to HOST_CALL (*host_##name)()
+CFLAGS_hijack.o += -std=gnu11
