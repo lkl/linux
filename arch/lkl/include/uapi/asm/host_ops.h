@@ -57,7 +57,7 @@ enum lkl_prot {
  * These operations must be provided by a host library or by the application
  * itself.
  *
- * @virtio_devices - string containg the list of virtio devices in virtio mmio
+ * @virtio_devices - string containing the list of virtio devices in virtio mmio
  * command line format. This string is appended to the kernel command line and
  * is provided here for convenience to be implemented by the host library.
  *
