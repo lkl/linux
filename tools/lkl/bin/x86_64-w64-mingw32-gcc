@@ -1,0 +1,22 @@
+#!/bin/bash
+# Shim: routes kernel code to cygwin cross-gcc, user-space to mingw-gcc.
+# Cygwin-gcc: LP64 (long=64-bit), direct PE/COFF output, no Wine needed.
+# Mingw-gcc: LLP64 (long=32-bit), standard Win64 libraries.
+# The LKL API header uses __lkl_long_t (always 64-bit) to bridge the difference.
+REAL_MINGW_GCC="/usr/bin/x86_64-w64-mingw32-gcc"
+CYGWIN_GCC="/usr/bin/x86_64-pc-cygwin-gcc"
+LKL_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Kernel code → cygwin-gcc (LP64)
+for arg in "$@"; do
+    if [[ "$arg" == "-D__KERNEL__" ]]; then
+        exec "$CYGWIN_GCC" "$@"
+    fi
+done
+
+# User-space: use mingw-gcc with patched ld via specs
+SPECS="$LKL_BIN_DIR/.lkl-linker.specs"
+if [[ ! -f "$SPECS" ]]; then
+    printf '*linker:\n%s/x86_64-w64-mingw32-ld\n' "$LKL_BIN_DIR" > "$SPECS"
+fi
+exec "$REAL_MINGW_GCC" -specs="$SPECS" "$@"
