@@ -104,7 +104,7 @@ LKL_TEST_CALL(mount_dev, lkl_mount_dev, 0, disk_id, cla.partition, cla.fstype,
 
 static int lkl_test_umount_dev(void)
 {
-	long ret, ret2;
+	__lkl_long_t ret, ret2;
 
 	ret = lkl_sys_chdir("/");
 

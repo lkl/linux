@@ -107,6 +107,7 @@ class Installer:
     def install_headers(self):
         self.find_headers("arch/lkl/include/uapi/asm/syscalls.h")
         self.headers.add("arch/lkl/include/uapi/asm/host_ops.h")
+        self.headers.add("arch/lkl/include/uapi/asm/lkl_long.h")
         self.find_headers("include/uapi/linux/android/binder.h")
         self.find_headers("include/uapi/linux/uhid.h")
         self.find_headers("include/uapi/linux/mman.h")
@@ -160,6 +161,37 @@ class Installer:
         # needed for i386
         self.defines.add("__NR_stime")
 
+
+    def replace_long_types(self, content, h):
+        """Replace 'long' and 'unsigned long' with __lkl_long_t/__lkl_ulong_t
+        for LLP64 compatibility, preserving 'long long' and 'long double'."""
+        # Skip lkl_long.h itself
+        if 'lkl_long.h' in h:
+            return content
+        # Step 1: protect 'long long' and 'long double' with placeholders
+        content = re.sub(r'\blong\s+long\b', '__LKLPH_LONGLONG__', content)
+        content = re.sub(r'\blong\s+double\b', '__LKLPH_LONGDOUBLE__', content)
+        # Step 2: replace 'unsigned long [int]' (now safe, no 'long long' present)
+        content = re.sub(r'\bunsigned\s+long(?:\s+int)?\b', '__lkl_ulong_t', content)
+        # Step 3: replace remaining 'long [int]'
+        content = re.sub(r'\blong(?:\s+int)?\b', '__lkl_long_t', content)
+        # Step 4: restore placeholders
+        content = content.replace('__LKLPH_LONGLONG__', 'long long')
+        content = content.replace('__LKLPH_LONGDOUBLE__', 'long double')
+        # Step 5: add include for __lkl_long_t definition if replacements were made
+        if '__lkl_long_t' in content or '__lkl_ulong_t' in content:
+            # Insert after the first #ifndef/#define guard or at the top
+            include_line = '#include <lkl/asm/lkl_long.h>\n'
+            if include_line not in content:
+                # Insert after the header guard #define
+                m = re.search(r'(#ifndef\s+\w+\s*\n#define\s+\w+\s*\n)', content)
+                if m:
+                    pos = m.end()
+                    content = content[:pos] + '\n' + include_line + '\n' + content[pos:]
+                else:
+                    content = include_line + content
+        return content
+
     def update_header(self, h):
         print("  REPLACE\t%s" % h)
         content = open(h).read()
@@ -184,6 +216,8 @@ class Installer:
             search_str = r"(\W?union\s+)" + s + r"(\W)"
             replace_str = "\\1" + self.lkl_prefix(s) + "\\2"
             content = re.sub(search_str, replace_str, content, flags = re.MULTILINE)
+        # Replace long/unsigned long with __lkl_long_t/__lkl_ulong_t
+        content = self.replace_long_types(content, h)
         open(h, 'w').write(content)
 
     def update_headers(self):

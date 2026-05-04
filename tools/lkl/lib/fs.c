@@ -77,7 +77,7 @@ static int get_node_with_prefix(const char *path, const char *prefix,
 int lkl_encode_dev_from_sysfs(const char *sysfs_path, uint32_t *pdevid)
 {
 	int ret;
-	long fd;
+	__lkl_long_t fd;
 	int major, minor;
 	char buf[16] = { 0, };
 	char *bufptr;
@@ -200,7 +200,7 @@ int lkl_get_virtio_blkdev(int disk_id, unsigned int part, uint32_t *pdevid)
 	return lkl_encode_dev_from_sysfs(sysfs_path, pdevid);
 }
 
-long lkl_mount_blkdev(unsigned int dev, const char *fs_type, int flags,
+__lkl_long_t lkl_mount_blkdev(unsigned int dev, const char *fs_type, int flags,
 		      const char *data, char *mnt_str, unsigned int mnt_str_len)
 {
 	char dev_str[] = { "/dev/xxxxxxxx" };
@@ -257,7 +257,7 @@ long lkl_mount_blkdev(unsigned int dev, const char *fs_type, int flags,
 	return 0;
 }
 
-long lkl_mount_dev(unsigned int disk_id, unsigned int part,
+__lkl_long_t lkl_mount_dev(unsigned int disk_id, unsigned int part,
 		   const char *fs_type, int flags,
 		   const char *data, char *mnt_str, unsigned int mnt_str_len)
 {
@@ -272,14 +272,14 @@ long lkl_mount_dev(unsigned int disk_id, unsigned int part,
 				mnt_str_len);
 }
 
-long lkl_umount_timeout(char *path, int flags, long timeout_ms)
+__lkl_long_t lkl_umount_timeout(char *path, int flags, __lkl_long_t timeout_ms)
 {
-	long incr = 10000000; /* 10 ms */
+	__lkl_long_t incr = 10000000; /* 10 ms */
 	struct __lkl__kernel_timespec ts = {
 		.tv_sec = 0,
 		.tv_nsec = incr,
 	};
-	long err;
+	__lkl_long_t err;
 
 	do {
 		err = lkl_sys_umount(path, flags);
@@ -292,7 +292,7 @@ long lkl_umount_timeout(char *path, int flags, long timeout_ms)
 	return err;
 }
 
-long lkl_umount_blkdev(unsigned int dev, int flags, long timeout_ms)
+__lkl_long_t lkl_umount_blkdev(unsigned int dev, int flags, __lkl_long_t timeout_ms)
 {
 	char dev_str[] = { "/dev/xxxxxxxx" };
 	char mnt_str[] = { "/mnt/xxxxxxxx" };
@@ -312,8 +312,8 @@ long lkl_umount_blkdev(unsigned int dev, int flags, long timeout_ms)
 	return lkl_sys_rmdir(mnt_str);
 }
 
-long lkl_umount_dev(unsigned int disk_id, unsigned int part, int flags,
-		    long timeout_ms)
+__lkl_long_t lkl_umount_dev(unsigned int disk_id, unsigned int part, int flags,
+		    __lkl_long_t timeout_ms)
 {
 	unsigned int dev;
 	int err;

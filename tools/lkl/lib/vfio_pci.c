@@ -40,7 +40,7 @@ struct lkl_pci_dev {
  */
 
 static struct lkl_pci_dev *vfio_pci_add(const char *name, void *kernel_ram,
-					unsigned long ram_size)
+					__lkl_ulong_t ram_size)
 {
 	struct lkl_pci_dev *dev;
 	char path[128], link[128], *l;
@@ -281,13 +281,13 @@ static int vfio_pci_irq_init(struct lkl_pci_dev *dev, int irq)
 }
 
 static unsigned long long vfio_map_page(struct lkl_pci_dev *dev, void *vaddr,
-					unsigned long size)
+					__lkl_ulong_t size)
 {
 	return (unsigned long long)vaddr - dev->dma_map.vaddr;
 }
 
 static void vfio_unmap_page(struct lkl_pci_dev *dev,
-			    unsigned long long dma_handle, unsigned long size)
+			    unsigned long long dma_handle, __lkl_ulong_t size)
 {
 }
 
@@ -357,7 +357,7 @@ static const struct lkl_iomem_ops pci_resource_ops = {
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 static void *vfio_resource_alloc(struct lkl_pci_dev *dev,
-				 unsigned long resource_size,
+				 __lkl_ulong_t resource_size,
 				 int resource_index)
 {
 	unsigned int region_index_list[] = {

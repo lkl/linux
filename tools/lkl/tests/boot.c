@@ -32,8 +32,8 @@ int lkl_test_nanosleep(void)
 		.tv_nsec = sleep_ns,
 	};
 	struct timespec start, stop;
-	long delta;
-	long ret;
+	__lkl_long_t delta;
+	__lkl_long_t ret;
 
 	clock_gettime(CLOCK_MONOTONIC, &start);
 	ret = lkl_sys_nanosleep(&ts, NULL);
@@ -54,12 +54,12 @@ int lkl_test_nanosleep(void)
 
 LKL_TEST_CALL(getpid, lkl_sys_getpid, 1)
 
-void check_latency(long (*f)(void), long *min, long *max, long *avg)
+void check_latency(__lkl_long_t (*f)(void), __lkl_long_t *min, __lkl_long_t *max, __lkl_long_t *avg)
 {
 	int i;
 	unsigned long long start, stop, sum = 0;
 	static const int count = 1000;
-	long delta;
+	__lkl_long_t delta;
 
 	*min = 1000000000;
 	*max = -1;
@@ -78,7 +78,7 @@ void check_latency(long (*f)(void), long *min, long *max, long *avg)
 	*avg = sum / count;
 }
 
-static long native_getpid(void)
+static __lkl_long_t native_getpid(void)
 {
 #ifdef __MINGW32__
 	GetCurrentProcessId();
@@ -90,7 +90,7 @@ static long native_getpid(void)
 
 int lkl_test_syscall_latency(void)
 {
-	long min, max, avg;
+	__lkl_long_t min, max, avg;
 
 	lkl_test_logf("avg/min/max: ");
 
@@ -122,7 +122,7 @@ LKL_TEST_CALL(lseek_set, lkl_sys_lseek, 0, 0, 0, LKL_SEEK_SET);
 int lkl_test_read(void)
 {
 	char buf[10] = { 0, };
-	long ret;
+	__lkl_long_t ret;
 
 	ret = lkl_sys_read(0, buf, sizeof(buf));
 
@@ -137,7 +137,7 @@ int lkl_test_read(void)
 int lkl_test_fstat(void)
 {
 	struct lkl_stat stat;
-	long ret;
+	__lkl_long_t ret;
 
 	ret = lkl_sys_fstat(0, &stat);
 
@@ -156,7 +156,7 @@ LKL_TEST_CALL(mkdir, lkl_sys_mkdir, 0, "/mnt", access_rights)
 int lkl_test_stat(void)
 {
 	struct lkl_stat stat;
-	long ret;
+	__lkl_long_t ret;
 
 	ret = lkl_sys_stat("/mnt", &stat);
 
@@ -177,7 +177,7 @@ static int lkl_test_pipe2(void)
 	char str[20];
 	int msg_len_bytes = strlen(msg) + 1;
 	int cmp_res;
-	long ret;
+	__lkl_long_t ret;
 
 	ret = lkl_sys_pipe2(pipe_fds, LKL_O_NONBLOCK);
 	if (ret) {
@@ -230,7 +230,7 @@ static int lkl_test_epoll(void)
 	int READ_IDX = 0, WRITE_IDX = 1;
 	struct lkl_epoll_event wait_on, read_result;
 	const char msg[] = "Hello world!";
-	long ret;
+	__lkl_long_t ret;
 
 	memset(&wait_on, 0, sizeof(wait_on));
 	memset(&read_result, 0, sizeof(read_result));
@@ -312,7 +312,7 @@ static int lkl_test_open_cwd(void)
 
 static int lkl_test_getdents64(void)
 {
-	long ret;
+	__lkl_long_t ret;
 	char buf[1024], *pos;
 	struct lkl_linux_dirent64 *de;
 	int wr;
@@ -346,7 +346,7 @@ LKL_TEST_CALL(lo_ifup, lkl_if_up, 0, 1);
 
 static int lkl_test_mutex(void)
 {
-	long ret = TEST_SUCCESS;
+	__lkl_long_t ret = TEST_SUCCESS;
 	/*
 	 * Can't do much to verify that this works, so we'll just let Valgrind
 	 * warn us on CI if we've made bad memory accesses.
@@ -371,7 +371,7 @@ static int lkl_test_mutex(void)
 
 static int lkl_test_semaphore(void)
 {
-	long ret = TEST_SUCCESS;
+	__lkl_long_t ret = TEST_SUCCESS;
 	/*
 	 * Can't do much to verify that this works, so we'll just let Valgrind
 	 * warn us on CI if we've made bad memory accesses.
@@ -400,7 +400,7 @@ static int lkl_test_syscall_thread(void)
 {
 	int pipe_fds[2];
 	char tmp[LKL_PIPE_BUF+1];
-	long ret;
+	__lkl_long_t ret;
 	lkl_thread_t tid;
 
 	ret = lkl_sys_pipe2(pipe_fds, 0);
@@ -468,8 +468,8 @@ static int lkl_test_many_syscall_threads(void)
 }
 
 struct lkl_test_tgid {
-	long tgid;
-	long parent_pid;
+	__lkl_long_t tgid;
+	__lkl_long_t parent_pid;
 	int new_thread_group_leader_result;
 };
 
@@ -489,7 +489,7 @@ static void thread_get_tgid(void *arg)
 static int lkl_test_new_tgid_threads(void)
 {
 	lkl_thread_t tid;
-	long current_pid;
+	__lkl_long_t current_pid;
 	int count = 65, ret;
 	struct lkl_test_tgid test_tgid;
 
@@ -603,7 +603,7 @@ static int lkl_test_shared_mmap(void)
 	if (fd < 0)
 		return TEST_FAILURE;
 
-	unsigned long mem_size = 15 * 4096;
+	__lkl_ulong_t mem_size = 15 * 4096;
 
 	if (lkl_sys_ftruncate(fd, mem_size) < 0)
 		return TEST_FAILURE;
@@ -631,10 +631,10 @@ static int lkl_test_shared_mmap(void)
 	if (memcmp(mem1, mem2, mem_size) != 0)
 		return TEST_FAILURE;
 
-	if (lkl_sys_munmap((unsigned long)mem1, mem_size) != 0)
+	if (lkl_sys_munmap((__lkl_ulong_t)mem1, mem_size) != 0)
 		return TEST_FAILURE;
 
-	if (lkl_sys_munmap((unsigned long)mem2, mem_size) != 0)
+	if (lkl_sys_munmap((__lkl_ulong_t)mem2, mem_size) != 0)
 		return TEST_FAILURE;
 
 	return TEST_SUCCESS;
@@ -642,7 +642,7 @@ static int lkl_test_shared_mmap(void)
 
 static int lkl_test_private_mmap(void)
 {
-	unsigned long mem_size = 3 * 4096;
+	__lkl_ulong_t mem_size = 3 * 4096;
 	int mem_prot = LKL_PROT_WRITE | LKL_PROT_READ;
 	// Super important to use LKL_MAP_POPULATE to force populating pages in the
 	// mapping as in the LKL context we don't have a way to fault in the pages.
@@ -654,7 +654,7 @@ static int lkl_test_private_mmap(void)
 
 	*(unsigned int *)mem = 13;
 
-	if (lkl_sys_munmap((unsigned long)mem, mem_size) < 0)
+	if (lkl_sys_munmap((__lkl_ulong_t)mem, mem_size) < 0)
 		return TEST_FAILURE;
 
 	return TEST_SUCCESS;

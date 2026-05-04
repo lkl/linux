@@ -67,7 +67,7 @@ static inline int lkl_sys_fstatfs(unsigned int fd, struct lkl_statfs *buf)
 static inline int lkl_sys_nanosleep(struct __lkl__kernel_timespec *rqtp,
 				    struct __lkl__kernel_timespec *rmtp)
 {
-	long p[6] = {LKL_CLOCK_MONOTONIC, 0, (long)rqtp, (long)rmtp, 0};
+	__lkl_long_t p[6] = {LKL_CLOCK_MONOTONIC, 0, (__lkl_long_t)rqtp, (__lkl_long_t)rmtp, 0};
 
 	return lkl_syscall(__lkl__NR_clock_nanosleep_time64, p);
 }
@@ -93,7 +93,7 @@ static inline long long lkl_sys_lseek(unsigned int fd, __lkl__kernel_loff_t off,
 				      unsigned int whence)
 {
 	long long res;
-	long ret = lkl_sys_llseek(fd, off >> 32, off & 0xffffffff, &res, whence);
+	__lkl_long_t ret = lkl_sys_llseek(fd, off >> 32, off & 0xffffffff, &res, whence);
 
 	return ret < 0 ? ret : res;
 }
@@ -102,7 +102,7 @@ static inline long long lkl_sys_lseek(unsigned int fd, __lkl__kernel_loff_t off,
 static inline void *lkl_sys_mmap(void *addr, size_t length, int prot, int flags,
 				 int fd, off_t offset)
 {
-	return (void *)lkl_sys_mmap_pgoff((long)addr, length, prot, flags, fd,
+	return (void *)lkl_sys_mmap_pgoff((__lkl_long_t)addr, length, prot, flags, fd,
 					  offset >> 12);
 }
 
@@ -112,7 +112,7 @@ static inline void *lkl_sys_mmap(void *addr, size_t length, int prot, int flags,
 /**
  * lkl_sys_open - wrapper for lkl_sys_openat
  */
-static inline long lkl_sys_open(const char *file, int flags, int mode)
+static inline __lkl_long_t lkl_sys_open(const char *file, int flags, int mode)
 {
 	return lkl_sys_openat(LKL_AT_FDCWD, file, flags, mode);
 }
@@ -120,7 +120,7 @@ static inline long lkl_sys_open(const char *file, int flags, int mode)
 /**
  * lkl_sys_creat - wrapper for lkl_sys_openat
  */
-static inline long lkl_sys_creat(const char *file, int mode)
+static inline __lkl_long_t lkl_sys_creat(const char *file, int mode)
 {
 	return lkl_sys_openat(LKL_AT_FDCWD, file,
 			      LKL_O_CREAT|LKL_O_WRONLY|LKL_O_TRUNC, mode);
@@ -132,7 +132,7 @@ static inline long lkl_sys_creat(const char *file, int mode)
 /**
  * lkl_sys_access - wrapper for lkl_sys_faccessat
  */
-static inline long lkl_sys_access(const char *file, int mode)
+static inline __lkl_long_t lkl_sys_access(const char *file, int mode)
 {
 	return lkl_sys_faccessat(LKL_AT_FDCWD, file, mode);
 }
@@ -142,7 +142,7 @@ static inline long lkl_sys_access(const char *file, int mode)
 /**
  * lkl_sys_chown - wrapper for lkl_sys_fchownat
  */
-static inline long lkl_sys_chown(const char *path, lkl_uid_t uid, lkl_gid_t gid)
+static inline __lkl_long_t lkl_sys_chown(const char *path, lkl_uid_t uid, lkl_gid_t gid)
 {
 	return lkl_sys_fchownat(LKL_AT_FDCWD, path, uid, gid, 0);
 }
@@ -152,7 +152,7 @@ static inline long lkl_sys_chown(const char *path, lkl_uid_t uid, lkl_gid_t gid)
 /**
  * lkl_sys_chmod - wrapper for lkl_sys_fchmodat
  */
-static inline long lkl_sys_chmod(const char *path, mode_t mode)
+static inline __lkl_long_t lkl_sys_chmod(const char *path, mode_t mode)
 {
 	return lkl_sys_fchmodat(LKL_AT_FDCWD, path, mode);
 }
@@ -162,7 +162,7 @@ static inline long lkl_sys_chmod(const char *path, mode_t mode)
 /**
  * lkl_sys_link - wrapper for lkl_sys_linkat
  */
-static inline long lkl_sys_link(const char *existing, const char *new)
+static inline __lkl_long_t lkl_sys_link(const char *existing, const char *new)
 {
 	return lkl_sys_linkat(LKL_AT_FDCWD, existing, LKL_AT_FDCWD, new, 0);
 }
@@ -172,7 +172,7 @@ static inline long lkl_sys_link(const char *existing, const char *new)
 /**
  * lkl_sys_unlink - wrapper for lkl_sys_unlinkat
  */
-static inline long lkl_sys_unlink(const char *path)
+static inline __lkl_long_t lkl_sys_unlink(const char *path)
 {
 	return lkl_sys_unlinkat(LKL_AT_FDCWD, path, 0);
 }
@@ -182,7 +182,7 @@ static inline long lkl_sys_unlink(const char *path)
 /**
  * lkl_sys_symlink - wrapper for lkl_sys_symlinkat
  */
-static inline long lkl_sys_symlink(const char *existing, const char *new)
+static inline __lkl_long_t lkl_sys_symlink(const char *existing, const char *new)
 {
 	return lkl_sys_symlinkat(existing, LKL_AT_FDCWD, new);
 }
@@ -192,7 +192,7 @@ static inline long lkl_sys_symlink(const char *existing, const char *new)
 /**
  * lkl_sys_readlink - wrapper for lkl_sys_readlinkat
  */
-static inline long lkl_sys_readlink(const char *path, char *buf, size_t bufsize)
+static inline __lkl_long_t lkl_sys_readlink(const char *path, char *buf, size_t bufsize)
 {
 	return lkl_sys_readlinkat(LKL_AT_FDCWD, path, buf, bufsize);
 }
@@ -202,7 +202,7 @@ static inline long lkl_sys_readlink(const char *path, char *buf, size_t bufsize)
 /**
  * lkl_sys_rename - wrapper for lkl_sys_renameat
  */
-static inline long lkl_sys_rename(const char *old, const char *new)
+static inline __lkl_long_t lkl_sys_rename(const char *old, const char *new)
 {
 	return lkl_sys_renameat(LKL_AT_FDCWD, old, LKL_AT_FDCWD, new);
 }
@@ -212,7 +212,7 @@ static inline long lkl_sys_rename(const char *old, const char *new)
 /**
  * lkl_sys_mkdir - wrapper for lkl_sys_mkdirat
  */
-static inline long lkl_sys_mkdir(const char *path, mode_t mode)
+static inline __lkl_long_t lkl_sys_mkdir(const char *path, mode_t mode)
 {
 	return lkl_sys_mkdirat(LKL_AT_FDCWD, path, mode);
 }
@@ -222,7 +222,7 @@ static inline long lkl_sys_mkdir(const char *path, mode_t mode)
 /**
  * lkl_sys_rmdir - wrapper for lkl_sys_unlinkrat
  */
-static inline long lkl_sys_rmdir(const char *path)
+static inline __lkl_long_t lkl_sys_rmdir(const char *path)
 {
 	return lkl_sys_unlinkat(LKL_AT_FDCWD, path, LKL_AT_REMOVEDIR);
 }
@@ -232,7 +232,7 @@ static inline long lkl_sys_rmdir(const char *path)
 /**
  * lkl_sys_mknod - wrapper for lkl_sys_mknodat
  */
-static inline long lkl_sys_mknod(const char *path, mode_t mode, dev_t dev)
+static inline __lkl_long_t lkl_sys_mknod(const char *path, mode_t mode, dev_t dev)
 {
 	return lkl_sys_mknodat(LKL_AT_FDCWD, path, mode, dev);
 }
@@ -242,7 +242,7 @@ static inline long lkl_sys_mknod(const char *path, mode_t mode, dev_t dev)
 /**
  * lkl_sys_pipe - wrapper for lkl_sys_pipe2
  */
-static inline long lkl_sys_pipe(int fd[2])
+static inline __lkl_long_t lkl_sys_pipe(int fd[2])
 {
 	return lkl_sys_pipe2(fd, 0);
 }
@@ -252,7 +252,7 @@ static inline long lkl_sys_pipe(int fd[2])
 /**
  * lkl_sys_send - wrapper for lkl_sys_sendto
  */
-static inline long lkl_sys_send(int fd, void *buf, size_t len, int flags)
+static inline __lkl_long_t lkl_sys_send(int fd, void *buf, size_t len, int flags)
 {
 	return lkl_sys_sendto(fd, buf, len, flags, 0, 0);
 }
@@ -262,7 +262,7 @@ static inline long lkl_sys_send(int fd, void *buf, size_t len, int flags)
 /**
  * lkl_sys_recv - wrapper for lkl_sys_recvfrom
  */
-static inline long lkl_sys_recv(int fd, void *buf, size_t len, int flags)
+static inline __lkl_long_t lkl_sys_recv(int fd, void *buf, size_t len, int flags)
 {
 	return lkl_sys_recvfrom(fd, buf, len, flags, 0, 0);
 }
@@ -272,10 +272,10 @@ static inline long lkl_sys_recv(int fd, void *buf, size_t len, int flags)
 /**
  * lkl_sys_select - wrapper for lkl_sys_pselect
  */
-static inline long lkl_sys_select(int n, lkl_fd_set *rfds, lkl_fd_set *wfds,
+static inline __lkl_long_t lkl_sys_select(int n, lkl_fd_set *rfds, lkl_fd_set *wfds,
 				  lkl_fd_set *efds, struct lkl_timeval *tv)
 {
-	long data[2] = { 0, _LKL_NSIG/8 };
+	__lkl_long_t data[2] = { 0, _LKL_NSIG/8 };
 	struct __lkl__kernel_timespec ts;
 
 	if (tv) {
@@ -293,7 +293,7 @@ static inline long lkl_sys_select(int n, lkl_fd_set *rfds, lkl_fd_set *wfds,
 /**
  * lkl_sys_poll - wrapper for lkl_sys_ppoll
  */
-static inline long lkl_sys_poll(struct lkl_pollfd *fds, int n, int timeout)
+static inline __lkl_long_t lkl_sys_poll(struct lkl_pollfd *fds, int n, int timeout)
 {
 	struct __lkl__kernel_timespec ts;
 
@@ -311,7 +311,7 @@ static inline long lkl_sys_poll(struct lkl_pollfd *fds, int n, int timeout)
 /**
  * lkl_sys_epoll_create - wrapper for lkl_sys_epoll_create1
  */
-static inline long lkl_sys_epoll_create(int size)
+static inline __lkl_long_t lkl_sys_epoll_create(int size)
 {
 	return lkl_sys_epoll_create1(0);
 }
@@ -321,7 +321,7 @@ static inline long lkl_sys_epoll_create(int size)
 /**
  * lkl_sys_epoll_wait - wrapper for lkl_sys_epoll_pwait
  */
-static inline long lkl_sys_epoll_wait(int fd, struct lkl_epoll_event *ev,
+static inline __lkl_long_t lkl_sys_epoll_wait(int fd, struct lkl_epoll_event *ev,
 				      int cnt, int to)
 {
 	return lkl_sys_epoll_pwait(fd, ev, cnt, to, 0, _LKL_NSIG/8);
@@ -428,7 +428,7 @@ int lkl_get_virtio_blkdev(int disk_id, unsigned int part, uint32_t *pdevid);
  * @mnt_str_len - size of mnt_str
  * @returns - 0 on success, a negative value on error
  */
-long lkl_mount_dev(unsigned int disk_id, unsigned int part, const char *fs_type,
+__lkl_long_t lkl_mount_dev(unsigned int disk_id, unsigned int part, const char *fs_type,
 		   int flags, const char *opts,
 		   char *mnt_str, unsigned int mnt_str_len);
 
@@ -447,7 +447,7 @@ long lkl_mount_dev(unsigned int disk_id, unsigned int part, const char *fs_type,
  * @mnt_str_len - size of mnt_str
  * @returns - 0 on success, a negative value on error
  */
-long lkl_mount_blkdev(unsigned int dev, const char *fs_type, int flags,
+__lkl_long_t lkl_mount_blkdev(unsigned int dev, const char *fs_type, int flags,
 		      const char *opts, char *mnt_str,
 		      unsigned int mnt_str_len);
 
@@ -464,8 +464,8 @@ long lkl_mount_blkdev(unsigned int dev, const char *fs_type, int flags,
  * umount can succeed
  * @returns - 0 on success, a negative value on error
  */
-long lkl_umount_dev(unsigned int disk_id, unsigned int part, int flags,
-		    long timeout_ms);
+__lkl_long_t lkl_umount_dev(unsigned int disk_id, unsigned int part, int flags,
+		    __lkl_long_t timeout_ms);
 
 /**
  * lkl_umount_blkdev - umount a block device
@@ -478,7 +478,7 @@ long lkl_umount_dev(unsigned int disk_id, unsigned int part, int flags,
  * umount can succeed
  * @returns - 0 on success, a negative value on error
  */
-long lkl_umount_blkdev(unsigned int dev, int flags, long timeout_ms);
+__lkl_long_t lkl_umount_blkdev(unsigned int dev, int flags, __lkl_long_t timeout_ms);
 
 /**
  * lkl_umount_timeout - umount filesystem with timeout
@@ -489,7 +489,7 @@ long lkl_umount_blkdev(unsigned int dev, int flags, long timeout_ms);
  * umount can succeed
  * @returns - 0 on success, a negative value on error
  */
-long lkl_umount_timeout(char *path, int flags, long timeout_ms);
+__lkl_long_t lkl_umount_timeout(char *path, int flags, __lkl_long_t timeout_ms);
 
 /**
  * lkl_opendir - open a directory

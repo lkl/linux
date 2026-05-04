@@ -52,7 +52,7 @@ static inline void set_sockaddr(struct lkl_sockaddr_in *sin, unsigned int addr,
 static inline int ifindex_to_name(int sock, struct lkl_ifreq *ifr, int ifindex)
 {
 	ifr->lkl_ifr_ifindex = ifindex;
-	return lkl_sys_ioctl(sock, LKL_SIOCGIFNAME, (long)ifr);
+	return lkl_sys_ioctl(sock, LKL_SIOCGIFNAME, (__lkl_long_t)ifr);
 }
 
 int lkl_ifname_to_ifindex(const char *name)
@@ -66,7 +66,7 @@ int lkl_ifname_to_ifindex(const char *name)
 
 	strcpy(ifr.lkl_ifr_name, name);
 
-	ret = lkl_sys_ioctl(fd, LKL_SIOCGIFINDEX, (long)&ifr);
+	ret = lkl_sys_ioctl(fd, LKL_SIOCGIFINDEX, (__lkl_long_t)&ifr);
 	if (ret < 0)
 		return ret;
 
@@ -84,10 +84,10 @@ int lkl_if_up(int ifindex)
 	if (err < 0)
 		return err;
 
-	err = lkl_sys_ioctl(sock, LKL_SIOCGIFFLAGS, (long)&ifr);
+	err = lkl_sys_ioctl(sock, LKL_SIOCGIFFLAGS, (__lkl_long_t)&ifr);
 	if (!err) {
 		ifr.lkl_ifr_flags |= LKL_IFF_UP;
-		err = lkl_sys_ioctl(sock, LKL_SIOCSIFFLAGS, (long)&ifr);
+		err = lkl_sys_ioctl(sock, LKL_SIOCSIFFLAGS, (__lkl_long_t)&ifr);
 	}
 
 	lkl_sys_close(sock);
@@ -108,10 +108,10 @@ int lkl_if_down(int ifindex)
 	if (err < 0)
 		return err;
 
-	err = lkl_sys_ioctl(sock, LKL_SIOCGIFFLAGS, (long)&ifr);
+	err = lkl_sys_ioctl(sock, LKL_SIOCGIFFLAGS, (__lkl_long_t)&ifr);
 	if (!err) {
 		ifr.lkl_ifr_flags &= ~LKL_IFF_UP;
-		err = lkl_sys_ioctl(sock, LKL_SIOCSIFFLAGS, (long)&ifr);
+		err = lkl_sys_ioctl(sock, LKL_SIOCSIFFLAGS, (__lkl_long_t)&ifr);
 	}
 
 	lkl_sys_close(sock);
@@ -134,7 +134,7 @@ int lkl_if_set_mtu(int ifindex, int mtu)
 
 	ifr.lkl_ifr_mtu = mtu;
 
-	err = lkl_sys_ioctl(sock, LKL_SIOCSIFMTU, (long)&ifr);
+	err = lkl_sys_ioctl(sock, LKL_SIOCSIFMTU, (__lkl_long_t)&ifr);
 
 	lkl_sys_close(sock);
 
@@ -154,10 +154,10 @@ int lkl_if_set_mac(int ifindex, void *addr)
 	if (err < 0)
 		goto out;
 
-	err = lkl_sys_ioctl(sock, LKL_SIOCGIFHWADDR, (long)&ifr);
+	err = lkl_sys_ioctl(sock, LKL_SIOCGIFHWADDR, (__lkl_long_t)&ifr);
 	if (!err) {
 		memcpy(ifr.lkl_ifr_hwaddr.sa_data, addr, LKL_ETH_ALEN);
-		err = lkl_sys_ioctl(sock, LKL_SIOCSIFHWADDR, (long)&ifr);
+		err = lkl_sys_ioctl(sock, LKL_SIOCSIFHWADDR, (__lkl_long_t)&ifr);
 	}
 
 out:
@@ -201,7 +201,7 @@ int lkl_netdev_get_ifindex(int id)
 		return sock;
 
 	snprintf(ifr.lkl_ifr_name, sizeof(ifr.lkl_ifr_name), "eth%d", id);
-	ret = lkl_sys_ioctl(sock, LKL_SIOCGIFINDEX, (long)&ifr);
+	ret = lkl_sys_ioctl(sock, LKL_SIOCGIFINDEX, (__lkl_long_t)&ifr);
 	lkl_sys_close(sock);
 
 	return ret < 0 ? ret : ifr.lkl_ifr_ifindex;

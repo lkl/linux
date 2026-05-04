@@ -6,8 +6,8 @@
  * Author: Hajime Tazaki <thehajime@gmail.com>
  *
  */
-#include <Windows.h>
-#include <Winreg.h>
+#include <windows.h>
+#include <winreg.h>
 #include <winioctl.h>
 #include <stdio.h>
 #include <stdint.h>

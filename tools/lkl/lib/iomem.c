@@ -53,7 +53,7 @@ void unregister_iomem(void *base)
 	iomem_regions[index].ops = NULL;
 }
 
-void *lkl_ioremap(long addr, int size)
+void *lkl_ioremap(__lkl_long_t addr, int size)
 {
 	int index = IOMEM_ADDR_TO_INDEX(addr);
 	struct iomem_region *iomem = &iomem_regions[index];
