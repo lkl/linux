@@ -21,6 +21,7 @@ extern "C" {
 #undef __unused
 
 #include <lkl/asm/syscalls.h>
+#include <lkl/asm/lkl_long.h>
 
 #pragma pop_macro("__unused")
 
