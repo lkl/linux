@@ -67,6 +67,7 @@ jobs:
             python-pip
             dosfstools
             mingw-w64-x86_64-ccache
+            mingw-w64-x86_64-libslirp
 
       - name: Checkout
         if: runner.os == 'Linux'
@@ -108,7 +109,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt update -y
-          sudo apt install -y ccache libjsmn-dev libfuse3-dev
+          sudo apt install -y ccache libjsmn-dev libfuse3-dev libslirp-dev
       - name: Install clang toolchain
         if: runner.os == 'Linux'
         run: |
