@@ -3,7 +3,7 @@
 #define _ASM_UAPI_LKL_LONG_H
 
 /*
- * __lkl_long_t / __lkl_ulong_t: pointer-width integer types for the
+ * lkl_long_t / lkl_ulong_t: pointer-width integer types for the
  * LKL cross-world interface (host_ops, syscall dispatch, UAPI structs).
  *
  * These must be the same size on both sides of the kernel<->host boundary:
@@ -16,12 +16,12 @@
  */
 #if defined(_WIN64) && !defined(__LP64__)
 /* LLP64: MinGW-w64 x64 user-space */
-typedef long long          __lkl_long_t;
-typedef unsigned long long __lkl_ulong_t;
+typedef long long          lkl_long_t;
+typedef unsigned long long lkl_ulong_t;
 #else
 /* LP64: kernel side, Linux, Cygwin, macOS, or any ILP32 system */
-typedef long               __lkl_long_t;
-typedef unsigned long      __lkl_ulong_t;
+typedef long               lkl_long_t;
+typedef unsigned long      lkl_ulong_t;
 #endif
 
 #endif /* _ASM_UAPI_LKL_LONG_H */

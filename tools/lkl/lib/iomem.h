@@ -8,7 +8,7 @@ struct lkl_iomem_ops {
 
 void* register_iomem(void *data, int size, const struct lkl_iomem_ops *ops);
 void unregister_iomem(void *iomem_base);
-void *lkl_ioremap(__lkl_long_t addr, int size);
+void *lkl_ioremap(lkl_long_t addr, int size);
 int lkl_iomem_access(const volatile void *addr, void *res, int size, int write);
 
 #endif /* _LKL_LIB_IOMEM_H */

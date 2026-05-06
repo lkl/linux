@@ -405,7 +405,7 @@ static inline void set_ptr_low(void **ptr, uint32_t val)
 	uint64_t tmp = (uintptr_t)*ptr;
 
 	tmp = (tmp & 0xFFFFFFFF00000000) | val;
-	*ptr = (void *)(__lkl_long_t)tmp;
+	*ptr = (void *)(lkl_long_t)tmp;
 }
 
 static inline void set_ptr_high(void **ptr, uint32_t val)
@@ -413,7 +413,7 @@ static inline void set_ptr_high(void **ptr, uint32_t val)
 	uint64_t tmp = (uintptr_t)*ptr;
 
 	tmp = (tmp & 0x00000000FFFFFFFF) | ((uint64_t)val << 32);
-	*ptr = (void *)(__lkl_long_t)tmp;
+	*ptr = (void *)(lkl_long_t)tmp;
 }
 
 static inline void set_status(struct virtio_dev *dev, uint32_t val)
@@ -562,7 +562,7 @@ int virtio_dev_setup(struct virtio_dev *dev, int queues, int num_max)
 		dev->virtio_mmio_id = lkl_num_virtio_boot_devs++;
 	} else {
 		ret =
-		    lkl_sys_virtio_mmio_device_add((__lkl_long_t)dev->base, mmio_size,
+		    lkl_sys_virtio_mmio_device_add((lkl_long_t)dev->base, mmio_size,
 						   dev->irq);
 		if (ret < 0) {
 			lkl_printf("can't register mmio device\n");
@@ -577,8 +577,8 @@ int virtio_dev_setup(struct virtio_dev *dev, int queues, int num_max)
 int virtio_dev_cleanup(struct virtio_dev *dev)
 {
 	char devname[100];
-	__lkl_long_t fd, ret;
-	__lkl_long_t mount_ret;
+	lkl_long_t fd, ret;
+	lkl_long_t mount_ret;
 
 	if (!lkl_is_running())
 		goto skip_unbind;

@@ -208,7 +208,7 @@ static void CALLBACK timer_callback(void *arg, BOOLEAN TimerOrWaitFired)
 		t->callback();
 }
 
-static int timer_set_oneshot(void *timer, __lkl_ulong_t ns)
+static int timer_set_oneshot(void *timer, lkl_ulong_t ns)
 {
 	struct timer *t = (struct timer *)timer;
 	HANDLE tmp;
@@ -241,7 +241,7 @@ static void print(const char *str, int len)
 	write(1, str, len);
 }
 
-static void *mem_alloc(__lkl_ulong_t size)
+static void *mem_alloc(lkl_ulong_t size)
 {
 	return malloc(size);
 }

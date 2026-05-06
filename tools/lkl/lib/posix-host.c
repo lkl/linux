@@ -257,7 +257,7 @@ static int thread_equal(lkl_thread_t a, lkl_thread_t b)
 #define pthread_getattr_np pthread_attr_get_np
 #endif
 
-void *thread_stack(__lkl_ulong_t *size)
+void *thread_stack(lkl_ulong_t *size)
 {
 	pthread_attr_t thread_attr;
 	size_t stack_size;
@@ -423,7 +423,7 @@ static void *timer_alloc(void (*fn)(void))
 	return (void *)(long)timer;
 }
 
-static int timer_set_oneshot(void *_timer, __lkl_ulong_t ns)
+static int timer_set_oneshot(void *_timer, lkl_ulong_t ns)
 {
 	timer_t timer = (timer_t)(long)_timer;
 	struct itimerspec ts = {
@@ -448,7 +448,7 @@ static void panic(void)
 	assert(0);
 }
 
-static void *page_alloc(__lkl_ulong_t size)
+static void *page_alloc(lkl_ulong_t size)
 {
 	void *addr;
 
@@ -461,7 +461,7 @@ static void *page_alloc(__lkl_ulong_t size)
 	return addr;
 }
 
-static void page_free(void *addr, __lkl_ulong_t size)
+static void page_free(void *addr, lkl_ulong_t size)
 {
 	munmap((void *)addr, size);
 }
@@ -492,7 +492,7 @@ static inline int get_prot(enum lkl_prot lkl_prot)
 #endif
 #endif
 
-static void *lkl_mmap(void *addr, __lkl_ulong_t size, enum lkl_prot prot)
+static void *lkl_mmap(void *addr, lkl_ulong_t size, enum lkl_prot prot)
 {
 	void *ret;
 	int fl = MAP_ANON | MAP_PRIVATE | MAP_FIXED_NOREPLACE | MAP_NORESERVE;
@@ -507,7 +507,7 @@ static void *lkl_mmap(void *addr, __lkl_ulong_t size, enum lkl_prot prot)
 	return ret;
 }
 
-static int lkl_munmap(void *addr, __lkl_ulong_t size)
+static int lkl_munmap(void *addr, lkl_ulong_t size)
 {
 	return munmap(addr, size);
 }
@@ -518,9 +518,9 @@ extern struct lkl_dev_pci_ops vfio_pci_ops;
 
 #ifdef LKL_HOST_CONFIG_MMU
 static int shared_mem_fd = -1;
-static __lkl_ulong_t shared_mem_size;
+static lkl_ulong_t shared_mem_size;
 
-static void shmem_init(__lkl_ulong_t size)
+static void shmem_init(lkl_ulong_t size)
 {
 	int rwx = 00700;
 	char lkl_shmem_id[NAME_MAX];
@@ -532,8 +532,8 @@ static void shmem_init(__lkl_ulong_t size)
 	assert(ftruncate(shared_mem_fd, shared_mem_size) == 0);
 }
 
-static void *lkl_shmem_mmap(void *addr, __lkl_ulong_t pg_off,
-		__lkl_ulong_t size, enum lkl_prot mem_prot_flags)
+static void *lkl_shmem_mmap(void *addr, lkl_ulong_t pg_off,
+		lkl_ulong_t size, enum lkl_prot mem_prot_flags)
 {
 	int prot = get_prot(mem_prot_flags);
 	int flags = MAP_SHARED | MAP_FIXED_NOREPLACE;
@@ -545,22 +545,22 @@ static void *lkl_shmem_mmap(void *addr, __lkl_ulong_t pg_off,
 }
 #endif // LKL_HOST_CONFIG_MMU
 
-static void *posix_malloc(__lkl_ulong_t size)
+static void *posix_malloc(lkl_ulong_t size)
 {
 	return malloc((size_t)size);
 }
 
-static void *posix_memcpy(void *dest, const void *src, __lkl_ulong_t n)
+static void *posix_memcpy(void *dest, const void *src, lkl_ulong_t n)
 {
 	return memcpy(dest, src, (size_t)n);
 }
 
-static void *posix_memset(void *s, int c, __lkl_ulong_t n)
+static void *posix_memset(void *s, int c, lkl_ulong_t n)
 {
 	return memset(s, c, (size_t)n);
 }
 
-static void *posix_memmove(void *dest, const void *src, __lkl_ulong_t n)
+static void *posix_memmove(void *dest, const void *src, lkl_ulong_t n)
 {
 	return memmove(dest, src, (size_t)n);
 }

@@ -31,7 +31,7 @@ static char bootparams[128];
 
 static int lkl_test_umount_dev(void)
 {
-	__lkl_long_t ret, ret2;
+	lkl_long_t ret, ret2;
 
 	ret = lkl_sys_chdir("/");
 
