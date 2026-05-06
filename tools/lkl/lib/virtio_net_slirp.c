@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * libslirp based virtual network interface for LKL
  *
@@ -5,7 +6,7 @@
  * Supports port forwarding from host to LKL guest network.
  * Portable: works on both POSIX and Win32 (MinGW).
  *
- * Copyright (c) 2025
+ * Copyright (c) 2025 Sheldon Qi
  */
 
 #include <stdio.h>
@@ -89,6 +90,7 @@ static int slirp_socketpair(slirp_fd_t pair[2])
 
 	/* Set non-blocking on read end */
 	u_long mode = 1;
+
 	ioctlsocket(s2, FIONBIO, &mode);
 
 	pair[0] = s2; /* read end (non-blocking) */
@@ -111,6 +113,7 @@ static inline int slirp_pipe_read(slirp_fd_t fd, char *buf, int len)
 static int64_t slirp_clock_ns(void)
 {
 	LARGE_INTEGER freq, count;
+
 	QueryPerformanceFrequency(&freq);
 	QueryPerformanceCounter(&count);
 	return (int64_t)((double)count.QuadPart / freq.QuadPart * 1000000000.0);
@@ -154,6 +157,7 @@ static inline int slirp_pipe_read(slirp_fd_t fd, char *buf, int len)
 static int64_t slirp_clock_ns(void)
 {
 	struct timespec ts;
+
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
@@ -217,6 +221,7 @@ static slirp_ssize_t slirp_send_packet_cb(const void *buf, size_t len, void *opa
 
 	slirp_mutex_lock(&nd->rx_lock);
 	int next = (nd->rx_head + 1) % PKT_RING_SIZE;
+
 	if (next == nd->rx_tail) {
 		slirp_mutex_unlock(&nd->rx_lock);
 		return (slirp_ssize_t)len;
@@ -233,6 +238,7 @@ static slirp_ssize_t slirp_send_packet_cb(const void *buf, size_t len, void *opa
 	slirp_mutex_unlock(&nd->rx_lock);
 
 	char c = 'r';
+
 	slirp_pipe_write(nd->pipe[1], &c, 1);
 	return (slirp_ssize_t)len;
 }
@@ -259,6 +265,7 @@ static void *slirp_timer_new_cb(SlirpTimerCb cb, void *cb_opaque, void *opaque)
 {
 	(void)opaque;
 	struct slirp_timer *t = calloc(1, sizeof(*t));
+
 	if (t) {
 		t->cb = cb;
 		t->cb_opaque = cb_opaque;
@@ -277,6 +284,7 @@ static void slirp_timer_mod_cb(void *timer, int64_t expire_time, void *opaque)
 {
 	(void)opaque;
 	struct slirp_timer *t = timer;
+
 	t->expire_ms = expire_time;
 }
 
@@ -296,6 +304,7 @@ static void slirp_notify_cb(void *opaque)
 {
 	struct lkl_netdev_slirp *nd = opaque;
 	char c = 'n';
+
 	slirp_pipe_write(nd->pipe[1], &c, 1);
 }
 
@@ -329,6 +338,7 @@ static int add_poll_cb(int fd, int events, void *opaque)
 	}
 
 	int idx = ps->nfds++;
+
 	ps->fds[idx].fd = fd;
 	ps->fds[idx].events = 0;
 	ps->fds[idx].revents = 0;
@@ -373,6 +383,7 @@ static void *slirp_poll_thread_fn(void *arg)
 
 	while (nd->running) {
 		uint32_t timeout = 100;
+
 		ps.nfds = 0;
 
 		slirp_pollfds_fill(nd->slirp, &timeout, add_poll_cb, &ps);
@@ -403,14 +414,17 @@ static int slirp_net_tx(struct lkl_netdev *dev, struct iovec *iov, int cnt)
 		container_of(dev, struct lkl_netdev_slirp, dev);
 
 	int total = 0;
+
 	for (int i = 0; i < cnt; i++)
 		total += iov[i].iov_len;
 
 	uint8_t *buf = malloc(total);
+
 	if (!buf)
 		return -1;
 
 	int off = 0;
+
 	for (int i = 0; i < cnt; i++) {
 		memcpy(buf + off, iov[i].iov_base, iov[i].iov_len);
 		off += iov[i].iov_len;
@@ -437,6 +451,7 @@ static int slirp_net_rx(struct lkl_netdev *dev, struct iovec *iov, int cnt)
 	int pkt_len = pkt->len;
 
 	int off = 0;
+
 	for (int i = 0; i < cnt && off < pkt_len; i++) {
 		int to_copy = pkt_len - off;
 		if (to_copy > (int)iov[i].iov_len)
@@ -460,11 +475,13 @@ static int slirp_net_poll(struct lkl_netdev *dev)
 		container_of(dev, struct lkl_netdev_slirp, dev);
 
 	slirp_pollfd_t pfd;
+
 	pfd.fd = nd->pipe[0];
 	pfd.events = SLIRP_POLLIN;
 	pfd.revents = 0;
 
 	int ret;
+
 	do {
 		ret = slirp_do_poll(&pfd, 1, -1);
 #ifndef __MINGW32__
@@ -542,12 +559,14 @@ static struct lkl_dev_net_ops slirp_net_ops = {
 struct lkl_netdev *lkl_netdev_slirp_create(void)
 {
 	struct lkl_netdev_slirp *nd = calloc(1, sizeof(*nd));
+
 	if (!nd)
 		return NULL;
 
 #ifdef __MINGW32__
 	{
 		WSADATA wsa;
+
 		WSAStartup(MAKEWORD(2, 2), &wsa);
 	}
 #endif
