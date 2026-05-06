@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
 # Shim: routes kernel code to cygwin cross-gcc, user-space to mingw-gcc.
 # Cygwin-gcc: LP64 (long=64-bit), direct PE/COFF output, no Wine needed.
 # Mingw-gcc: LLP64 (long=32-bit), standard Win64 libraries.

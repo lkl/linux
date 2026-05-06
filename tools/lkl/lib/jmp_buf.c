@@ -26,6 +26,7 @@
 static inline int lkl_setjmp(void *buf)
 {
 	int ret;
+
 	__asm__ __volatile__ (
 		"movq %%rbx,   0(%[b])\n\t"
 		"movq %%rbp,   8(%[b])\n\t"
