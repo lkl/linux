@@ -24,13 +24,13 @@
 static int lkl_test_dlmopen(void)
 {
 	void *handle;
-	long ret;
+	lkl_long_t ret;
 	char *filename = "liblkl.so";
-	long params[6] = {0};
+	lkl_long_t params[6] = {0};
 	int (*fn_init)(struct lkl_host_operations *ops);
 	int (*fn_start)(char *fmt, ...);
-	long (*fn_syscall)(long no, long *params);
-	long (*fn_sys_halt)(void);
+	lkl_long_t (*fn_syscall)(lkl_long_t no, lkl_long_t *params);
+	lkl_long_t (*fn_sys_halt)(void);
 	void (*fn_tls_mode)(void);
 	struct lkl_host_operations *lkl_host_ops;
 

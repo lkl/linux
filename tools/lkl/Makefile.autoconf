@@ -106,10 +106,12 @@ endef
 
 define nt_host
   $(call set_autoconf_var,NT,y)
+  $(call set_kernel_config,INIT_STACK_ALL_ZERO,n)
   KOPT = "KALLSYMS_EXTRA_PASS=1"
   KOPT += "HOSTCFLAGS=-Wno-char-subscripts"
   KOPT += "HOSTLDFLAGS=-s"
   LDLIBS += -lws2_32
+  LDFLAGS += -Wl,--image-base,0x10000
   EXESUF := .exe
   SOSUF := .dll
   CFLAGS += -Iinclude/mingw32
