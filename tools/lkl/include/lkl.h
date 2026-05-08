@@ -845,6 +845,62 @@ lkl_netdev_wintap_create(const char *ifparams)
 #endif
 
 /**
+ * lkl_netdev_slirp_create - create slirp net_device for the virtio net backend
+ *
+ * Provides user-mode TCP/IP networking without requiring root privileges.
+ * Guest network is 10.0.2.0/24 with gateway at 10.0.2.2 and DNS at 10.0.2.3.
+ * Use lkl_netdev_slirp_add_hostfwd() for port forwarding from host to guest.
+ */
+#ifdef LKL_HOST_CONFIG_VIRTIO_NET_SLIRP
+struct lkl_netdev *lkl_netdev_slirp_create(void);
+
+/**
+ * lkl_netdev_slirp_add_hostfwd - add port forwarding from host to guest
+ *
+ * @nd - netdev returned by lkl_netdev_slirp_create()
+ * @is_udp - 1 for UDP, 0 for TCP
+ * @host_addr - host address to listen on (e.g. "0.0.0.0")
+ * @host_port - host port number
+ * @guest_addr - guest address (e.g. "10.0.2.15")
+ * @guest_port - guest port number
+ * @returns 0 on success, -1 on failure
+ */
+int lkl_netdev_slirp_add_hostfwd(struct lkl_netdev *nd, int is_udp,
+				  const char *host_addr, int host_port,
+				  const char *guest_addr, int guest_port);
+
+/**
+ * lkl_netdev_slirp_remove_hostfwd - remove a port forwarding rule
+ *
+ * @nd - netdev returned by lkl_netdev_slirp_create()
+ * @is_udp - 1 for UDP, 0 for TCP
+ * @host_addr - host address
+ * @host_port - host port number
+ * @returns 0 on success, -1 on failure
+ */
+int lkl_netdev_slirp_remove_hostfwd(struct lkl_netdev *nd, int is_udp,
+				     const char *host_addr, int host_port);
+#else
+static inline struct lkl_netdev *lkl_netdev_slirp_create(void)
+{
+	return NULL;
+}
+static inline int
+lkl_netdev_slirp_add_hostfwd(struct lkl_netdev *nd, int is_udp,
+			      const char *host_addr, int host_port,
+			      const char *guest_addr, int guest_port)
+{
+	return -1;
+}
+static inline int
+lkl_netdev_slirp_remove_hostfwd(struct lkl_netdev *nd, int is_udp,
+				 const char *host_addr, int host_port)
+{
+	return -1;
+}
+#endif
+
+/**
  * lkl_add_neighbor - add a permanent arp entry
  * @ifindex - the ifindex of the interface
  * @af - address family of the ip address. Must be LKL_AF_INET or LKL_AF_INET6

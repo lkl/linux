@@ -1,5 +1,6 @@
 CFLAGS_posix-host.o += -D_FILE_OFFSET_BITS=64
 CFLAGS_virtio_net_vde.o += $(pkg-config --cflags vdeplug 2>/dev/null)
+CFLAGS_virtio_net_slirp.o += $(shell pkg-config --cflags slirp 2>/dev/null)
 CFLAGS_nt-host.o += -D_WIN32_WINNT=0x0600
 
 liblkl-y += fs.o
@@ -18,6 +19,7 @@ liblkl-$(LKL_HOST_CONFIG_VIRTIO_NET_FD) += virtio_net_raw.o
 liblkl-$(LKL_HOST_CONFIG_VIRTIO_NET_MACVTAP) += virtio_net_macvtap.o
 liblkl-$(LKL_HOST_CONFIG_VIRTIO_NET_DPDK) += virtio_net_dpdk.o
 liblkl-$(LKL_HOST_CONFIG_VIRTIO_NET_VDE) += virtio_net_vde.o
+liblkl-$(LKL_HOST_CONFIG_VIRTIO_NET_SLIRP) += virtio_net_slirp.o
 liblkl-$(LKL_HOST_CONFIG_VIRTIO_NET_FD) += virtio_net_pipe.o
 liblkl-$(LKL_HOST_CONFIG_NT64) += virtio_net_wintap.o
 liblkl-$(LKL_HOST_CONFIG_VFIO_PCI) += vfio_pci.o

@@ -58,6 +58,7 @@ tests = [
     'net.sh -b raw',
     'net.sh -b macvtap',
     'net.sh -b wintap',
+    'net.sh -b slirp',
     'lklfuse.sh -t ext4',
     'lklfuse.sh -t btrfs',
     'lklfuse.sh -t vfat',
