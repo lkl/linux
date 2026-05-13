@@ -246,8 +246,26 @@ static void *mem_alloc(lkl_ulong_t size)
 	return malloc(size);
 }
 
+static void *nt_memcpy(void *dest, const void *src, lkl_ulong_t n)
+{
+	return memcpy(dest, src, (size_t)n);
+}
+
+static void *nt_memset(void *s, int c, lkl_ulong_t n)
+{
+	return memset(s, c, (size_t)n);
+}
+
+static void *nt_memmove(void *dest, const void *src, lkl_ulong_t n)
+{
+	return memmove(dest, src, (size_t)n);
+}
+
 struct lkl_host_operations lkl_host_ops = {
 	.panic = panic,
+	.memcpy = nt_memcpy,
+	.memset = nt_memset,
+	.memmove = nt_memmove,
 	.thread_create = thread_create,
 	.thread_detach = thread_detach,
 	.thread_exit = thread_exit,
