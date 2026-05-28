@@ -4,6 +4,7 @@
 #define __DRIVER_USB_TYPEC_UCSI_H
 
 #include <linux/bitops.h>
+#include <linux/bitmap.h>
 #include <linux/completion.h>
 #include <linux/device.h>
 #include <linux/power_supply.h>
@@ -29,6 +30,7 @@ struct dentry;
 #define UCSIv2_MESSAGE_OUT		272
 
 /* UCSI versions */
+#define UCSI_VERSION_1_0	0x0100
 #define UCSI_VERSION_1_1	0x0110
 #define UCSI_VERSION_1_2	0x0120
 #define UCSI_VERSION_2_0	0x0200
@@ -48,6 +50,7 @@ struct dentry;
 /* Command Status and Connector Change Indication (CCI) bits */
 #define UCSI_CCI_CONNECTOR(_c_)		(((_c_) & GENMASK(7, 1)) >> 1)
 #define UCSI_CCI_LENGTH(_c_)		(((_c_) & GENMASK(15, 8)) >> 8)
+#define UCSI_SET_CCI_LENGTH(_c_)	((_c_) << 8)
 #define UCSI_CCI_NOT_SUPPORTED		BIT(25)
 #define UCSI_CCI_CANCEL_COMPLETE	BIT(26)
 #define UCSI_CCI_RESET_COMPLETE		BIT(27)
@@ -60,6 +63,7 @@ struct dentry;
  * struct ucsi_operations - UCSI I/O operations
  * @read_version: Read implemented UCSI version
  * @read_cci: Read CCI register
+ * @poll_cci: Read CCI register while polling with notifications disabled
  * @read_message_in: Read message data from UCSI
  * @sync_control: Blocking control operation
  * @async_control: Non-blocking control operation
@@ -74,10 +78,13 @@ struct dentry;
 struct ucsi_operations {
 	int (*read_version)(struct ucsi *ucsi, u16 *version);
 	int (*read_cci)(struct ucsi *ucsi, u32 *cci);
+	int (*poll_cci)(struct ucsi *ucsi, u32 *cci);
 	int (*read_message_in)(struct ucsi *ucsi, void *val, size_t val_len);
-	int (*sync_control)(struct ucsi *ucsi, u64 command);
+	int (*sync_control)(struct ucsi *ucsi, u64 command, u32 *cci,
+			    void *data, size_t size);
 	int (*async_control)(struct ucsi *ucsi, u64 command);
-	bool (*update_altmodes)(struct ucsi *ucsi, struct ucsi_altmode *orig,
+	bool (*update_altmodes)(struct ucsi *ucsi, u8 recipient,
+				struct ucsi_altmode *orig,
 				struct ucsi_altmode *updated);
 	void (*update_connector)(struct ucsi_connector *con);
 	void (*connector_status)(struct ucsi_connector *con);
@@ -89,32 +96,44 @@ int ucsi_register(struct ucsi *ucsi);
 void ucsi_unregister(struct ucsi *ucsi);
 void *ucsi_get_drvdata(struct ucsi *ucsi);
 void ucsi_set_drvdata(struct ucsi *ucsi, void *data);
+bool ucsi_con_mutex_lock(struct ucsi_connector *con);
+void ucsi_con_mutex_unlock(struct ucsi_connector *con);
 
 void ucsi_connector_change(struct ucsi *ucsi, u8 num);
 
 /* -------------------------------------------------------------------------- */
 
 /* Commands */
-#define UCSI_PPM_RESET			0x01
-#define UCSI_CANCEL			0x02
-#define UCSI_CONNECTOR_RESET		0x03
-#define UCSI_ACK_CC_CI			0x04
-#define UCSI_SET_NOTIFICATION_ENABLE	0x05
-#define UCSI_GET_CAPABILITY		0x06
-#define UCSI_GET_CONNECTOR_CAPABILITY	0x07
-#define UCSI_SET_UOM			0x08
-#define UCSI_SET_UOR			0x09
-#define UCSI_SET_PDM			0x0a
-#define UCSI_SET_PDR			0x0b
-#define UCSI_GET_ALTERNATE_MODES	0x0c
-#define UCSI_GET_CAM_SUPPORTED		0x0d
-#define UCSI_GET_CURRENT_CAM		0x0e
-#define UCSI_SET_NEW_CAM		0x0f
-#define UCSI_GET_PDOS			0x10
-#define UCSI_GET_CABLE_PROPERTY		0x11
-#define UCSI_GET_CONNECTOR_STATUS	0x12
-#define UCSI_GET_ERROR_STATUS		0x13
-#define UCSI_GET_PD_MESSAGE		0x15
+#define UCSI_PPM_RESET				0x01
+#define UCSI_CANCEL				0x02
+#define UCSI_CONNECTOR_RESET			0x03
+#define UCSI_ACK_CC_CI				0x04
+#define UCSI_SET_NOTIFICATION_ENABLE		0x05
+#define UCSI_GET_CAPABILITY			0x06
+#define UCSI_GET_CAPABILITY_SIZE		128
+#define UCSI_GET_CONNECTOR_CAPABILITY		0x07
+#define UCSI_GET_CONNECTOR_CAPABILITY_SIZE	32
+#define UCSI_SET_CCOM				0x08
+#define UCSI_SET_UOR				0x09
+#define UCSI_SET_PDM				0x0a
+#define UCSI_SET_PDR				0x0b
+#define UCSI_GET_ALTERNATE_MODES		0x0c
+#define UCSI_GET_CAM_SUPPORTED			0x0d
+#define UCSI_GET_CURRENT_CAM			0x0e
+#define UCSI_SET_NEW_CAM			0x0f
+#define UCSI_GET_PDOS				0x10
+#define UCSI_GET_CABLE_PROPERTY			0x11
+#define UCSI_GET_CABLE_PROPERTY_SIZE		64
+#define UCSI_GET_CONNECTOR_STATUS		0x12
+#define UCSI_GET_CONNECTOR_STATUS_SIZE		152
+#define UCSI_GET_ERROR_STATUS			0x13
+#define UCSI_GET_ATTENTION_VDO			0x16
+#define UCSI_GET_PD_MESSAGE			0x15
+#define UCSI_GET_CAM_CS			0x18
+#define UCSI_SET_SINK_PATH			0x1c
+#define UCSI_READ_POWER_LEVEL			0x1e
+#define UCSI_SET_USB				0x21
+#define UCSI_GET_LPM_PPM_INFO			0x22
 
 #define UCSI_CONNECTOR_NUMBER(_num_)		((u64)(_num_) << 16)
 #define UCSI_COMMAND(_cmd_)			((_cmd_) & 0xff)
@@ -125,7 +144,6 @@ void ucsi_connector_change(struct ucsi *ucsi, u8 num);
 /* CONNECTOR_RESET command bits */
 #define UCSI_CONNECTOR_RESET_HARD_VER_1_0	BIT(23) /* Deprecated in v1.1 */
 #define UCSI_CONNECTOR_RESET_DATA_VER_2_0	BIT(23) /* Redefined in v2.0 */
-
 
 /* ACK_CC_CI bits */
 #define UCSI_ACK_CONNECTOR_CHANGE		BIT(16)
@@ -250,42 +268,6 @@ struct ucsi_capability {
 	u16 typec_version;
 } __packed;
 
-/* Data structure filled by PPM in response to GET_CONNECTOR_CAPABILITY cmd. */
-struct ucsi_connector_capability {
-	u8 op_mode;
-#define UCSI_CONCAP_OPMODE_DFP			BIT(0)
-#define UCSI_CONCAP_OPMODE_UFP			BIT(1)
-#define UCSI_CONCAP_OPMODE_DRP			BIT(2)
-#define UCSI_CONCAP_OPMODE_AUDIO_ACCESSORY	BIT(3)
-#define UCSI_CONCAP_OPMODE_DEBUG_ACCESSORY	BIT(4)
-#define UCSI_CONCAP_OPMODE_USB2			BIT(5)
-#define UCSI_CONCAP_OPMODE_USB3			BIT(6)
-#define UCSI_CONCAP_OPMODE_ALT_MODE		BIT(7)
-	u32 flags;
-#define UCSI_CONCAP_FLAG_PROVIDER		BIT(0)
-#define UCSI_CONCAP_FLAG_CONSUMER		BIT(1)
-#define UCSI_CONCAP_FLAG_SWAP_TO_DFP		BIT(2)
-#define UCSI_CONCAP_FLAG_SWAP_TO_UFP		BIT(3)
-#define UCSI_CONCAP_FLAG_SWAP_TO_SRC		BIT(4)
-#define UCSI_CONCAP_FLAG_SWAP_TO_SINK		BIT(5)
-#define UCSI_CONCAP_FLAG_EX_OP_MODE(_f_) \
-	(((_f_) & GENMASK(13, 6)) >> 6)
-#define   UCSI_CONCAP_EX_OP_MODE_USB4_GEN2	BIT(0)
-#define   UCSI_CONCAP_EX_OP_MODE_EPR_SRC	BIT(1)
-#define   UCSI_CONCAP_EX_OP_MODE_EPR_SINK	BIT(2)
-#define   UCSI_CONCAP_EX_OP_MODE_USB4_GEN3	BIT(3)
-#define   UCSI_CONCAP_EX_OP_MODE_USB4_GEN4	BIT(4)
-#define UCSI_CONCAP_FLAG_MISC_CAPS(_f_) \
-	(((_f_) & GENMASK(17, 14)) >> 14)
-#define   UCSI_CONCAP_MISC_CAP_FW_UPDATE	BIT(0)
-#define   UCSI_CONCAP_MISC_CAP_SECURITY		BIT(1)
-#define UCSI_CONCAP_FLAG_REV_CURR_PROT_SUPPORT	BIT(18)
-#define UCSI_CONCAP_FLAG_PARTNER_PD_MAJOR_REV(_f_) \
-	(((_f_) & GENMASK(20, 19)) >> 19)
-#define UCSI_CONCAP_FLAG_PARTNER_PD_MAJOR_REV_AS_BCD(_f_) \
-	UCSI_SPEC_REVISION_TO_BCD(UCSI_CONCAP_FLAG_PARTNER_PD_MAJOR_REV(_f_))
-} __packed;
-
 struct ucsi_altmode {
 	u16 svid;
 	u32 mid;
@@ -311,9 +293,83 @@ struct ucsi_cable_property {
 	u8 latency;
 } __packed;
 
-/* Data structure filled by PPM in response to GET_CONNECTOR_STATUS command. */
-struct ucsi_connector_status {
-	u16 change;
+/* Get Connector Capability Fields. */
+#define UCSI_CONCAP_OPMODE			UCSI_DECLARE_BITFIELD(0, 0, 8)
+#define   UCSI_CONCAP_OPMODE_DFP		UCSI_DECLARE_BITFIELD(0, 0, 1)
+#define   UCSI_CONCAP_OPMODE_UFP		UCSI_DECLARE_BITFIELD(0, 1, 1)
+#define   UCSI_CONCAP_OPMODE_DRP		UCSI_DECLARE_BITFIELD(0, 2, 1)
+#define   UCSI_CONCAP_OPMODE_AUDIO_ACCESSORY	UCSI_DECLARE_BITFIELD(0, 3, 1)
+#define   UCSI_CONCAP_OPMODE_DEBUG_ACCESSORY	UCSI_DECLARE_BITFIELD(0, 4, 1)
+#define   UCSI_CONCAP_OPMODE_USB2		UCSI_DECLARE_BITFIELD(0, 5, 1)
+#define   UCSI_CONCAP_OPMODE_USB3		UCSI_DECLARE_BITFIELD(0, 6, 1)
+#define   UCSI_CONCAP_OPMODE_ALT_MODE		UCSI_DECLARE_BITFIELD(0, 7, 1)
+#define UCSI_CONCAP_PROVIDER			UCSI_DECLARE_BITFIELD(0, 8, 1)
+#define UCSI_CONCAP_CONSUMER			UCSI_DECLARE_BITFIELD(0, 9, 1)
+#define UCSI_CONCAP_SWAP_TO_DFP_V1_1		UCSI_DECLARE_BITFIELD_V1_1(10, 1)
+#define UCSI_CONCAP_SWAP_TO_UFP_V1_1		UCSI_DECLARE_BITFIELD_V1_1(11, 1)
+#define UCSI_CONCAP_SWAP_TO_SRC_V1_1		UCSI_DECLARE_BITFIELD_V1_1(12, 1)
+#define UCSI_CONCAP_SWAP_TO_SNK_V1_1		UCSI_DECLARE_BITFIELD_V1_1(13, 1)
+#define UCSI_CONCAP_EXT_OPMODE_V2_0		UCSI_DECLARE_BITFIELD_V2_0(14, 8)
+#define   UCSI_CONCAP_EXT_OPMODE_USB4_GEN2_V2_0	UCSI_DECLARE_BITFIELD_V2_0(14, 1)
+#define   UCSI_CONCAP_EXT_OPMODE_EPR_SRC_V2_0	UCSI_DECLARE_BITFIELD_V2_0(15, 1)
+#define   UCSI_CONCAP_EXT_OPMODE_EPR_SINK_V2_0	UCSI_DECLARE_BITFIELD_V2_0(16, 1)
+#define   UCSI_CONCAP_EXT_OPMODE_USB4_GEN3_V2_0	UCSI_DECLARE_BITFIELD_V2_0(17, 1)
+#define   UCSI_CONCAP_EXT_OPMODE_USB4_GEN4_V2_0	UCSI_DECLARE_BITFIELD_V2_0(18, 1)
+#define UCSI_CONCAP_MISC_V2_0			UCSI_DECLARE_BITFIELD_V2_0(22, 4)
+#define   UCSI_CONCAP_MISC_FW_UPDATE_V2_0	UCSI_DECLARE_BITFIELD_V2_0(22, 1)
+#define   UCSI_CONCAP_MISC_SECURITY_V2_0	UCSI_DECLARE_BITFIELD_V2_0(23, 1)
+#define UCSI_CONCAP_REV_CURR_PROT_SUPPORT_V2_0	UCSI_DECLARE_BITFIELD_V2_0(26, 1)
+#define UCSI_CONCAP_PARTNER_PD_REVISION_V2_1	UCSI_DECLARE_BITFIELD_V2_1(27, 2)
+
+/* Helpers for USB capability checks. */
+#define UCSI_CONCAP_USB2_SUPPORT(_con_) UCSI_CONCAP((_con_), OPMODE_USB2)
+#define UCSI_CONCAP_USB3_SUPPORT(_con_) UCSI_CONCAP((_con_), OPMODE_USB3)
+#define UCSI_CONCAP_USB4_SUPPORT(_con_)					\
+	((_con_)->ucsi->version >= UCSI_VERSION_2_0 &&			\
+	 (UCSI_CONCAP((_con_), EXT_OPMODE_USB4_GEN2_V2_0) |		\
+	  UCSI_CONCAP((_con_), EXT_OPMODE_USB4_GEN3_V2_0) |		\
+	  UCSI_CONCAP((_con_), EXT_OPMODE_USB4_GEN4_V2_0)))
+
+/* Get Connector Status Fields. */
+#define UCSI_CONSTAT_CHANGE			UCSI_DECLARE_BITFIELD(0, 0, 16)
+#define UCSI_CONSTAT_PWR_OPMODE			UCSI_DECLARE_BITFIELD(0, 16, 3)
+#define   UCSI_CONSTAT_PWR_OPMODE_NONE		0
+#define   UCSI_CONSTAT_PWR_OPMODE_DEFAULT	1
+#define   UCSI_CONSTAT_PWR_OPMODE_BC		2
+#define   UCSI_CONSTAT_PWR_OPMODE_PD		3
+#define   UCSI_CONSTAT_PWR_OPMODE_TYPEC1_5	4
+#define   UCSI_CONSTAT_PWR_OPMODE_TYPEC3_0	5
+#define UCSI_CONSTAT_CONNECTED			UCSI_DECLARE_BITFIELD(0, 19, 1)
+#define UCSI_CONSTAT_PWR_DIR			UCSI_DECLARE_BITFIELD(0, 20, 1)
+#define UCSI_CONSTAT_PARTNER_FLAGS		UCSI_DECLARE_BITFIELD(0, 21, 8)
+#define   UCSI_CONSTAT_PARTNER_FLAG_USB		UCSI_DECLARE_BITFIELD(0, 21, 1)
+#define   UCSI_CONSTAT_PARTNER_FLAG_ALT_MODE	UCSI_DECLARE_BITFIELD(0, 22, 1)
+#define   UCSI_CONSTAT_PARTNER_FLAG_USB4_GEN3	UCSI_DECLARE_BITFIELD(0, 23, 1)
+#define   UCSI_CONSTAT_PARTNER_FLAG_USB4_GEN4	UCSI_DECLARE_BITFIELD(0, 24, 1)
+#define UCSI_CONSTAT_PARTNER_TYPE		UCSI_DECLARE_BITFIELD(0, 29, 3)
+#define   UCSI_CONSTAT_PARTNER_TYPE_DFP		1
+#define   UCSI_CONSTAT_PARTNER_TYPE_UFP		2
+#define   UCSI_CONSTAT_PARTNER_TYPE_CABLE	3   /* Powered Cable */
+#define   UCSI_CONSTAT_PARTNER_TYPE_CABLE_AND_UFP 4 /* Powered Cable */
+#define   UCSI_CONSTAT_PARTNER_TYPE_DEBUG	5
+#define   UCSI_CONSTAT_PARTNER_TYPE_AUDIO	6
+#define UCSI_CONSTAT_RDO			UCSI_DECLARE_BITFIELD(0, 32, 32)
+#define UCSI_CONSTAT_BC_STATUS			UCSI_DECLARE_BITFIELD(0, 64, 2)
+#define   UCSI_CONSTAT_BC_NOT_CHARGING		0
+#define   UCSI_CONSTAT_BC_NOMINAL_CHARGING	1
+#define   UCSI_CONSTAT_BC_SLOW_CHARGING		2
+#define   UCSI_CONSTAT_BC_TRICKLE_CHARGING	3
+#define UCSI_CONSTAT_PD_VERSION_V1_2		UCSI_DECLARE_BITFIELD_V1_2(70, 16)
+#define UCSI_CONSTAT_PWR_READING_READY_V2_1	UCSI_DECLARE_BITFIELD_V2_1(89, 1)
+#define UCSI_CONSTAT_CURRENT_SCALE_V2_1		UCSI_DECLARE_BITFIELD_V2_1(90, 3)
+#define UCSI_CONSTAT_PEAK_CURRENT_V2_1		UCSI_DECLARE_BITFIELD_V2_1(93, 16)
+#define UCSI_CONSTAT_AVG_CURRENT_V2_1		UCSI_DECLARE_BITFIELD_V2_1(109, 16)
+#define UCSI_CONSTAT_VOLTAGE_SCALE_V2_1		UCSI_DECLARE_BITFIELD_V2_1(125, 4)
+#define UCSI_CONSTAT_VBUS_VOLTAGE_V2_1		UCSI_DECLARE_BITFIELD_V2_1(129, 16)
+#define UCSI_CONSTAT_CURR_SCALE_MULT		5
+#define UCSI_CONSTAT_VOLT_SCALE_MULT		5
+
+/* Connector Status Change Bits.  */
 #define UCSI_CONSTAT_EXT_SUPPLY_CHANGE		BIT(1)
 #define UCSI_CONSTAT_POWER_OPMODE_CHANGE	BIT(2)
 #define UCSI_CONSTAT_PDOS_CHANGE		BIT(5)
@@ -325,35 +381,63 @@ struct ucsi_connector_status {
 #define UCSI_CONSTAT_POWER_DIR_CHANGE		BIT(12)
 #define UCSI_CONSTAT_CONNECT_CHANGE		BIT(14)
 #define UCSI_CONSTAT_ERROR			BIT(15)
-	u16 flags;
-#define UCSI_CONSTAT_PWR_OPMODE(_f_)		((_f_) & GENMASK(2, 0))
-#define   UCSI_CONSTAT_PWR_OPMODE_NONE		0
-#define   UCSI_CONSTAT_PWR_OPMODE_DEFAULT	1
-#define   UCSI_CONSTAT_PWR_OPMODE_BC		2
-#define   UCSI_CONSTAT_PWR_OPMODE_PD		3
-#define   UCSI_CONSTAT_PWR_OPMODE_TYPEC1_5	4
-#define   UCSI_CONSTAT_PWR_OPMODE_TYPEC3_0	5
-#define UCSI_CONSTAT_CONNECTED			BIT(3)
-#define UCSI_CONSTAT_PWR_DIR			BIT(4)
-#define UCSI_CONSTAT_PARTNER_FLAGS(_f_)		(((_f_) & GENMASK(12, 5)) >> 5)
-#define   UCSI_CONSTAT_PARTNER_FLAG_USB		1
-#define   UCSI_CONSTAT_PARTNER_FLAG_ALT_MODE	2
-#define UCSI_CONSTAT_PARTNER_TYPE(_f_)		(((_f_) & GENMASK(15, 13)) >> 13)
-#define   UCSI_CONSTAT_PARTNER_TYPE_DFP		1
-#define   UCSI_CONSTAT_PARTNER_TYPE_UFP		2
-#define   UCSI_CONSTAT_PARTNER_TYPE_CABLE	3 /* Powered Cable */
-#define   UCSI_CONSTAT_PARTNER_TYPE_CABLE_AND_UFP	4 /* Powered Cable */
-#define   UCSI_CONSTAT_PARTNER_TYPE_DEBUG	5
-#define   UCSI_CONSTAT_PARTNER_TYPE_AUDIO	6
-	u32 request_data_obj;
 
-	u8 pwr_status;
-#define UCSI_CONSTAT_BC_STATUS(_p_)		((_p_) & GENMASK(1, 0))
-#define   UCSI_CONSTAT_BC_NOT_CHARGING		0
-#define   UCSI_CONSTAT_BC_NOMINAL_CHARGING	1
-#define   UCSI_CONSTAT_BC_SLOW_CHARGING		2
-#define   UCSI_CONSTAT_BC_TRICKLE_CHARGING	3
-} __packed;
+#define UCSI_DECLARE_BITFIELD_V1_1(_offset_, _size_)			\
+	  UCSI_DECLARE_BITFIELD(UCSI_VERSION_1_1, (_offset_), (_size_))
+#define UCSI_DECLARE_BITFIELD_V1_2(_offset_, _size_)			\
+	  UCSI_DECLARE_BITFIELD(UCSI_VERSION_1_2, (_offset_), (_size_))
+#define UCSI_DECLARE_BITFIELD_V2_0(_offset_, _size_)			\
+	  UCSI_DECLARE_BITFIELD(UCSI_VERSION_2_0, (_offset_), (_size_))
+#define UCSI_DECLARE_BITFIELD_V2_1(_offset_, _size_)			\
+	  UCSI_DECLARE_BITFIELD(UCSI_VERSION_2_1, (_offset_), (_size_))
+#define UCSI_DECLARE_BITFIELD_V3_0(_offset_, _size_)			\
+	  UCSI_DECLARE_BITFIELD(UCSI_VERSION_3_0, (_offset_), (_size_))
+
+#define UCSI_DECLARE_BITFIELD(_ver_, _offset_, _size_)			\
+(struct ucsi_bitfield) {						\
+	.version = _ver_,						\
+	.offset = _offset_,						\
+	.size = _size_,							\
+}
+
+struct ucsi_bitfield {
+	const u16 version;
+	const u8 offset;
+	const u8 size;
+};
+
+/**
+ * ucsi_bitfield_read - Read a field from UCSI command response
+ * @_map_: UCSI command response
+ * @_field_: The field offset in the response data structure
+ * @_ver_: UCSI version where the field was introduced
+ *
+ * Reads the fields in the command responses by first checking that the field is
+ * valid with the UCSI interface version that is used in the system.
+ * @_ver_ is the minimum UCSI version for the @_field_. If the UCSI interface is
+ * older than @_ver_, a warning is generated.
+ *
+ * Caveats:
+ * - Removed fields are not checked - @_ver_ is just the minimum UCSI version.
+ *
+ * Returns the value of @_field_, or 0 when the UCSI interface is older than
+ * @_ver_.
+ */
+#define ucsi_bitfield_read(_map_, _field_, _ver_)			\
+({									\
+	struct ucsi_bitfield f = (_field_);				\
+	WARN((_ver_) < f.version,					\
+	"Access to unsupported field at offset 0x%x (need version %04x)", \
+	     f.offset, f.version) ? 0 :					\
+	bitmap_read((_map_), f.offset, f.size);				\
+})
+
+/* Helpers to access cached command responses. */
+#define UCSI_CONCAP(_con_, _field_)					\
+	ucsi_bitfield_read((_con_)->cap, UCSI_CONCAP_##_field_, (_con_)->ucsi->version)
+
+#define UCSI_CONSTAT(_con_, _field_)					\
+	ucsi_bitfield_read((_con_)->status, UCSI_CONSTAT_##_field_, (_con_)->ucsi->version)
 
 /* -------------------------------------------------------------------------- */
 
@@ -363,7 +447,7 @@ struct ucsi_debugfs_entry {
 		u64 low;
 		u64 high;
 	} response;
-	u32 status;
+	int status;
 	struct dentry *dentry;
 };
 
@@ -408,9 +492,10 @@ struct ucsi {
 #define UCSI_MAX_SVID		5
 #define UCSI_MAX_ALTMODES	(UCSI_MAX_SVID * 6)
 
-#define UCSI_TYPEC_VSAFE5V	5000
-#define UCSI_TYPEC_1_5_CURRENT	1500
-#define UCSI_TYPEC_3_0_CURRENT	3000
+#define UCSI_TYPEC_VSAFE5V		5000
+#define UCSI_TYPEC_DEFAULT_CURRENT	 100
+#define UCSI_TYPEC_1_5_CURRENT		1500
+#define UCSI_TYPEC_3_0_CURRENT		3000
 
 struct ucsi_connector {
 	int num;
@@ -433,13 +518,19 @@ struct ucsi_connector {
 
 	struct typec_capability typec_cap;
 
-	struct ucsi_connector_status status;
-	struct ucsi_connector_capability cap;
+	/* Cached command responses. */
+	DECLARE_BITMAP(cap, UCSI_GET_CONNECTOR_CAPABILITY_SIZE);
+	DECLARE_BITMAP(status, UCSI_GET_CONNECTOR_STATUS_SIZE);
+
 	struct power_supply *psy;
 	struct power_supply_desc psy_desc;
 	u32 rdo;
 	u32 src_pdos[PDO_MAX_OBJECTS];
 	int num_pdos;
+
+	u32 peak_current;
+	u32 avg_current;
+	u32 vbus_voltage;
 
 	/* USB PD objects */
 	struct usb_power_delivery *pd;
@@ -463,7 +554,8 @@ void ucsi_altmode_update_active(struct ucsi_connector *con);
 int ucsi_resume(struct ucsi *ucsi);
 
 void ucsi_notify_common(struct ucsi *ucsi, u32 cci);
-int ucsi_sync_control_common(struct ucsi *ucsi, u64 command);
+int ucsi_sync_control_common(struct ucsi *ucsi, u64 command, u32 *cci,
+			     void *data, size_t size);
 
 #if IS_ENABLED(CONFIG_POWER_SUPPLY)
 int ucsi_register_port_psy(struct ucsi_connector *con);

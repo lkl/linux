@@ -10,6 +10,7 @@
 
 #include "sta.h"
 #include "wfx.h"
+#include "bus.h"
 #include "fwio.h"
 #include "bh.h"
 #include "key.h"
@@ -219,7 +220,7 @@ int wfx_conf_tx(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 	return 0;
 }
 
-int wfx_set_rts_threshold(struct ieee80211_hw *hw, u32 value)
+int wfx_set_rts_threshold(struct ieee80211_hw *hw, int radio_idx, u32 value)
 {
 	struct wfx_dev *wdev = hw->priv;
 	struct wfx_vif *wvif = NULL;
@@ -705,7 +706,7 @@ void wfx_unassign_vif_chanctx(struct ieee80211_hw *hw, struct ieee80211_vif *vif
 	wvif->channel = NULL;
 }
 
-int wfx_config(struct ieee80211_hw *hw, u32 changed)
+int wfx_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
 {
 	return 0;
 }
@@ -802,6 +803,30 @@ void wfx_remove_interface(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
 			wfx_hif_set_block_ack_policy(wvif, 0x00, 0x00);
 	}
 }
+
+#ifdef CONFIG_PM
+int wfx_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
+{
+	/* FIXME: hardware also support WIPHY_WOWLAN_MAGIC_PKT and other filters */
+	if (!wowlan->any || !wowlan->disconnect)
+		return -EINVAL;
+	return 0;
+}
+
+int wfx_resume(struct ieee80211_hw *hw)
+{
+	return 0;
+}
+
+void wfx_set_wakeup(struct ieee80211_hw *hw, bool enabled)
+{
+	struct wfx_dev *wdev = hw->priv;
+
+	if (enabled)
+		dev_info(wdev->dev, "support for WoWLAN is experimental\n");
+	wdev->hwbus_ops->set_wakeup(wdev->hwbus_priv, enabled);
+}
+#endif
 
 int wfx_start(struct ieee80211_hw *hw)
 {

@@ -322,14 +322,14 @@ static int mxic_ecc_init_ctx(struct nand_device *nand, struct device *dev)
 	sg_init_table(ctx->sg, 2);
 
 	/* Configuration dump and sanity checks */
-	dev_err(dev, "DPE version number: %d\n",
+	dev_dbg(dev, "DPE version number: %d\n",
 		readl(mxic->regs + DP_VER) >> DP_VER_OFFSET);
-	dev_err(dev, "Chunk size: %d\n", readl(mxic->regs + CHUNK_SIZE));
-	dev_err(dev, "Main size: %d\n", readl(mxic->regs + MAIN_SIZE));
-	dev_err(dev, "Spare size: %d\n", SPARE_SZ(spare_reg));
-	dev_err(dev, "Rsv size: %ld\n", RSV_SZ(spare_reg));
-	dev_err(dev, "Parity size: %d\n", ctx->parity_sz);
-	dev_err(dev, "Meta size: %d\n", ctx->meta_sz);
+	dev_dbg(dev, "Chunk size: %d\n", readl(mxic->regs + CHUNK_SIZE));
+	dev_dbg(dev, "Main size: %d\n", readl(mxic->regs + MAIN_SIZE));
+	dev_dbg(dev, "Spare size: %d\n", SPARE_SZ(spare_reg));
+	dev_dbg(dev, "Rsv size: %ld\n", RSV_SZ(spare_reg));
+	dev_dbg(dev, "Parity size: %d\n", ctx->parity_sz);
+	dev_dbg(dev, "Meta size: %d\n", ctx->meta_sz);
 
 	if ((ctx->meta_sz + ctx->parity_sz + RSV_SZ(spare_reg)) !=
 	    SPARE_SZ(spare_reg)) {
@@ -614,7 +614,7 @@ static int mxic_ecc_finish_io_req_external(struct nand_device *nand,
 {
 	struct mxic_ecc_engine *mxic = nand_to_mxic(nand);
 	struct mxic_ecc_ctx *ctx = nand_to_ecc_ctx(nand);
-	int nents, step, ret;
+	int nents, step, ret = 0;
 
 	if (req->mode == MTD_OPS_RAW)
 		return 0;
@@ -723,21 +723,21 @@ static int mxic_ecc_finish_io_req_pipelined(struct nand_device *nand,
 	return ret;
 }
 
-static struct nand_ecc_engine_ops mxic_ecc_engine_external_ops = {
+static const struct nand_ecc_engine_ops mxic_ecc_engine_external_ops = {
 	.init_ctx = mxic_ecc_init_ctx_external,
 	.cleanup_ctx = mxic_ecc_cleanup_ctx,
 	.prepare_io_req = mxic_ecc_prepare_io_req_external,
 	.finish_io_req = mxic_ecc_finish_io_req_external,
 };
 
-static struct nand_ecc_engine_ops mxic_ecc_engine_pipelined_ops = {
+static const struct nand_ecc_engine_ops mxic_ecc_engine_pipelined_ops = {
 	.init_ctx = mxic_ecc_init_ctx_pipelined,
 	.cleanup_ctx = mxic_ecc_cleanup_ctx,
 	.prepare_io_req = mxic_ecc_prepare_io_req_pipelined,
 	.finish_io_req = mxic_ecc_finish_io_req_pipelined,
 };
 
-struct nand_ecc_engine_ops *mxic_ecc_get_pipelined_ops(void)
+const struct nand_ecc_engine_ops *mxic_ecc_get_pipelined_ops(void)
 {
 	return &mxic_ecc_engine_pipelined_ops;
 }
@@ -869,7 +869,7 @@ static struct platform_driver mxic_ecc_driver = {
 		.of_match_table = mxic_ecc_of_ids,
 	},
 	.probe = mxic_ecc_probe,
-	.remove_new = mxic_ecc_remove,
+	.remove = mxic_ecc_remove,
 };
 module_platform_driver(mxic_ecc_driver);
 

@@ -7,6 +7,7 @@
  * Kernel loop code stolen from Steven Rostedt <srostedt@redhat.com>
  */
 #define _GNU_SOURCE
+#include <sys/prctl.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <stdio.h>
@@ -15,13 +16,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <include/vdso/time64.h>
 #include <pthread.h>
 
 #include "../kselftest.h"
 
 #define DELAY 2
-#define USECS_PER_SEC 1000000
-#define NSECS_PER_SEC 1000000000
 
 static void __fatal_error(const char *test, const char *name, const char *what)
 {
@@ -86,9 +86,9 @@ static int check_diff(struct timeval start, struct timeval end)
 	long long diff;
 
 	diff = end.tv_usec - start.tv_usec;
-	diff += (end.tv_sec - start.tv_sec) * USECS_PER_SEC;
+	diff += (end.tv_sec - start.tv_sec) * USEC_PER_SEC;
 
-	if (llabs(diff - DELAY * USECS_PER_SEC) > USECS_PER_SEC / 2) {
+	if (llabs(diff - DELAY * USEC_PER_SEC) > USEC_PER_SEC / 2) {
 		printf("Diff too high: %lld..", diff);
 		return -1;
 	}
@@ -448,7 +448,7 @@ static inline int64_t calcdiff_ns(struct timespec t1, struct timespec t2)
 {
 	int64_t diff;
 
-	diff = NSECS_PER_SEC * (int64_t)((int) t1.tv_sec - (int) t2.tv_sec);
+	diff = NSEC_PER_SEC * (int64_t)((int) t1.tv_sec - (int) t2.tv_sec);
 	diff += ((int) t1.tv_nsec - (int) t2.tv_nsec);
 	return diff;
 }
@@ -479,7 +479,7 @@ static void check_sigev_none(int which, const char *name)
 	do {
 		if (clock_gettime(which, &now))
 			fatal_error(name, "clock_gettime()");
-	} while (calcdiff_ns(now, start) < NSECS_PER_SEC);
+	} while (calcdiff_ns(now, start) < NSEC_PER_SEC);
 
 	if (timer_gettime(timerid, &its))
 		fatal_error(name, "timer_gettime()");
@@ -536,7 +536,7 @@ static void check_gettime(int which, const char *name)
 			wraps++;
 		prev = its;
 
-	} while (calcdiff_ns(now, start) < NSECS_PER_SEC);
+	} while (calcdiff_ns(now, start) < NSEC_PER_SEC);
 
 	if (timer_delete(timerid))
 		fatal_error(name, "timer_delete()");
@@ -587,7 +587,7 @@ static void check_overrun(int which, const char *name)
 	do {
 		if (clock_gettime(which, &now))
 			fatal_error(name, "clock_gettime()");
-	} while (calcdiff_ns(now, start) < NSECS_PER_SEC);
+	} while (calcdiff_ns(now, start) < NSEC_PER_SEC);
 
 	/* Unblock it, which should deliver a signal */
 	if (sigprocmask(SIG_UNBLOCK, &set, NULL))
@@ -600,13 +600,83 @@ static void check_overrun(int which, const char *name)
 			 "check_overrun %s\n", name);
 }
 
+#include <sys/syscall.h>
+
+static int do_timer_create(int *id)
+{
+	return syscall(__NR_timer_create, CLOCK_MONOTONIC, NULL, id);
+}
+
+static int do_timer_delete(int id)
+{
+	return syscall(__NR_timer_delete, id);
+}
+
+#ifndef PR_TIMER_CREATE_RESTORE_IDS
+# define PR_TIMER_CREATE_RESTORE_IDS		77
+# define PR_TIMER_CREATE_RESTORE_IDS_OFF	 0
+# define PR_TIMER_CREATE_RESTORE_IDS_ON		 1
+# define PR_TIMER_CREATE_RESTORE_IDS_GET	 2
+#endif
+
+static void check_timer_create_exact(void)
+{
+	int id;
+
+	if (prctl(PR_TIMER_CREATE_RESTORE_IDS, PR_TIMER_CREATE_RESTORE_IDS_ON, 0, 0, 0)) {
+		switch (errno) {
+		case EINVAL:
+			ksft_test_result_skip("check timer create exact, not supported\n");
+			return;
+		default:
+			ksft_test_result_skip("check timer create exact, errno = %d\n", errno);
+			return;
+		}
+	}
+
+	if (prctl(PR_TIMER_CREATE_RESTORE_IDS, PR_TIMER_CREATE_RESTORE_IDS_GET, 0, 0, 0) != 1)
+		fatal_error(NULL, "prctl(GET) failed\n");
+
+	id = 8;
+	if (do_timer_create(&id) < 0)
+		fatal_error(NULL, "timer_create()");
+
+	if (do_timer_delete(id))
+		fatal_error(NULL, "timer_delete()");
+
+	if (prctl(PR_TIMER_CREATE_RESTORE_IDS, PR_TIMER_CREATE_RESTORE_IDS_OFF, 0, 0, 0))
+		fatal_error(NULL, "prctl(OFF)");
+
+	if (prctl(PR_TIMER_CREATE_RESTORE_IDS, PR_TIMER_CREATE_RESTORE_IDS_GET, 0, 0, 0) != 0)
+		fatal_error(NULL, "prctl(GET) failed\n");
+
+	if (id != 8) {
+		ksft_test_result_fail("check timer create exact %d != 8\n", id);
+		return;
+	}
+
+	/* Validate that it went back to normal mode and allocates ID 9 */
+	if (do_timer_create(&id) < 0)
+		fatal_error(NULL, "timer_create()");
+
+	if (do_timer_delete(id))
+		fatal_error(NULL, "timer_delete()");
+
+	if (id == 9)
+		ksft_test_result_pass("check timer create exact\n");
+	else
+		ksft_test_result_fail("check timer create exact. Disabling failed.\n");
+}
+
 int main(int argc, char **argv)
 {
 	ksft_print_header();
-	ksft_set_plan(18);
+	ksft_set_plan(19);
 
 	ksft_print_msg("Testing posix timers. False negative may happen on CPU execution \n");
 	ksft_print_msg("based timers if other threads run on the CPU...\n");
+
+	check_timer_create_exact();
 
 	check_itimer(ITIMER_VIRTUAL, "ITIMER_VIRTUAL");
 	check_itimer(ITIMER_PROF, "ITIMER_PROF");

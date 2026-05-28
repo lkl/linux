@@ -174,7 +174,7 @@ struct bmi323_data {
 	__le16 fifo_buff[BMI323_FIFO_FULL_IN_WORDS] __aligned(IIO_DMA_MINALIGN);
 	struct {
 		__le16 channels[BMI323_CHAN_MAX];
-		s64 ts __aligned(8);
+		aligned_s64 ts;
 	} buffer;
 	__le16 steps_count[BMI323_STEP_LEN];
 };
@@ -467,7 +467,7 @@ static int bmi323_feature_engine_events(struct bmi323_data *data,
 			    BMI323_FEAT_IO_STATUS_MSK);
 }
 
-static int bmi323_step_wtrmrk_en(struct bmi323_data *data, int state)
+static int bmi323_step_wtrmrk_en(struct bmi323_data *data, bool state)
 {
 	enum bmi323_irq_pin step_irq;
 	int ret;
@@ -484,7 +484,7 @@ static int bmi323_step_wtrmrk_en(struct bmi323_data *data, int state)
 	ret = bmi323_update_ext_reg(data, BMI323_STEP_SC1_REG,
 				    BMI323_STEP_SC1_WTRMRK_MSK,
 				    FIELD_PREP(BMI323_STEP_SC1_WTRMRK_MSK,
-					       state ? 1 : 0));
+					       state));
 	if (ret)
 		return ret;
 
@@ -506,7 +506,7 @@ static int bmi323_motion_config_reg(enum iio_event_direction dir)
 }
 
 static int bmi323_motion_event_en(struct bmi323_data *data,
-				  enum iio_event_direction dir, int state)
+				  enum iio_event_direction dir, bool state)
 {
 	unsigned int state_value = state ? BMI323_FEAT_XYZ_MSK : 0;
 	int config, ret, msk, raw, field_value;
@@ -570,7 +570,7 @@ static int bmi323_motion_event_en(struct bmi323_data *data,
 }
 
 static int bmi323_tap_event_en(struct bmi323_data *data,
-			       enum iio_event_direction dir, int state)
+			       enum iio_event_direction dir, bool state)
 {
 	enum bmi323_irq_pin tap_irq;
 	int ret, tap_enabled;
@@ -785,7 +785,7 @@ static const struct attribute_group bmi323_event_attribute_group = {
 static int bmi323_write_event_config(struct iio_dev *indio_dev,
 				     const struct iio_chan_spec *chan,
 				     enum iio_event_type type,
-				     enum iio_event_direction dir, int state)
+				     enum iio_event_direction dir, bool state)
 {
 	struct bmi323_data *data = iio_priv(indio_dev);
 
@@ -1702,26 +1702,30 @@ static int bmi323_write_raw(struct iio_dev *indio_dev,
 			    int val2, long mask)
 {
 	struct bmi323_data *data = iio_priv(indio_dev);
+	int ret;
 
 	switch (mask) {
 	case IIO_CHAN_INFO_SAMP_FREQ:
-		iio_device_claim_direct_scoped(return -EBUSY, indio_dev)
-			return bmi323_set_odr(data,
-					      bmi323_iio_to_sensor(chan->type),
-					      val, val2);
-		unreachable();
+		if (!iio_device_claim_direct(indio_dev))
+			return -EBUSY;
+		ret = bmi323_set_odr(data, bmi323_iio_to_sensor(chan->type),
+				     val, val2);
+		iio_device_release_direct(indio_dev);
+		return ret;
 	case IIO_CHAN_INFO_SCALE:
-		iio_device_claim_direct_scoped(return -EBUSY, indio_dev)
-			return bmi323_set_scale(data,
-						bmi323_iio_to_sensor(chan->type),
-						val, val2);
-		unreachable();
+		if (!iio_device_claim_direct(indio_dev))
+			return -EBUSY;
+		ret = bmi323_set_scale(data, bmi323_iio_to_sensor(chan->type),
+				       val, val2);
+		iio_device_release_direct(indio_dev);
+		return ret;
 	case IIO_CHAN_INFO_OVERSAMPLING_RATIO:
-		iio_device_claim_direct_scoped(return -EBUSY, indio_dev)
-			return bmi323_set_average(data,
-						  bmi323_iio_to_sensor(chan->type),
-						  val);
-		unreachable();
+		if (!iio_device_claim_direct(indio_dev))
+			return -EBUSY;
+		ret = bmi323_set_average(data, bmi323_iio_to_sensor(chan->type),
+					 val);
+		iio_device_release_direct(indio_dev);
+		return ret;
 	case IIO_CHAN_INFO_ENABLE:
 		return bmi323_enable_steps(data, val);
 	case IIO_CHAN_INFO_PROCESSED: {
@@ -1747,6 +1751,7 @@ static int bmi323_read_raw(struct iio_dev *indio_dev,
 			   int *val2, long mask)
 {
 	struct bmi323_data *data = iio_priv(indio_dev);
+	int ret;
 
 	switch (mask) {
 	case IIO_CHAN_INFO_PROCESSED:
@@ -1755,10 +1760,11 @@ static int bmi323_read_raw(struct iio_dev *indio_dev,
 		switch (chan->type) {
 		case IIO_ACCEL:
 		case IIO_ANGL_VEL:
-			iio_device_claim_direct_scoped(return -EBUSY,
-						       indio_dev)
-				return bmi323_read_axis(data, chan, val);
-			unreachable();
+			if (!iio_device_claim_direct(indio_dev))
+				return -EBUSY;
+			ret = bmi323_read_axis(data, chan, val);
+			iio_device_release_direct(indio_dev);
+			return ret;
 		case IIO_TEMP:
 			return bmi323_get_temp_data(data, val);
 		default:
@@ -1881,7 +1887,6 @@ static int bmi323_trigger_probe(struct bmi323_data *data,
 	struct fwnode_handle *fwnode;
 	enum bmi323_irq_pin irq_pin;
 	int ret, irq, irq_type;
-	struct irq_data *desc;
 
 	fwnode = dev_fwnode(data->dev);
 	if (!fwnode)
@@ -1898,12 +1903,7 @@ static int bmi323_trigger_probe(struct bmi323_data *data,
 		irq_pin = BMI323_IRQ_INT2;
 	}
 
-	desc = irq_get_irq_data(irq);
-	if (!desc)
-		return dev_err_probe(data->dev, -EINVAL,
-				     "Could not find IRQ %d\n", irq);
-
-	irq_type = irqd_get_trigger_type(desc);
+	irq_type = irq_get_trigger_type(irq);
 	switch (irq_type) {
 	case IRQF_TRIGGER_RISING:
 		latch = false;
@@ -2112,8 +2112,7 @@ int bmi323_core_probe(struct device *dev)
 
 	indio_dev = devm_iio_device_alloc(dev, sizeof(*data));
 	if (!indio_dev)
-		return dev_err_probe(dev, -ENOMEM,
-				     "Failed to allocate device\n");
+		return -ENOMEM;
 
 	ret = devm_regulator_bulk_get_enable(dev, ARRAY_SIZE(regulator_names),
 					     regulator_names);
@@ -2170,7 +2169,7 @@ int bmi323_core_probe(struct device *dev)
 
 	return bmi323_fifo_disable(data);
 }
-EXPORT_SYMBOL_NS_GPL(bmi323_core_probe, IIO_BMI323);
+EXPORT_SYMBOL_NS_GPL(bmi323_core_probe, "IIO_BMI323");
 
 static int bmi323_core_runtime_suspend(struct device *dev)
 {
@@ -2298,7 +2297,7 @@ const struct dev_pm_ops bmi323_core_pm_ops = {
 	RUNTIME_PM_OPS(bmi323_core_runtime_suspend,
 		       bmi323_core_runtime_resume, NULL)
 };
-EXPORT_SYMBOL_NS_GPL(bmi323_core_pm_ops, IIO_BMI323);
+EXPORT_SYMBOL_NS_GPL(bmi323_core_pm_ops, "IIO_BMI323");
 
 MODULE_DESCRIPTION("Bosch BMI323 IMU driver");
 MODULE_AUTHOR("Jagath Jog J <jagathjog1996@gmail.com>");

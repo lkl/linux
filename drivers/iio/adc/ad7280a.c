@@ -541,7 +541,7 @@ static ssize_t ad7280_store_balance_timer(struct iio_dev *indio_dev,
 	int val, val2;
 	int ret;
 
-	ret = iio_str_to_fixpoint(buf, 1000, &val, &val2);
+	ret = iio_str_to_fixpoint(buf, 100, &val, &val2);
 	if (ret)
 		return ret;
 
@@ -572,7 +572,7 @@ static const struct iio_chan_spec_ext_info ad7280_cell_ext_info[] = {
 		.write = ad7280_store_balance_timer,
 		.shared = IIO_SEPARATE,
 	},
-	{}
+	{ }
 };
 
 static const struct iio_event_spec ad7280_events[] = {
@@ -822,17 +822,15 @@ static irqreturn_t ad7280_event_handler(int irq, void *private)
 		if (FIELD_GET(AD7280A_TRANS_READ_CONV_CHANADDR_MSK, channels[i]) <=
 		    AD7280A_CELL_VOLTAGE_6_REG) {
 			if (val >= st->cell_threshhigh) {
-				u64 tmp = IIO_EVENT_CODE(IIO_VOLTAGE, 1, 0,
-							 IIO_EV_DIR_RISING,
-							 IIO_EV_TYPE_THRESH,
-							 0, 0, 0);
+				u64 tmp = IIO_DIFF_EVENT_CODE(IIO_VOLTAGE, 0, 0,
+							IIO_EV_TYPE_THRESH,
+							IIO_EV_DIR_RISING);
 				iio_push_event(indio_dev, tmp,
 					       iio_get_time_ns(indio_dev));
 			} else if (val <= st->cell_threshlow) {
-				u64 tmp = IIO_EVENT_CODE(IIO_VOLTAGE, 1, 0,
-							 IIO_EV_DIR_FALLING,
-							 IIO_EV_TYPE_THRESH,
-							 0, 0, 0);
+				u64 tmp = IIO_DIFF_EVENT_CODE(IIO_VOLTAGE, 0, 0,
+							IIO_EV_TYPE_THRESH,
+							IIO_EV_DIR_FALLING);
 				iio_push_event(indio_dev, tmp,
 					       iio_get_time_ns(indio_dev));
 			}

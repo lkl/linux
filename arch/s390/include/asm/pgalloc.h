@@ -19,14 +19,17 @@
 
 #define CRST_ALLOC_ORDER 2
 
-unsigned long *crst_table_alloc(struct mm_struct *);
+unsigned long *crst_table_alloc_noprof(struct mm_struct *);
+#define crst_table_alloc(...)	alloc_hooks(crst_table_alloc_noprof(__VA_ARGS__))
 void crst_table_free(struct mm_struct *, unsigned long *);
 
-unsigned long *page_table_alloc(struct mm_struct *);
-struct ptdesc *page_table_alloc_pgste(struct mm_struct *mm);
+unsigned long *page_table_alloc_noprof(struct mm_struct *);
+#define page_table_alloc(...)	alloc_hooks(page_table_alloc_noprof(__VA_ARGS__))
 void page_table_free(struct mm_struct *, unsigned long *);
+
+struct ptdesc *page_table_alloc_pgste_noprof(struct mm_struct *mm);
+#define page_table_alloc_pgste(...)	alloc_hooks(page_table_alloc_pgste_noprof(__VA_ARGS__))
 void page_table_free_pgste(struct ptdesc *ptdesc);
-extern int page_table_allocate_pgste;
 
 static inline void crst_table_init(unsigned long *crst, unsigned long entry)
 {
@@ -49,54 +52,70 @@ static inline unsigned long check_asce_limit(struct mm_struct *mm, unsigned long
 	return addr;
 }
 
-static inline p4d_t *p4d_alloc_one(struct mm_struct *mm, unsigned long address)
+static inline p4d_t *p4d_alloc_one_noprof(struct mm_struct *mm, unsigned long address)
 {
-	unsigned long *table = crst_table_alloc(mm);
+	unsigned long *table = crst_table_alloc_noprof(mm);
 
-	if (table)
-		crst_table_init(table, _REGION2_ENTRY_EMPTY);
+	if (!table)
+		return NULL;
+	crst_table_init(table, _REGION2_ENTRY_EMPTY);
+	pagetable_p4d_ctor(virt_to_ptdesc(table));
+
 	return (p4d_t *) table;
 }
+#define p4d_alloc_one(...)	alloc_hooks(p4d_alloc_one_noprof(__VA_ARGS__))
 
 static inline void p4d_free(struct mm_struct *mm, p4d_t *p4d)
 {
-	if (!mm_p4d_folded(mm))
-		crst_table_free(mm, (unsigned long *) p4d);
+	if (mm_p4d_folded(mm))
+		return;
+
+	pagetable_dtor(virt_to_ptdesc(p4d));
+	crst_table_free(mm, (unsigned long *) p4d);
 }
 
-static inline pud_t *pud_alloc_one(struct mm_struct *mm, unsigned long address)
+static inline pud_t *pud_alloc_one_noprof(struct mm_struct *mm, unsigned long address)
 {
-	unsigned long *table = crst_table_alloc(mm);
-	if (table)
-		crst_table_init(table, _REGION3_ENTRY_EMPTY);
+	unsigned long *table = crst_table_alloc_noprof(mm);
+
+	if (!table)
+		return NULL;
+	crst_table_init(table, _REGION3_ENTRY_EMPTY);
+	pagetable_pud_ctor(virt_to_ptdesc(table));
+
 	return (pud_t *) table;
 }
+#define pud_alloc_one(...)	alloc_hooks(pud_alloc_one_noprof(__VA_ARGS__))
 
 static inline void pud_free(struct mm_struct *mm, pud_t *pud)
 {
-	if (!mm_pud_folded(mm))
-		crst_table_free(mm, (unsigned long *) pud);
+	if (mm_pud_folded(mm))
+		return;
+
+	pagetable_dtor(virt_to_ptdesc(pud));
+	crst_table_free(mm, (unsigned long *) pud);
 }
 
-static inline pmd_t *pmd_alloc_one(struct mm_struct *mm, unsigned long vmaddr)
+static inline pmd_t *pmd_alloc_one_noprof(struct mm_struct *mm, unsigned long vmaddr)
 {
-	unsigned long *table = crst_table_alloc(mm);
+	unsigned long *table = crst_table_alloc_noprof(mm);
 
 	if (!table)
 		return NULL;
 	crst_table_init(table, _SEGMENT_ENTRY_EMPTY);
-	if (!pagetable_pmd_ctor(virt_to_ptdesc(table))) {
+	if (!pagetable_pmd_ctor(mm, virt_to_ptdesc(table))) {
 		crst_table_free(mm, table);
 		return NULL;
 	}
 	return (pmd_t *) table;
 }
+#define pmd_alloc_one(...)	alloc_hooks(pmd_alloc_one_noprof(__VA_ARGS__))
 
 static inline void pmd_free(struct mm_struct *mm, pmd_t *pmd)
 {
 	if (mm_pmd_folded(mm))
 		return;
-	pagetable_pmd_dtor(virt_to_ptdesc(pmd));
+	pagetable_dtor(virt_to_ptdesc(pmd));
 	crst_table_free(mm, (unsigned long *) pmd);
 }
 
@@ -115,13 +134,21 @@ static inline void pud_populate(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
 	set_pud(pud, __pud(_REGION3_ENTRY | __pa(pmd)));
 }
 
-static inline pgd_t *pgd_alloc(struct mm_struct *mm)
+static inline pgd_t *pgd_alloc_noprof(struct mm_struct *mm)
 {
-	return (pgd_t *) crst_table_alloc(mm);
+	unsigned long *table = crst_table_alloc_noprof(mm);
+
+	if (!table)
+		return NULL;
+	pagetable_pgd_ctor(virt_to_ptdesc(table));
+
+	return (pgd_t *) table;
 }
+#define pgd_alloc(...)	alloc_hooks(pgd_alloc_noprof(__VA_ARGS__))
 
 static inline void pgd_free(struct mm_struct *mm, pgd_t *pgd)
 {
+	pagetable_dtor(virt_to_ptdesc(pgd));
 	crst_table_free(mm, (unsigned long *) pgd);
 }
 

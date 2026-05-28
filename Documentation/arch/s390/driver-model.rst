@@ -244,7 +244,7 @@ information about the interrupt from the irb parameter.
 --------------------
 
 The ccwgroup mechanism is designed to handle devices consisting of multiple ccw
-devices, like lcs or ctc.
+devices, like qeth or ctc.
 
 The ccw driver provides a 'group' attribute. Piping bus ids of ccw devices to
 this attributes creates a ccwgroup device consisting of these ccw devices (if
@@ -305,24 +305,3 @@ xpram shows up under devices/system/ as 'xpram'.
 
 For each cpu, a directory is created under devices/system/cpu/. Each cpu has an
 attribute 'online' which can be 0 or 1.
-
-
-4. Other devices
-----------------
-
-4.1 Netiucv
------------
-
-The netiucv driver creates an attribute 'connection' under
-bus/iucv/drivers/netiucv. Piping to this attribute creates a new netiucv
-connection to the specified host.
-
-Netiucv connections show up under devices/iucv/ as "netiucv<ifnum>". The interface
-number is assigned sequentially to the connections defined via the 'connection'
-attribute.
-
-user
-    - shows the connection partner.
-
-buffer
-    - maximum buffer size. Pipe to it to change buffer size.

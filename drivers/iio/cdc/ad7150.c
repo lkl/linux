@@ -232,7 +232,7 @@ static int ad7150_write_event_params(struct iio_dev *indio_dev,
 static int ad7150_write_event_config(struct iio_dev *indio_dev,
 				     const struct iio_chan_spec *chan,
 				     enum iio_event_type type,
-				     enum iio_event_direction dir, int state)
+				     enum iio_event_direction dir, bool state)
 {
 	struct ad7150_chip_info *chip = iio_priv(indio_dev);
 	int ret = 0;
@@ -631,7 +631,7 @@ static const struct i2c_device_id ad7150_id[] = {
 	{ "ad7150", AD7150 },
 	{ "ad7151", AD7151 },
 	{ "ad7156", AD7150 },
-	{}
+	{ }
 };
 
 MODULE_DEVICE_TABLE(i2c, ad7150_id);
@@ -640,7 +640,7 @@ static const struct of_device_id ad7150_of_match[] = {
 	{ "adi,ad7150" },
 	{ "adi,ad7151" },
 	{ "adi,ad7156" },
-	{}
+	{ }
 };
 static struct i2c_driver ad7150_driver = {
 	.driver = {

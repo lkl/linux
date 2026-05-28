@@ -101,6 +101,73 @@ int pm8001_tag_alloc(struct pm8001_hba_info *pm8001_ha, u32 *tag_out)
 	return 0;
 }
 
+static void pm80xx_get_tag_opcodes(struct sas_task *task, int *ata_op,
+								   int *ata_tag, bool *task_aborted)
+{
+	unsigned long flags;
+	struct ata_queued_cmd *qc = NULL;
+
+	*ata_op = 0;
+	*ata_tag = -1;
+	*task_aborted = false;
+
+	if (!task)
+		return;
+
+	spin_lock_irqsave(&task->task_state_lock, flags);
+	if (unlikely((task->task_state_flags & SAS_TASK_STATE_ABORTED)))
+		*task_aborted = true;
+	spin_unlock_irqrestore(&task->task_state_lock, flags);
+
+	if (task->task_proto == SAS_PROTOCOL_STP) {
+		// sas_ata_qc_issue path uses SAS_PROTOCOL_STP.
+		// This only works for scsi + libsas + libata users.
+		qc = task->uldd_task;
+		if (qc) {
+			*ata_op = qc->tf.command;
+			*ata_tag = qc->tag;
+		}
+	}
+}
+
+u32 pm80xx_get_local_phy_id(struct domain_device *dev)
+{
+	struct pm8001_device *pm8001_dev = dev->lldd_dev;
+
+	if (dev_parent_is_expander(dev))
+		return dev->parent->ex_dev.ex_phy->phy_id;
+
+	return pm8001_dev->attached_phy;
+}
+
+void pm80xx_show_pending_commands(struct pm8001_hba_info *pm8001_ha,
+				  struct pm8001_device *target_pm8001_dev)
+{
+	int i = 0, ata_op = 0, ata_tag = -1;
+	struct pm8001_ccb_info *ccb = NULL;
+	struct sas_task *task = NULL;
+	struct pm8001_device *pm8001_dev = NULL;
+	bool task_aborted;
+
+	for (i = 0; i < pm8001_ha->ccb_count; i++) {
+		ccb = &pm8001_ha->ccb_info[i];
+		if (ccb->ccb_tag == PM8001_INVALID_TAG)
+			continue;
+		pm8001_dev = ccb->device;
+		if (target_pm8001_dev && pm8001_dev &&
+		    target_pm8001_dev != pm8001_dev)
+			continue;
+		task = ccb->task;
+		pm80xx_get_tag_opcodes(task, &ata_op, &ata_tag, &task_aborted);
+		pm8001_dbg(pm8001_ha, FAIL,
+			"tag %#x, device %#x task %p task aborted %d ata opcode %#x ata tag %d\n",
+			ccb->ccb_tag,
+			(pm8001_dev ? pm8001_dev->device_id : 0),
+			task, task_aborted,
+			ata_op, ata_tag);
+	}
+}
+
 /**
  * pm8001_mem_alloc - allocate memory for pm8001.
  * @pdev: pci device.
@@ -374,23 +441,6 @@ static int pm8001_task_prep_ssp(struct pm8001_hba_info *pm8001_ha,
 	return PM8001_CHIP_DISP->ssp_io_req(pm8001_ha, ccb);
 }
 
- /* Find the local port id that's attached to this device */
-static int sas_find_local_port_id(struct domain_device *dev)
-{
-	struct domain_device *pdev = dev->parent;
-
-	/* Directly attached device */
-	if (!pdev)
-		return dev->port->id;
-	while (pdev) {
-		struct domain_device *pdev_p = pdev->parent;
-		if (!pdev_p)
-			return pdev->port->id;
-		pdev = pdev->parent;
-	}
-	return 0;
-}
-
 #define DEV_IS_GONE(pm8001_dev)	\
 	((!pm8001_dev || (pm8001_dev->dev_type == SAS_PHY_UNUSED)))
 
@@ -437,7 +487,7 @@ int pm8001_queue_command(struct sas_task *task, gfp_t gfp_flags)
 	struct pm8001_device *pm8001_dev = dev->lldd_dev;
 	bool internal_abort = sas_is_internal_abort(task);
 	struct pm8001_hba_info *pm8001_ha;
-	struct pm8001_port *port = NULL;
+	struct pm8001_port *port;
 	struct pm8001_ccb_info *ccb;
 	unsigned long flags;
 	u32 n_elem = 0;
@@ -462,11 +512,10 @@ int pm8001_queue_command(struct sas_task *task, gfp_t gfp_flags)
 
 	spin_lock_irqsave(&pm8001_ha->lock, flags);
 
-	pm8001_dev = dev->lldd_dev;
-	port = &pm8001_ha->port[sas_find_local_port_id(dev)];
+	port = dev->port->lldd_port;
 
 	if (!internal_abort &&
-	    (DEV_IS_GONE(pm8001_dev) || !port->port_attached)) {
+	    (DEV_IS_GONE(pm8001_dev) || !port || !port->port_attached)) {
 		ts->resp = SAS_TASK_UNDELIVERED;
 		ts->stat = SAS_PHY_DOWN;
 		if (sas_protocol_ata(task_proto)) {
@@ -572,6 +621,13 @@ void pm8001_ccb_task_free(struct pm8001_hba_info *pm8001_ha,
 	pm8001_ccb_free(pm8001_ha, ccb);
 }
 
+static void pm8001_init_dev(struct pm8001_device *pm8001_dev, int id)
+{
+	pm8001_dev->id = id;
+	pm8001_dev->device_id = PM8001_MAX_DEVICES;
+	atomic_set(&pm8001_dev->running_req, 0);
+}
+
 /**
  * pm8001_alloc_dev - find a empty pm8001_device
  * @pm8001_ha: our hba card information
@@ -580,9 +636,11 @@ static struct pm8001_device *pm8001_alloc_dev(struct pm8001_hba_info *pm8001_ha)
 {
 	u32 dev;
 	for (dev = 0; dev < PM8001_MAX_DEVICES; dev++) {
-		if (pm8001_ha->devices[dev].dev_type == SAS_PHY_UNUSED) {
-			pm8001_ha->devices[dev].id = dev;
-			return &pm8001_ha->devices[dev];
+		struct pm8001_device *pm8001_dev = &pm8001_ha->devices[dev];
+
+		if (pm8001_dev->dev_type == SAS_PHY_UNUSED) {
+			pm8001_init_dev(pm8001_dev, dev);
+			return pm8001_dev;
 		}
 	}
 	if (dev == PM8001_MAX_DEVICES) {
@@ -613,9 +671,7 @@ struct pm8001_device *pm8001_find_dev(struct pm8001_hba_info *pm8001_ha,
 
 void pm8001_free_dev(struct pm8001_device *pm8001_dev)
 {
-	u32 id = pm8001_dev->id;
 	memset(pm8001_dev, 0, sizeof(*pm8001_dev));
-	pm8001_dev->id = id;
 	pm8001_dev->dev_type = SAS_PHY_UNUSED;
 	pm8001_dev->device_id = PM8001_MAX_DEVICES;
 	pm8001_dev->sas_device = NULL;
@@ -654,7 +710,7 @@ static int pm8001_dev_found_notify(struct domain_device *dev)
 	dev->lldd_dev = pm8001_device;
 	pm8001_device->dev_type = dev->dev_type;
 	pm8001_device->dcompletion = &completion;
-	if (parent_dev && dev_is_expander(parent_dev->dev_type)) {
+	if (dev_parent_is_expander(dev)) {
 		int phy_id;
 
 		phy_id = sas_find_attached_phy_id(&parent_dev->ex_dev, dev);
@@ -719,6 +775,16 @@ static void pm8001_dev_gone_notify(struct domain_device *dev)
 			spin_lock_irqsave(&pm8001_ha->lock, flags);
 		}
 		PM8001_CHIP_DISP->dereg_dev_req(pm8001_ha, device_id);
+
+		/*
+		 * The phy array only contains local phys. Thus, we cannot clear
+		 * phy_attached for a device behind an expander.
+		 */
+		if (!dev_parent_is_expander(dev)) {
+			u32 phy_id = pm80xx_get_local_phy_id(dev);
+
+			pm8001_ha->phy[phy_id].phy_attached = 0;
+		}
 		pm8001_free_dev(pm8001_dev);
 	} else {
 		pm8001_dbg(pm8001_ha, DISC, "Found dev has gone.\n");
@@ -1000,7 +1066,7 @@ int pm8001_abort_task(struct sas_task *task)
 	struct pm8001_hba_info *pm8001_ha;
 	struct pm8001_device *pm8001_dev;
 	int rc = TMF_RESP_FUNC_FAILED, ret;
-	u32 phy_id, port_id;
+	u32 port_id;
 	struct sas_task_slow slow_task;
 
 	if (!task->lldd_task || !task->dev)
@@ -1009,7 +1075,6 @@ int pm8001_abort_task(struct sas_task *task)
 	dev = task->dev;
 	pm8001_dev = dev->lldd_dev;
 	pm8001_ha = pm8001_find_ha_by_dev(dev);
-	phy_id = pm8001_dev->attached_phy;
 
 	if (PM8001_CHIP_DISP->fatal_errors(pm8001_ha)) {
 		// If the controller is seeing fatal errors
@@ -1041,7 +1106,8 @@ int pm8001_abort_task(struct sas_task *task)
 		if (pm8001_ha->chip_id == chip_8006) {
 			DECLARE_COMPLETION_ONSTACK(completion_reset);
 			DECLARE_COMPLETION_ONSTACK(completion);
-			struct pm8001_phy *phy = pm8001_ha->phy + phy_id;
+			u32 phy_id = pm80xx_get_local_phy_id(dev);
+			struct pm8001_phy *phy = &pm8001_ha->phy[phy_id];
 			port_id = phy->port->port_id;
 
 			/* 1. Set Device state as Recovery */

@@ -182,10 +182,42 @@ static const struct sun20i_ppu_desc sun20i_d1_ppu_desc = {
 	.num_domains	= ARRAY_SIZE(sun20i_d1_ppu_pd_names),
 };
 
+static const char *const sun8i_v853_ppu_pd_names[] = {
+	"RISCV",
+	"NPU",
+	"VE",
+};
+
+static const struct sun20i_ppu_desc sun8i_v853_ppu_desc = {
+	.names		= sun8i_v853_ppu_pd_names,
+	.num_domains	= ARRAY_SIZE(sun8i_v853_ppu_pd_names),
+};
+
+static const char *const sun55i_a523_ppu_pd_names[] = {
+	"DSP",
+	"NPU",
+	"AUDIO",
+	"SRAM",
+	"RISCV",
+};
+
+static const struct sun20i_ppu_desc sun55i_a523_ppu_desc = {
+	.names		= sun55i_a523_ppu_pd_names,
+	.num_domains	= ARRAY_SIZE(sun55i_a523_ppu_pd_names),
+};
+
 static const struct of_device_id sun20i_ppu_of_match[] = {
 	{
 		.compatible	= "allwinner,sun20i-d1-ppu",
 		.data		= &sun20i_d1_ppu_desc,
+	},
+	{
+		.compatible	= "allwinner,sun8i-v853-ppu",
+		.data		= &sun8i_v853_ppu_desc,
+	},
+	{
+		.compatible	= "allwinner,sun55i-a523-ppu",
+		.data		= &sun55i_a523_ppu_desc,
 	},
 	{ }
 };

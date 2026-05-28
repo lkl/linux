@@ -8,7 +8,9 @@
 
 #include <sound/hdaudio_ext.h>
 #include "avs.h"
+#include "debug.h"
 #include "messages.h"
+#include "registers.h"
 
 static void avs_cnl_ipc_interrupt(struct avs_dev *adev)
 {

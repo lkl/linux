@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2017-2024 Broadcom. All Rights Reserved. The term *
+ * Copyright (C) 2017-2025 Broadcom. All Rights Reserved. The term *
  * “Broadcom” refers to Broadcom Inc. and/or its subsidiaries.  *
  * Copyright (C) 2009-2016 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
@@ -1328,6 +1328,9 @@ struct cq_context {
 #define LPFC_CQ_CNT_512		0x1
 #define LPFC_CQ_CNT_1024	0x2
 #define LPFC_CQ_CNT_WORD7	0x3
+#define lpfc_cq_context_cqe_sz_SHIFT	25
+#define lpfc_cq_context_cqe_sz_MASK	0x00000003
+#define lpfc_cq_context_cqe_sz_WORD	word0
 #define lpfc_cq_context_autovalid_SHIFT 15
 #define lpfc_cq_context_autovalid_MASK  0x00000001
 #define lpfc_cq_context_autovalid_WORD  word0
@@ -1383,9 +1386,9 @@ struct lpfc_mbx_cq_create_set {
 #define lpfc_mbx_cq_create_set_valid_SHIFT	29
 #define lpfc_mbx_cq_create_set_valid_MASK	0x00000001
 #define lpfc_mbx_cq_create_set_valid_WORD	word1
-#define lpfc_mbx_cq_create_set_cqe_cnt_SHIFT	27
-#define lpfc_mbx_cq_create_set_cqe_cnt_MASK	0x00000003
-#define lpfc_mbx_cq_create_set_cqe_cnt_WORD	word1
+#define lpfc_mbx_cq_create_set_cqecnt_SHIFT	27
+#define lpfc_mbx_cq_create_set_cqecnt_MASK	0x00000003
+#define lpfc_mbx_cq_create_set_cqecnt_WORD	word1
 #define lpfc_mbx_cq_create_set_cqe_size_SHIFT	25
 #define lpfc_mbx_cq_create_set_cqe_size_MASK	0x00000003
 #define lpfc_mbx_cq_create_set_cqe_size_WORD	word1
@@ -1398,13 +1401,16 @@ struct lpfc_mbx_cq_create_set {
 #define lpfc_mbx_cq_create_set_clswm_SHIFT	12
 #define lpfc_mbx_cq_create_set_clswm_MASK	0x00000003
 #define lpfc_mbx_cq_create_set_clswm_WORD	word1
+#define lpfc_mbx_cq_create_set_cqe_cnt_hi_SHIFT	0
+#define lpfc_mbx_cq_create_set_cqe_cnt_hi_MASK	0x0000001F
+#define lpfc_mbx_cq_create_set_cqe_cnt_hi_WORD	word1
 			uint32_t word2;
 #define lpfc_mbx_cq_create_set_arm_SHIFT	31
 #define lpfc_mbx_cq_create_set_arm_MASK		0x00000001
 #define lpfc_mbx_cq_create_set_arm_WORD		word2
-#define lpfc_mbx_cq_create_set_cq_cnt_SHIFT	16
-#define lpfc_mbx_cq_create_set_cq_cnt_MASK	0x00007FFF
-#define lpfc_mbx_cq_create_set_cq_cnt_WORD	word2
+#define lpfc_mbx_cq_create_set_cqe_cnt_lo_SHIFT	16
+#define lpfc_mbx_cq_create_set_cqe_cnt_lo_MASK	0x00007FFF
+#define lpfc_mbx_cq_create_set_cqe_cnt_lo_WORD	word2
 #define lpfc_mbx_cq_create_set_num_cq_SHIFT	0
 #define lpfc_mbx_cq_create_set_num_cq_MASK	0x0000FFFF
 #define lpfc_mbx_cq_create_set_num_cq_WORD	word2
@@ -1907,22 +1913,22 @@ struct lpfc_mbx_query_fw_config {
 		uint32_t asic_revision;
 		uint32_t physical_port;
 		uint32_t function_mode;
-#define LPFC_FCOE_INI_MODE	0x00000040
-#define LPFC_FCOE_TGT_MODE	0x00000080
+#define LPFC_FC_INI_MODE	0x00000040
+#define LPFC_FC_TGT_MODE	0x00000080
 #define LPFC_DUA_MODE		0x00000800
-		uint32_t ulp0_mode;
-#define LPFC_ULP_FCOE_INIT_MODE	0x00000040
-#define LPFC_ULP_FCOE_TGT_MODE	0x00000080
-		uint32_t ulp0_nap_words[12];
-		uint32_t ulp1_mode;
-		uint32_t ulp1_nap_words[12];
+		uint32_t oper_mode;
+		uint32_t rsvd9[2];
+		uint32_t wqid_base;
+		uint32_t wqid_tot;
+		uint32_t rqid_base;
+		uint32_t rqid_tot;
+		uint32_t rsvd15[19];
 		uint32_t function_capabilities;
 		uint32_t cqid_base;
 		uint32_t cqid_tot;
 		uint32_t eqid_base;
 		uint32_t eqid_tot;
-		uint32_t ulp0_nap2_words[2];
-		uint32_t ulp1_nap2_words[2];
+		uint32_t rsvd39[4];
 	} rsp;
 };
 
@@ -3778,25 +3784,22 @@ struct lpfc_mbx_get_prof_cfg {
 struct lpfc_controller_attribute {
 	uint32_t version_string[8];
 	uint32_t manufacturer_name[8];
-	uint32_t supported_modes;
+	uint32_t rsvd16;
 	uint32_t word17;
-#define lpfc_cntl_attr_eprom_ver_lo_SHIFT	0
-#define lpfc_cntl_attr_eprom_ver_lo_MASK	0x000000ff
-#define lpfc_cntl_attr_eprom_ver_lo_WORD	word17
-#define lpfc_cntl_attr_eprom_ver_hi_SHIFT	8
-#define lpfc_cntl_attr_eprom_ver_hi_MASK	0x000000ff
-#define lpfc_cntl_attr_eprom_ver_hi_WORD	word17
 #define lpfc_cntl_attr_flash_id_SHIFT		16
 #define lpfc_cntl_attr_flash_id_MASK		0x000000ff
 #define lpfc_cntl_attr_flash_id_WORD		word17
-	uint32_t mbx_da_struct_ver;
-	uint32_t ep_fw_da_struct_ver;
+#define lpfc_cntl_attr_boot_enable_SHIFT	24
+#define lpfc_cntl_attr_boot_enable_MASK		0x00000001
+#define lpfc_cntl_attr_boot_enable_WORD		word17
+	uint32_t rsvd18[2];
 	uint32_t ncsi_ver_str[3];
-	uint32_t dflt_ext_timeout;
+	uint32_t rsvd23;
 	uint32_t model_number[8];
 	uint32_t description[16];
 	uint32_t serial_number[8];
-	uint32_t ip_ver_str[8];
+	uint32_t ipl_name[5];
+	uint32_t rsvd61[3];
 	uint32_t fw_ver_str[8];
 	uint32_t bios_ver_str[8];
 	uint32_t redboot_ver_str[8];
@@ -3804,53 +3807,31 @@ struct lpfc_controller_attribute {
 	uint32_t flash_fw_ver_str[8];
 	uint32_t functionality;
 	uint32_t word105;
-#define lpfc_cntl_attr_max_cbd_len_SHIFT	0
-#define lpfc_cntl_attr_max_cbd_len_MASK		0x0000ffff
-#define lpfc_cntl_attr_max_cbd_len_WORD		word105
 #define lpfc_cntl_attr_asic_rev_SHIFT		16
 #define lpfc_cntl_attr_asic_rev_MASK		0x000000ff
 #define lpfc_cntl_attr_asic_rev_WORD		word105
-#define lpfc_cntl_attr_gen_guid0_SHIFT		24
-#define lpfc_cntl_attr_gen_guid0_MASK		0x000000ff
-#define lpfc_cntl_attr_gen_guid0_WORD		word105
-	uint32_t gen_guid1_12[3];
+	uint32_t rsvd106[3];
 	uint32_t word109;
-#define lpfc_cntl_attr_gen_guid13_14_SHIFT	0
-#define lpfc_cntl_attr_gen_guid13_14_MASK	0x0000ffff
-#define lpfc_cntl_attr_gen_guid13_14_WORD	word109
-#define lpfc_cntl_attr_gen_guid15_SHIFT		16
-#define lpfc_cntl_attr_gen_guid15_MASK		0x000000ff
-#define lpfc_cntl_attr_gen_guid15_WORD		word109
 #define lpfc_cntl_attr_hba_port_cnt_SHIFT	24
 #define lpfc_cntl_attr_hba_port_cnt_MASK	0x000000ff
 #define lpfc_cntl_attr_hba_port_cnt_WORD	word109
-	uint32_t word110;
-#define lpfc_cntl_attr_dflt_lnk_tmo_SHIFT	0
-#define lpfc_cntl_attr_dflt_lnk_tmo_MASK	0x0000ffff
-#define lpfc_cntl_attr_dflt_lnk_tmo_WORD	word110
-#define lpfc_cntl_attr_multi_func_dev_SHIFT	24
-#define lpfc_cntl_attr_multi_func_dev_MASK	0x000000ff
-#define lpfc_cntl_attr_multi_func_dev_WORD	word110
+	uint32_t rsvd110;
 	uint32_t word111;
-#define lpfc_cntl_attr_cache_valid_SHIFT	0
-#define lpfc_cntl_attr_cache_valid_MASK		0x000000ff
-#define lpfc_cntl_attr_cache_valid_WORD		word111
 #define lpfc_cntl_attr_hba_status_SHIFT		8
 #define lpfc_cntl_attr_hba_status_MASK		0x000000ff
 #define lpfc_cntl_attr_hba_status_WORD		word111
-#define lpfc_cntl_attr_max_domain_SHIFT		16
-#define lpfc_cntl_attr_max_domain_MASK		0x000000ff
-#define lpfc_cntl_attr_max_domain_WORD		word111
 #define lpfc_cntl_attr_lnk_numb_SHIFT		24
 #define lpfc_cntl_attr_lnk_numb_MASK		0x0000003f
 #define lpfc_cntl_attr_lnk_numb_WORD		word111
 #define lpfc_cntl_attr_lnk_type_SHIFT		30
 #define lpfc_cntl_attr_lnk_type_MASK		0x00000003
 #define lpfc_cntl_attr_lnk_type_WORD		word111
-	uint32_t fw_post_status;
-	uint32_t hba_mtu[8];
+	uint32_t rsvd112[9];
 	uint32_t word121;
-	uint32_t reserved1[3];
+#define lpfc_cntl_attr_asic_gen_SHIFT		8
+#define lpfc_cntl_attr_asic_gen_MASK		0x000000ff
+#define lpfc_cntl_attr_asic_gen_WORD		word121
+	uint32_t rsvd122[3];
 	uint32_t word125;
 #define lpfc_cntl_attr_pci_vendor_id_SHIFT	0
 #define lpfc_cntl_attr_pci_vendor_id_MASK	0x0000ffff
@@ -3875,15 +3856,7 @@ struct lpfc_controller_attribute {
 #define lpfc_cntl_attr_pci_fnc_num_SHIFT	16
 #define lpfc_cntl_attr_pci_fnc_num_MASK		0x000000ff
 #define lpfc_cntl_attr_pci_fnc_num_WORD		word127
-#define lpfc_cntl_attr_inf_type_SHIFT		24
-#define lpfc_cntl_attr_inf_type_MASK		0x000000ff
-#define lpfc_cntl_attr_inf_type_WORD		word127
-	uint32_t unique_id[2];
-	uint32_t word130;
-#define lpfc_cntl_attr_num_netfil_SHIFT		0
-#define lpfc_cntl_attr_num_netfil_MASK		0x000000ff
-#define lpfc_cntl_attr_num_netfil_WORD		word130
-	uint32_t reserved2[4];
+	uint32_t rsvd128[7];
 };
 
 struct lpfc_mbx_get_cntl_attributes {
@@ -4936,18 +4909,18 @@ struct send_frame_wqe {
 
 #define ELS_RDF_REG_TAG_CNT		4
 struct lpfc_els_rdf_reg_desc {
-	struct fc_df_desc_fpin_reg	reg_desc;	/* descriptor header */
+	struct fc_df_desc_fpin_reg_hdr	reg_desc;	/* descriptor header */
 	__be32				desc_tags[ELS_RDF_REG_TAG_CNT];
 							/* tags in reg_desc */
 };
 
 struct lpfc_els_rdf_req {
-	struct fc_els_rdf		rdf;	   /* hdr up to descriptors */
+	struct fc_els_rdf_hdr		rdf;	   /* hdr up to descriptors */
 	struct lpfc_els_rdf_reg_desc	reg_d1;	/* 1st descriptor */
 };
 
 struct lpfc_els_rdf_rsp {
-	struct fc_els_rdf_resp		rdf_resp;  /* hdr up to descriptors */
+	struct fc_els_rdf_resp_hdr	rdf_resp;  /* hdr up to descriptors */
 	struct lpfc_els_rdf_reg_desc	reg_d1;	/* 1st descriptor */
 };
 

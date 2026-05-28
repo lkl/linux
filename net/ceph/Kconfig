@@ -2,12 +2,11 @@
 config CEPH_LIB
 	tristate "Ceph core library"
 	depends on INET
-	select LIBCRC32C
+	select CRC32
 	select CRYPTO_AES
 	select CRYPTO_CBC
 	select CRYPTO_GCM
-	select CRYPTO_HMAC
-	select CRYPTO_SHA256
+	select CRYPTO_LIB_SHA256
 	select CRYPTO
 	select KEYS
 	default n

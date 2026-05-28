@@ -21,7 +21,7 @@
 #include "gc.h"
 
 static LIST_HEAD(f2fs_stat_list);
-static DEFINE_RAW_SPINLOCK(f2fs_stat_lock);
+static DEFINE_SPINLOCK(f2fs_stat_lock);
 #ifdef CONFIG_DEBUG_FS
 static struct dentry *f2fs_debugfs_root;
 #endif
@@ -60,6 +60,70 @@ void f2fs_update_sit_info(struct f2fs_sb_info *sbi)
 }
 
 #ifdef CONFIG_DEBUG_FS
+static void update_multidevice_stats(struct f2fs_sb_info *sbi)
+{
+	struct f2fs_stat_info *si = F2FS_STAT(sbi);
+	struct f2fs_dev_stats *dev_stats = si->dev_stats;
+	int i, j;
+
+	if (!f2fs_is_multi_device(sbi))
+		return;
+
+	memset(dev_stats, 0, sizeof(struct f2fs_dev_stats) * sbi->s_ndevs);
+	for (i = 0; i < sbi->s_ndevs; i++) {
+		unsigned int start_segno, end_segno;
+		block_t start_blk, end_blk;
+
+		if (i == 0) {
+			start_blk = MAIN_BLKADDR(sbi);
+			end_blk = FDEV(i).end_blk + 1 - SEG0_BLKADDR(sbi);
+		} else {
+			start_blk = FDEV(i).start_blk;
+			end_blk = FDEV(i).end_blk + 1;
+		}
+
+		start_segno = GET_SEGNO(sbi, start_blk);
+		end_segno = GET_SEGNO(sbi, end_blk);
+
+		for (j = start_segno; j < end_segno; j++) {
+			unsigned int seg_blks, sec_blks;
+
+			seg_blks = get_seg_entry(sbi, j)->valid_blocks;
+
+			/* update segment stats */
+			if (is_curseg(sbi, j))
+				dev_stats[i].devstats[0][DEVSTAT_INUSE]++;
+			else if (seg_blks == BLKS_PER_SEG(sbi))
+				dev_stats[i].devstats[0][DEVSTAT_FULL]++;
+			else if (seg_blks != 0)
+				dev_stats[i].devstats[0][DEVSTAT_DIRTY]++;
+			else if (!test_bit(j, FREE_I(sbi)->free_segmap))
+				dev_stats[i].devstats[0][DEVSTAT_FREE]++;
+			else
+				dev_stats[i].devstats[0][DEVSTAT_PREFREE]++;
+
+			if (!__is_large_section(sbi) ||
+				(j % SEGS_PER_SEC(sbi)) != 0)
+				continue;
+
+			sec_blks = get_sec_entry(sbi, j)->valid_blocks;
+
+			/* update section stats */
+			if (is_cursec(sbi, GET_SEC_FROM_SEG(sbi, j)))
+				dev_stats[i].devstats[1][DEVSTAT_INUSE]++;
+			else if (sec_blks == BLKS_PER_SEC(sbi))
+				dev_stats[i].devstats[1][DEVSTAT_FULL]++;
+			else if (sec_blks != 0)
+				dev_stats[i].devstats[1][DEVSTAT_DIRTY]++;
+			else if (!test_bit(GET_SEC_FROM_SEG(sbi, j),
+					FREE_I(sbi)->free_secmap))
+				dev_stats[i].devstats[1][DEVSTAT_FREE]++;
+			else
+				dev_stats[i].devstats[1][DEVSTAT_PREFREE]++;
+		}
+	}
+}
+
 static void update_general_status(struct f2fs_sb_info *sbi)
 {
 	struct f2fs_stat_info *si = F2FS_STAT(sbi);
@@ -100,6 +164,7 @@ static void update_general_status(struct f2fs_sb_info *sbi)
 	si->ndirty_imeta = get_pages(sbi, F2FS_DIRTY_IMETA);
 	si->ndirty_dirs = sbi->ndirty_inode[DIR_INODE];
 	si->ndirty_files = sbi->ndirty_inode[FILE_INODE];
+	si->ndonate_files = sbi->donate_files;
 	si->nquota_files = sbi->nquota_files;
 	si->ndirty_all = sbi->ndirty_inode[DIRTY_META];
 	si->aw_cnt = atomic_read(&sbi->atomic_files);
@@ -213,6 +278,8 @@ static void update_general_status(struct f2fs_sb_info *sbi)
 			si->dirty_seg[type]++;
 		si->valid_blks[type] += blks;
 	}
+
+	update_multidevice_stats(sbi);
 
 	for (i = 0; i < MAX_CALL_TYPE; i++)
 		si->cp_call_count[i] = atomic_read(&sbi->cp_call_count[i]);
@@ -372,9 +439,8 @@ static int stat_show(struct seq_file *s, void *v)
 {
 	struct f2fs_stat_info *si;
 	int i = 0, j = 0;
-	unsigned long flags;
 
-	raw_spin_lock_irqsave(&f2fs_stat_lock, flags);
+	spin_lock(&f2fs_stat_lock);
 	list_for_each_entry(si, &f2fs_stat_list, stat_list) {
 		struct f2fs_sb_info *sbi = si->sbi;
 
@@ -435,6 +501,8 @@ static int stat_show(struct seq_file *s, void *v)
 			   si->compr_inode, si->compr_blocks);
 		seq_printf(s, "  - Swapfile Inode: %u\n",
 			   si->swapfile_inode);
+		seq_printf(s, "  - Donate Inode: %u\n",
+			   si->ndonate_files);
 		seq_printf(s, "  - Orphan/Append/Update Inode: %u, %u, %u\n",
 			   si->orphans, si->append, si->update);
 		seq_printf(s, "\nMain area: %d segs, %d secs %d zones\n",
@@ -498,6 +566,36 @@ static int stat_show(struct seq_file *s, void *v)
 			   si->dirty_count);
 		seq_printf(s, "  - Prefree: %d\n  - Free: %d (%d)\n\n",
 			   si->prefree_count, si->free_segs, si->free_secs);
+		if (f2fs_is_multi_device(sbi)) {
+			seq_puts(s, "Multidevice stats:\n");
+			seq_printf(s, "  [seg:   %8s %8s %8s %8s %8s]",
+					"inuse", "dirty", "full", "free", "prefree");
+			if (__is_large_section(sbi))
+				seq_printf(s, " [sec:   %8s %8s %8s %8s %8s]\n",
+					"inuse", "dirty", "full", "free", "prefree");
+			else
+				seq_puts(s, "\n");
+
+			for (i = 0; i < sbi->s_ndevs; i++) {
+				seq_printf(s, "  #%-2d     %8u %8u %8u %8u %8u", i,
+					si->dev_stats[i].devstats[0][DEVSTAT_INUSE],
+					si->dev_stats[i].devstats[0][DEVSTAT_DIRTY],
+					si->dev_stats[i].devstats[0][DEVSTAT_FULL],
+					si->dev_stats[i].devstats[0][DEVSTAT_FREE],
+					si->dev_stats[i].devstats[0][DEVSTAT_PREFREE]);
+				if (!__is_large_section(sbi)) {
+					seq_puts(s, "\n");
+					continue;
+				}
+				seq_printf(s, "          %8u %8u %8u %8u %8u\n",
+					si->dev_stats[i].devstats[1][DEVSTAT_INUSE],
+					si->dev_stats[i].devstats[1][DEVSTAT_DIRTY],
+					si->dev_stats[i].devstats[1][DEVSTAT_FULL],
+					si->dev_stats[i].devstats[1][DEVSTAT_FREE],
+					si->dev_stats[i].devstats[1][DEVSTAT_PREFREE]);
+			}
+			seq_puts(s, "\n");
+		}
 		seq_printf(s, "CP calls: %d (BG: %d)\n",
 			   si->cp_call_count[TOTAL_CALL],
 			   si->cp_call_count[BACKGROUND]);
@@ -598,9 +696,9 @@ static int stat_show(struct seq_file *s, void *v)
 			   si->ndirty_node, si->node_pages);
 		seq_printf(s, "  - dents: %4d in dirs:%4d (%4d)\n",
 			   si->ndirty_dent, si->ndirty_dirs, si->ndirty_all);
-		seq_printf(s, "  - datas: %4d in files:%4d\n",
+		seq_printf(s, "  - data: %4d in files:%4d\n",
 			   si->ndirty_data, si->ndirty_files);
-		seq_printf(s, "  - quota datas: %4d in quota files:%4d\n",
+		seq_printf(s, "  - quota data: %4d in quota files:%4d\n",
 			   si->ndirty_qdata, si->nquota_files);
 		seq_printf(s, "  - meta: %4d in %4d\n",
 			   si->ndirty_meta, si->meta_pages);
@@ -654,7 +752,7 @@ static int stat_show(struct seq_file *s, void *v)
 		seq_printf(s, "  - paged : %llu KB\n",
 				si->page_mem >> 10);
 	}
-	raw_spin_unlock_irqrestore(&f2fs_stat_lock, flags);
+	spin_unlock(&f2fs_stat_lock);
 	return 0;
 }
 
@@ -665,12 +763,21 @@ int f2fs_build_stats(struct f2fs_sb_info *sbi)
 {
 	struct f2fs_super_block *raw_super = F2FS_RAW_SUPER(sbi);
 	struct f2fs_stat_info *si;
-	unsigned long flags;
+	struct f2fs_dev_stats *dev_stats;
 	int i;
 
 	si = f2fs_kzalloc(sbi, sizeof(struct f2fs_stat_info), GFP_KERNEL);
 	if (!si)
 		return -ENOMEM;
+
+	dev_stats = f2fs_kzalloc(sbi, sizeof(struct f2fs_dev_stats) *
+						sbi->s_ndevs, GFP_KERNEL);
+	if (!dev_stats) {
+		kfree(si);
+		return -ENOMEM;
+	}
+
+	si->dev_stats = dev_stats;
 
 	si->all_area_segs = le32_to_cpu(raw_super->segment_count);
 	si->sit_area_segs = le32_to_cpu(raw_super->segment_count_sit);
@@ -708,9 +815,9 @@ int f2fs_build_stats(struct f2fs_sb_info *sbi)
 
 	atomic_set(&sbi->max_aw_cnt, 0);
 
-	raw_spin_lock_irqsave(&f2fs_stat_lock, flags);
+	spin_lock(&f2fs_stat_lock);
 	list_add_tail(&si->stat_list, &f2fs_stat_list);
-	raw_spin_unlock_irqrestore(&f2fs_stat_lock, flags);
+	spin_unlock(&f2fs_stat_lock);
 
 	return 0;
 }
@@ -718,12 +825,12 @@ int f2fs_build_stats(struct f2fs_sb_info *sbi)
 void f2fs_destroy_stats(struct f2fs_sb_info *sbi)
 {
 	struct f2fs_stat_info *si = F2FS_STAT(sbi);
-	unsigned long flags;
 
-	raw_spin_lock_irqsave(&f2fs_stat_lock, flags);
+	spin_lock(&f2fs_stat_lock);
 	list_del(&si->stat_list);
-	raw_spin_unlock_irqrestore(&f2fs_stat_lock, flags);
+	spin_unlock(&f2fs_stat_lock);
 
+	kfree(si->dev_stats);
 	kfree(si);
 }
 

@@ -226,7 +226,7 @@ static inline void ipc3_log_header(struct device *dev, u8 *text, u32 cmd)
 static void sof_ipc3_dump_payload(struct snd_sof_dev *sdev,
 				  void *ipc_data, size_t size)
 {
-	printk(KERN_DEBUG "Size of payload following the header: %zu\n", size);
+	dev_dbg(sdev->dev, "Size of payload following the header: %zu\n", size);
 	print_hex_dump_debug("Message payload: ", DUMP_PREFIX_OFFSET,
 			     16, 4, ipc_data, size, false);
 }
@@ -801,20 +801,16 @@ int sof_ipc3_validate_fw_version(struct snd_sof_dev *sdev)
 		return -EINVAL;
 	}
 
-	if (ready->flags & SOF_IPC_INFO_BUILD) {
+	if (ready->flags & SOF_IPC_INFO_BUILD)
 		dev_info(sdev->dev,
 			 "Firmware debug build %d on %s-%s - options:\n"
 			 " GDB: %s\n"
 			 " lock debug: %s\n"
 			 " lock vdebug: %s\n",
 			 v->build, v->date, v->time,
-			 (ready->flags & SOF_IPC_INFO_GDB) ?
-				"enabled" : "disabled",
-			 (ready->flags & SOF_IPC_INFO_LOCKS) ?
-				"enabled" : "disabled",
-			 (ready->flags & SOF_IPC_INFO_LOCKSV) ?
-				"enabled" : "disabled");
-	}
+			 str_enabled_disabled(ready->flags & SOF_IPC_INFO_GDB),
+			 str_enabled_disabled(ready->flags & SOF_IPC_INFO_LOCKS),
+			 str_enabled_disabled(ready->flags & SOF_IPC_INFO_LOCKSV));
 
 	/* copy the fw_version into debugfs at first boot */
 	memcpy(&sdev->fw_version, v, sizeof(*v));

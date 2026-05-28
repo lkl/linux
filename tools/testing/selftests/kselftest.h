@@ -18,7 +18,8 @@
  *     ksft_print_msg(fmt, ...);
  *     ksft_perror(msg);
  *
- * and finally report the pass/fail/skip/xfail state of the test with one of:
+ * and finally report the pass/fail/skip/xfail/xpass state of the test
+ * with one of:
  *
  *     ksft_test_result(condition, fmt, ...);
  *     ksft_test_result_report(result, fmt, ...);
@@ -26,6 +27,7 @@
  *     ksft_test_result_fail(fmt, ...);
  *     ksft_test_result_skip(fmt, ...);
  *     ksft_test_result_xfail(fmt, ...);
+ *     ksft_test_result_xpass(fmt, ...);
  *     ksft_test_result_error(fmt, ...);
  *     ksft_test_result_code(exit_code, test_name, fmt, ...);
  *
@@ -52,6 +54,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
 #include <sys/utsname.h>
@@ -90,6 +93,14 @@
 #endif
 #define __printf(a, b)   __attribute__((format(printf, a, b)))
 
+#ifndef __always_unused
+#define __always_unused __attribute__((__unused__))
+#endif
+
+#ifndef __maybe_unused
+#define __maybe_unused __attribute__((__unused__))
+#endif
+
 /* counters */
 struct ksft_count {
 	unsigned int ksft_pass;
@@ -102,6 +113,7 @@ struct ksft_count {
 
 static struct ksft_count ksft_cnt;
 static unsigned int ksft_plan;
+static bool ksft_debug_enabled;
 
 static inline unsigned int ksft_test_num(void)
 {
@@ -147,6 +159,11 @@ static inline void ksft_set_plan(unsigned int plan)
 
 static inline void ksft_print_cnts(void)
 {
+	if (ksft_cnt.ksft_xskip > 0)
+		printf(
+			"# %u skipped test(s) detected. Consider enabling relevant config options to improve coverage.\n",
+			ksft_cnt.ksft_xskip
+		);
 	if (ksft_plan != ksft_test_num())
 		printf("# Planned tests != run tests (%u != %u)\n",
 			ksft_plan, ksft_test_num());
@@ -165,6 +182,18 @@ static inline __printf(1, 2) void ksft_print_msg(const char *msg, ...)
 	printf("# ");
 	errno = saved_errno;
 	vprintf(msg, args);
+	va_end(args);
+}
+
+static inline void ksft_print_dbg_msg(const char *msg, ...)
+{
+	va_list args;
+
+	if (!ksft_debug_enabled)
+		return;
+
+	va_start(args, msg);
+	ksft_print_msg(msg, args);
 	va_end(args);
 }
 
@@ -222,6 +251,20 @@ static inline __printf(1, 2) void ksft_test_result_xfail(const char *msg, ...)
 
 	va_start(args, msg);
 	printf("ok %u # XFAIL ", ksft_test_num());
+	errno = saved_errno;
+	vprintf(msg, args);
+	va_end(args);
+}
+
+static inline __printf(1, 2) void ksft_test_result_xpass(const char *msg, ...)
+{
+	int saved_errno = errno;
+	va_list args;
+
+	ksft_cnt.ksft_xpass++;
+
+	va_start(args, msg);
+	printf("ok %u # XPASS ", ksft_test_num());
 	errno = saved_errno;
 	vprintf(msg, args);
 	va_end(args);
@@ -318,6 +361,9 @@ void ksft_test_result_code(int exit_code, const char *test_name,
 	case KSFT_XFAIL:					\
 		ksft_test_result_xfail(fmt, ##__VA_ARGS__);	\
 		break;						\
+	case KSFT_XPASS:					\
+		ksft_test_result_xpass(fmt, ##__VA_ARGS__);	\
+		break;						\
 	case KSFT_SKIP:						\
 		ksft_test_result_skip(fmt, ##__VA_ARGS__);	\
 		break;						\
@@ -403,7 +449,7 @@ static inline __noreturn __printf(1, 2) void ksft_exit_skip(const char *msg, ...
 	 */
 	if (ksft_plan || ksft_test_num()) {
 		ksft_cnt.ksft_xskip++;
-		printf("ok %d # SKIP ", 1 + ksft_test_num());
+		printf("ok %u # SKIP ", 1 + ksft_test_num());
 	} else {
 		printf("1..0 # SKIP ");
 	}
@@ -420,10 +466,6 @@ static inline __noreturn __printf(1, 2) void ksft_exit_skip(const char *msg, ...
 static inline int ksft_min_kernel_version(unsigned int min_major,
 					  unsigned int min_minor)
 {
-#ifdef NOLIBC
-	ksft_print_msg("NOLIBC: Can't check kernel version: Function not implemented\n");
-	return 0;
-#else
 	unsigned int major, minor;
 	struct utsname info;
 
@@ -431,7 +473,6 @@ static inline int ksft_min_kernel_version(unsigned int min_major,
 		ksft_exit_fail_msg("Can't parse kernel version\n");
 
 	return major > min_major || (major == min_major && minor >= min_minor);
-#endif
 }
 
 #endif /* __KSELFTEST_H */

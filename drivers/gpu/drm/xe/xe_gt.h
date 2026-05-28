@@ -24,19 +24,19 @@
 extern struct fault_attr gt_reset_failure;
 static inline bool xe_fault_inject_gt_reset(void)
 {
-	return should_fail(&gt_reset_failure, 1);
+	return IS_ENABLED(CONFIG_DEBUG_FS) && should_fail(&gt_reset_failure, 1);
 }
 
 struct xe_gt *xe_gt_alloc(struct xe_tile *tile);
-int xe_gt_init_hwconfig(struct xe_gt *gt);
 int xe_gt_init_early(struct xe_gt *gt);
 int xe_gt_init(struct xe_gt *gt);
+void xe_gt_mmio_init(struct xe_gt *gt);
 void xe_gt_declare_wedged(struct xe_gt *gt);
 int xe_gt_record_default_lrcs(struct xe_gt *gt);
 
 /**
  * xe_gt_record_user_engines - save data related to engines available to
- * usersapce
+ * userspace
  * @gt: GT structure
  *
  * Walk the available HW engines from gt->info.engine_mask and calculate data
@@ -48,11 +48,36 @@ void xe_gt_record_user_engines(struct xe_gt *gt);
 
 void xe_gt_suspend_prepare(struct xe_gt *gt);
 int xe_gt_suspend(struct xe_gt *gt);
+void xe_gt_shutdown(struct xe_gt *gt);
 int xe_gt_resume(struct xe_gt *gt);
 void xe_gt_reset_async(struct xe_gt *gt);
 void xe_gt_sanitize(struct xe_gt *gt);
 int xe_gt_sanitize_freq(struct xe_gt *gt);
-void xe_gt_remove(struct xe_gt *gt);
+
+/**
+ * xe_gt_wait_for_reset - wait for gt's async reset to finalize.
+ * @gt: GT structure
+ * Return:
+ * %true if it waited for the work to finish execution,
+ * %false if there was no scheduled reset or it was done.
+ */
+static inline bool xe_gt_wait_for_reset(struct xe_gt *gt)
+{
+	return flush_work(&gt->reset.worker);
+}
+
+/**
+ * xe_gt_reset - perform synchronous reset
+ * @gt: GT structure
+ * Return:
+ * %true if it waited for the reset to finish,
+ * %false if there was no scheduled reset.
+ */
+static inline bool xe_gt_reset(struct xe_gt *gt)
+{
+	xe_gt_reset_async(gt);
+	return xe_gt_wait_for_reset(gt);
+}
 
 /**
  * xe_gt_any_hw_engine_by_reset_domain - scan the list of engines and return the
@@ -79,6 +104,11 @@ static inline bool xe_gt_has_indirect_ring_state(struct xe_gt *gt)
 {
 	return gt->info.has_indirect_ring_state &&
 	       xe_device_uc_enabled(gt_to_xe(gt));
+}
+
+static inline bool xe_gt_is_main_type(struct xe_gt *gt)
+{
+	return gt->info.type == XE_GT_TYPE_MAIN;
 }
 
 static inline bool xe_gt_is_media_type(struct xe_gt *gt)

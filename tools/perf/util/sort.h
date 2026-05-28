@@ -6,6 +6,7 @@
 #include "hist.h"
 
 struct option;
+struct perf_env;
 
 extern regex_t parent_regex;
 extern const char *sort_order;
@@ -72,6 +73,8 @@ enum sort_type {
 	SORT_ANNOTATE_DATA_TYPE_OFFSET,
 	SORT_SYM_OFFSET,
 	SORT_ANNOTATE_DATA_TYPE_CACHELINE,
+	SORT_PARALLELISM,
+	SORT_TGID,
 
 	/* branch stack specific sort keys */
 	__SORT_BRANCH_STACK,
@@ -88,6 +91,9 @@ enum sort_type {
 	SORT_SYM_IPC,
 	SORT_ADDR_FROM,
 	SORT_ADDR_TO,
+	SORT_CALLCHAIN_BRANCH_PREDICTED,
+	SORT_CALLCHAIN_BRANCH_ABORT,
+	SORT_CALLCHAIN_BRANCH_CYCLES,
 
 	/* memory mode specific sort keys */
 	__SORT_MEMORY_MODE,
@@ -125,7 +131,7 @@ extern struct sort_entry sort_thread;
 
 struct evlist;
 struct tep_handle;
-int setup_sorting(struct evlist *evlist);
+int setup_sorting(struct evlist *evlist, struct perf_env *env);
 int setup_output_field(void);
 void reset_output_field(void);
 void sort__setup_elide(FILE *fp);
@@ -137,12 +143,12 @@ int report_parse_ignore_callees_opt(const struct option *opt, const char *arg, i
 
 bool is_strict_order(const char *order);
 
-int hpp_dimension__add_output(unsigned col);
+int hpp_dimension__add_output(unsigned col, bool implicit);
 void reset_dimensions(void);
 int sort_dimension__add(struct perf_hpp_list *list, const char *tok,
-			struct evlist *evlist,
+			struct evlist *evlist, struct perf_env *env,
 			int level);
-int output_field_add(struct perf_hpp_list *list, const char *tok);
+int output_field_add(struct perf_hpp_list *list, const char *tok, int *level);
 int64_t
 sort__iaddr_cmp(struct hist_entry *left, struct hist_entry *right);
 int64_t

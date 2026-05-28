@@ -145,6 +145,7 @@ struct symbol {
 #define SYMBOL_CONST      0x0001  /* symbol is const */
 #define SYMBOL_CHECK      0x0008  /* used during dependency checking */
 #define SYMBOL_VALID      0x0080  /* set when symbol.curr is calculated */
+#define SYMBOL_TRANS      0x0100  /* symbol is transitional only (not visible)*/
 #define SYMBOL_WRITE      0x0200  /* write symbol to file (KCONFIG_CONFIG) */
 #define SYMBOL_WRITTEN    0x0800  /* track info to avoid double-write to .config */
 #define SYMBOL_CHECKED    0x2000  /* used during dependency checking */
@@ -205,15 +206,26 @@ struct property {
 	for (st = sym->prop; st; st = st->next) \
 		if (st->text)
 
+enum menu_type {
+	M_CHOICE,  // "choice"
+	M_COMMENT, // "comment"
+	M_IF,      // "if"
+	M_MENU,    // "mainmenu", "menu", "menuconfig"
+	M_NORMAL,  // others, i.e., "config"
+};
+
 /*
  * Represents a node in the menu tree, as seen in e.g. menuconfig (though used
  * for all front ends). Each symbol, menu, etc. defined in the Kconfig files
  * gets a node. A symbol defined in multiple locations gets one node at each
  * location.
  *
+ * @type: type of the menu entry
  * @choice_members: list of choice members with priority.
  */
 struct menu {
+	enum menu_type type;
+
 	/* The next menu node at the same level */
 	struct menu *next;
 

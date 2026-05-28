@@ -3,7 +3,7 @@ config SPARX5_SWITCH
 	depends on NET_SWITCHDEV
 	depends on HAS_IOMEM
 	depends on OF
-	depends on ARCH_SPARX5 || COMPILE_TEST
+	depends on ARCH_SPARX5 || ARCH_LAN969X || COMPILE_TEST
 	depends on PTP_1588_CLOCK_OPTIONAL
 	depends on BRIDGE || BRIDGE=n
 	select PHYLINK
@@ -24,3 +24,10 @@ config SPARX5_DCB
 	  DSCP and PCP.
 
 	  If unsure, set to Y.
+
+config LAN969X_SWITCH
+	bool "Lan969x switch driver"
+	depends on SPARX5_SWITCH
+	select PAGE_POOL
+	help
+	  This driver supports the lan969x family of network switch devices.

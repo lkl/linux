@@ -42,6 +42,7 @@ TORTURE_JITTER_STOP=""
 TORTURE_KCONFIG_KASAN_ARG=""
 TORTURE_KCONFIG_KCSAN_ARG=""
 TORTURE_KMAKE_ARG=""
+TORTURE_NO_AFFINITY=""
 TORTURE_QEMU_MEM=512
 torture_qemu_mem_default=1
 TORTURE_REMOTE=
@@ -82,6 +83,7 @@ usage () {
 	echo "       --kmake-arg kernel-make-arguments"
 	echo "       --mac nn:nn:nn:nn:nn:nn"
 	echo "       --memory megabytes|nnnG"
+	echo "       --no-affinity"
 	echo "       --no-initrd"
 	echo "       --qemu-args qemu-arguments"
 	echo "       --qemu-cmd qemu-system-..."
@@ -197,7 +199,7 @@ do
 		fi
 		;;
 	--kconfig|--kconfigs)
-		checkarg --kconfig "(Kconfig options)" $# "$2" '^\(#CHECK#\)\?CONFIG_[A-Z0-9_]\+=\([ynm]\|[0-9]\+\|"[^"]*"\)\( \(#CHECK#\)\?CONFIG_[A-Z0-9_]\+=\([ynm]\|[0-9]\+\|"[^"]*"\)\)*$' '^error$'
+		checkarg --kconfig "(Kconfig options)" $# "$2" '^\(#CHECK#\)\?CONFIG_[A-Z0-9_]\+=\([ynm]\|[0-9]\+\|"[^"]*"\)\( \+\(#CHECK#\)\?CONFIG_[A-Z0-9_]\+=\([ynm]\|[0-9]\+\|"[^"]*"\)\)* *$' '^error$'
 		TORTURE_KCONFIG_ARG="`echo "$TORTURE_KCONFIG_ARG $2" | sed -e 's/^ *//' -e 's/ *$//'`"
 		shift
 		;;
@@ -219,6 +221,9 @@ do
 		TORTURE_QEMU_MEM=$2
 		torture_qemu_mem_default=
 		shift
+		;;
+	--no-affinity)
+		TORTURE_NO_AFFINITY="no-affinity"
 		;;
 	--no-initrd)
 		TORTURE_INITRD=""; export TORTURE_INITRD
@@ -417,6 +422,7 @@ TORTURE_KCONFIG_KASAN_ARG="$TORTURE_KCONFIG_KASAN_ARG"; export TORTURE_KCONFIG_K
 TORTURE_KCONFIG_KCSAN_ARG="$TORTURE_KCONFIG_KCSAN_ARG"; export TORTURE_KCONFIG_KCSAN_ARG
 TORTURE_KMAKE_ARG="$TORTURE_KMAKE_ARG"; export TORTURE_KMAKE_ARG
 TORTURE_MOD="$TORTURE_MOD"; export TORTURE_MOD
+TORTURE_NO_AFFINITY="$TORTURE_NO_AFFINITY"; export TORTURE_NO_AFFINITY
 TORTURE_QEMU_CMD="$TORTURE_QEMU_CMD"; export TORTURE_QEMU_CMD
 TORTURE_QEMU_INTERACTIVE="$TORTURE_QEMU_INTERACTIVE"; export TORTURE_QEMU_INTERACTIVE
 TORTURE_QEMU_MAC="$TORTURE_QEMU_MAC"; export TORTURE_QEMU_MAC
@@ -436,18 +442,7 @@ echo $scriptname $args
 touch $resdir/$ds/log
 echo $scriptname $args >> $resdir/$ds/log
 echo ${TORTURE_SUITE} > $resdir/$ds/torture_suite
-echo Build directory: `pwd` > $resdir/$ds/testid.txt
-if test -d .git
-then
-	echo Current commit: `git rev-parse HEAD` >> $resdir/$ds/testid.txt
-	echo >> $resdir/$ds/testid.txt
-	echo ' ---' Output of "'"git status"'": >> $resdir/$ds/testid.txt
-	git status >> $resdir/$ds/testid.txt
-	echo >> $resdir/$ds/testid.txt
-	echo >> $resdir/$ds/testid.txt
-	echo ' ---' Output of "'"git diff HEAD"'": >> $resdir/$ds/testid.txt
-	git diff HEAD >> $resdir/$ds/testid.txt
-fi
+mktestid.sh $resdir/$ds
 ___EOF___
 kvm-assign-cpus.sh /sys/devices/system/node > $T/cpuarray.awk
 kvm-get-cpus-script.sh $T/cpuarray.awk $T/dumpbatches.awk

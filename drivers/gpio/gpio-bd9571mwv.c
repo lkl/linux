@@ -72,13 +72,13 @@ static int bd9571mwv_gpio_get(struct gpio_chip *chip, unsigned int offset)
 	return val & BIT(offset);
 }
 
-static void bd9571mwv_gpio_set(struct gpio_chip *chip, unsigned int offset,
+static int bd9571mwv_gpio_set(struct gpio_chip *chip, unsigned int offset,
 			      int value)
 {
 	struct bd9571mwv_gpio *gpio = gpiochip_get_data(chip);
 
-	regmap_update_bits(gpio->regmap, BD9571MWV_GPIO_OUT,
-			   BIT(offset), value ? BIT(offset) : 0);
+	return regmap_update_bits(gpio->regmap, BD9571MWV_GPIO_OUT,
+				  BIT(offset), value ? BIT(offset) : 0);
 }
 
 static const struct gpio_chip template_chip = {

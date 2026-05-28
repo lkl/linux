@@ -7,28 +7,35 @@ $schema: http://devicetree.org/meta-schemas/core.yaml#
 title: Analog Devices ADIS16480 and similar IMUs
 
 maintainers:
-  - Alexandru Tachici <alexandru.tachici@analog.com>
+  - Marcelo Schmitt <marcelo.schmitt@analog.com>
+  - Nuno Sá <nuno.sa@analog.com>
 
 properties:
   compatible:
-    enum:
-      - adi,adis16375
-      - adi,adis16480
-      - adi,adis16485
-      - adi,adis16488
-      - adi,adis16490
-      - adi,adis16495-1
-      - adi,adis16495-2
-      - adi,adis16495-3
-      - adi,adis16497-1
-      - adi,adis16497-2
-      - adi,adis16497-3
-      - adi,adis16545-1
-      - adi,adis16545-2
-      - adi,adis16545-3
-      - adi,adis16547-1
-      - adi,adis16547-2
-      - adi,adis16547-3
+    oneOf:
+      - enum:
+          - adi,adis16375
+          - adi,adis16480
+          - adi,adis16485
+          - adi,adis16486
+          - adi,adis16488
+          - adi,adis16489
+          - adi,adis16490
+          - adi,adis16495-1
+          - adi,adis16495-2
+          - adi,adis16495-3
+          - adi,adis16497-1
+          - adi,adis16497-2
+          - adi,adis16497-3
+          - adi,adis16545-1
+          - adi,adis16545-2
+          - adi,adis16545-3
+          - adi,adis16547-1
+          - adi,adis16547-2
+          - adi,adis16547-3
+      - items:
+          - const: adi,adis16487
+          - const: adi,adis16485
 
   reg:
     maxItems: 1

@@ -16,7 +16,7 @@ static ssize_t global_mmio_size_show(struct device *device,
 {
 	struct ocxl_afu *afu = to_afu(device);
 
-	return scnprintf(buf, PAGE_SIZE, "%d\n",
+	return sysfs_emit(buf, "%d\n",
 			afu->config.global_mmio_size);
 }
 
@@ -26,7 +26,7 @@ static ssize_t pp_mmio_size_show(struct device *device,
 {
 	struct ocxl_afu *afu = to_afu(device);
 
-	return scnprintf(buf, PAGE_SIZE, "%d\n",
+	return sysfs_emit(buf, "%d\n",
 			afu->config.pp_mmio_stride);
 }
 
@@ -36,7 +36,7 @@ static ssize_t afu_version_show(struct device *device,
 {
 	struct ocxl_afu *afu = to_afu(device);
 
-	return scnprintf(buf, PAGE_SIZE, "%hhu:%hhu\n",
+	return sysfs_emit(buf, "%hhu:%hhu\n",
 			afu->config.version_major,
 			afu->config.version_minor);
 }
@@ -47,7 +47,7 @@ static ssize_t contexts_show(struct device *device,
 {
 	struct ocxl_afu *afu = to_afu(device);
 
-	return scnprintf(buf, PAGE_SIZE, "%d/%d\n",
+	return sysfs_emit(buf, "%d/%d\n",
 			afu->pasid_count, afu->pasid_max);
 }
 
@@ -61,9 +61,9 @@ static ssize_t reload_on_reset_show(struct device *device,
 	int val;
 
 	if (ocxl_config_get_reset_reload(pci_dev, &val))
-		return scnprintf(buf, PAGE_SIZE, "unavailable\n");
+		return sysfs_emit(buf, "unavailable\n");
 
-	return scnprintf(buf, PAGE_SIZE, "%d\n", val);
+	return sysfs_emit(buf, "%d\n", val);
 }
 
 static ssize_t reload_on_reset_store(struct device *device,
@@ -94,7 +94,7 @@ static struct device_attribute afu_attrs[] = {
 };
 
 static ssize_t global_mmio_read(struct file *filp, struct kobject *kobj,
-				struct bin_attribute *bin_attr, char *buf,
+				const struct bin_attribute *bin_attr, char *buf,
 				loff_t off, size_t count)
 {
 	struct ocxl_afu *afu = to_afu(kobj_to_dev(kobj));
@@ -125,7 +125,7 @@ static const struct vm_operations_struct global_mmio_vmops = {
 };
 
 static int global_mmio_mmap(struct file *filp, struct kobject *kobj,
-			struct bin_attribute *bin_attr,
+			const struct bin_attribute *bin_attr,
 			struct vm_area_struct *vma)
 {
 	struct ocxl_afu *afu = to_afu(kobj_to_dev(kobj));

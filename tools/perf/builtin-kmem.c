@@ -36,7 +36,7 @@
 #include <regex.h>
 
 #include <linux/ctype.h>
-#include <traceevent/event-parse.h>
+#include <event-parse.h>
 
 static int	kmem_slab;
 static int	kmem_page;
@@ -761,6 +761,7 @@ static int parse_gfp_flags(struct evsel *evsel, struct perf_sample *sample,
 	};
 	struct trace_seq seq;
 	char *str, *pos = NULL;
+	const struct tep_event *tp_format;
 
 	if (nr_gfps) {
 		struct gfp_flag key = {
@@ -772,8 +773,9 @@ static int parse_gfp_flags(struct evsel *evsel, struct perf_sample *sample,
 	}
 
 	trace_seq_init(&seq);
-	tep_print_event(evsel->tp_format->tep,
-			&seq, &record, "%s", TEP_PRINT_INFO);
+	tp_format = evsel__tp_format(evsel);
+	if (tp_format)
+		tep_print_event(tp_format->tep, &seq, &record, "%s", TEP_PRINT_INFO);
 
 	str = strtok_r(seq.buffer, " ", &pos);
 	while (str) {
@@ -2012,17 +2014,17 @@ int cmd_kmem(int argc, const char **argv)
 
 	if (kmem_page) {
 		struct evsel *evsel = evlist__find_tracepoint_by_name(session->evlist, "kmem:mm_page_alloc");
+		const struct tep_event *tp_format = evsel ? evsel__tp_format(evsel) : NULL;
 
-		if (evsel == NULL) {
+		if (tp_format == NULL) {
 			pr_err(errmsg, "page", "page");
 			goto out_delete;
 		}
-
-		kmem_page_size = tep_get_page_size(evsel->tp_format->tep);
+		kmem_page_size = tep_get_page_size(tp_format->tep);
 		symbol_conf.use_callchain = true;
 	}
 
-	symbol__init(&session->header.env);
+	symbol__init(perf_session__env(session));
 
 	if (perf_time__parse_str(&ptime, time_str) != 0) {
 		pr_err("Invalid time string\n");

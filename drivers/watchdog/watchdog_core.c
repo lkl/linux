@@ -33,7 +33,8 @@
 #include <linux/init.h>		/* For __init/__exit/... */
 #include <linux/idr.h>		/* For ida_* macros */
 #include <linux/err.h>		/* For IS_ERR macros */
-#include <linux/of.h>		/* For of_get_timeout_sec */
+#include <linux/of.h>		/* For of_alias_get_id */
+#include <linux/property.h>	/* For device_property_read_u32 */
 #include <linux/suspend.h>
 
 #include "watchdog_core.h"	/* For watchdog_dev_register/... */
@@ -137,8 +138,7 @@ int watchdog_init_timeout(struct watchdog_device *wdd,
 	}
 
 	/* try to get the timeout_sec property */
-	if (dev && dev->of_node &&
-	    of_property_read_u32(dev->of_node, "timeout-sec", &t) == 0) {
+	if (dev && device_property_read_u32(dev, "timeout-sec", &t) == 0) {
 		if (t && !watchdog_timeout_invalid(wdd, t)) {
 			wdd->timeout = t;
 			return 0;
@@ -237,7 +237,7 @@ void watchdog_set_restart_priority(struct watchdog_device *wdd, int priority)
 }
 EXPORT_SYMBOL_GPL(watchdog_set_restart_priority);
 
-static int __watchdog_register_device(struct watchdog_device *wdd)
+static int ___watchdog_register_device(struct watchdog_device *wdd)
 {
 	int ret, id = -1;
 
@@ -337,6 +337,22 @@ static int __watchdog_register_device(struct watchdog_device *wdd)
 	return 0;
 }
 
+static int __watchdog_register_device(struct watchdog_device *wdd)
+{
+	const char *dev_str;
+	int ret;
+
+	ret = ___watchdog_register_device(wdd);
+	if (ret) {
+		dev_str = wdd->parent ? dev_name(wdd->parent) :
+			  (const char *)wdd->info->identity;
+		pr_err("%s: failed to register watchdog device (err = %d)\n",
+			dev_str, ret);
+	}
+
+	return ret;
+}
+
 /**
  * watchdog_register_device() - register a watchdog device
  * @wdd: watchdog device
@@ -350,7 +366,6 @@ static int __watchdog_register_device(struct watchdog_device *wdd)
 
 int watchdog_register_device(struct watchdog_device *wdd)
 {
-	const char *dev_str;
 	int ret = 0;
 
 	mutex_lock(&wtd_deferred_reg_mutex);
@@ -359,13 +374,6 @@ int watchdog_register_device(struct watchdog_device *wdd)
 	else
 		watchdog_deferred_registration_add(wdd);
 	mutex_unlock(&wtd_deferred_reg_mutex);
-
-	if (ret) {
-		dev_str = wdd->parent ? dev_name(wdd->parent) :
-			  (const char *)wdd->info->identity;
-		pr_err("%s: failed to register watchdog device (err = %d)\n",
-			dev_str, ret);
-	}
 
 	return ret;
 }

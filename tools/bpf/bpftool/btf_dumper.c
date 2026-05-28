@@ -38,7 +38,7 @@ static int dump_prog_id_as_func_ptr(const struct btf_dumper *d,
 	__u32 info_len = sizeof(info);
 	const char *prog_name = NULL;
 	struct btf *prog_btf = NULL;
-	struct bpf_func_info finfo;
+	struct bpf_func_info finfo = {};
 	__u32 finfo_rec_size;
 	char prog_str[1024];
 	int err;
@@ -653,7 +653,7 @@ static int __btf_dumper_type_only(const struct btf *btf, __u32 type_id,
 	case BTF_KIND_ARRAY:
 		array = (struct btf_array *)(t + 1);
 		BTF_PRINT_TYPE(array->type);
-		BTF_PRINT_ARG("[%d]", array->nelems);
+		BTF_PRINT_ARG("[%u]", array->nelems);
 		break;
 	case BTF_KIND_PTR:
 		BTF_PRINT_TYPE(t->type);

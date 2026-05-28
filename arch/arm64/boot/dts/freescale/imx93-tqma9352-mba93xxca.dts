@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: (GPL-2.0-or-later OR MIT)
 /*
- * Copyright (c) 2022-2023 TQ-Systems GmbH <linux@ew.tq-group.com>,
+ * Copyright (c) 2022-2024 TQ-Systems GmbH <linux@ew.tq-group.com>,
  * D-82229 Seefeld, Germany.
  * Author: Markus Niebel
  * Author: Alexander Stein
@@ -26,10 +26,35 @@
 
 	aliases {
 		eeprom0 = &eeprom0;
-		ethernet0 = &fec;
-		ethernet1 = &eqos;
+		ethernet0 = &eqos;
+		ethernet1 = &fec;
+		gpio0 = &gpio1;
+		gpio1 = &gpio2;
+		gpio2 = &gpio3;
+		gpio3 = &gpio4;
+		i2c0 = &lpi2c1;
+		i2c1 = &lpi2c2;
+		i2c2 = &lpi2c3;
+		i2c3 = &lpi2c4;
+		i2c4 = &lpi2c5;
+		mmc0 = &usdhc1;
+		mmc1 = &usdhc2;
 		rtc0 = &pcf85063;
 		rtc1 = &bbnsm_rtc;
+		serial0 = &lpuart1;
+		serial1 = &lpuart2;
+		serial2 = &lpuart3;
+		serial3 = &lpuart4;
+		serial4 = &lpuart5;
+		serial5 = &lpuart6;
+		serial6 = &lpuart7;
+		serial7 = &lpuart8;
+		spi0 = &lpspi1;
+		spi1 = &lpspi2;
+		spi2 = &lpspi3;
+		spi3 = &lpspi4;
+		spi4 = &lpspi5;
+		spi5 = &lpspi6;
 	};
 
 	backlight_lvds: backlight {
@@ -448,38 +473,38 @@
 				  "WLAN_PERST#", "12V_EN";
 
 		/*
-		 * Controls the WiFi card PD pin which is low active
-		 * as power down signal. The output-high states, the signal
-		 * is active, e.g. card is powered down
+		 * Controls the WiFi card's low-active power down pin.
+		 * The output-low states, the signal is inactive,
+		 * resulting in high signal at power-down pin
 		 */
 		wlan-pd-hog {
 			gpio-hog;
 			gpios = <4 GPIO_ACTIVE_LOW>;
-			output-high;
+			output-low;
 			line-name = "WLAN_PD#";
 		};
 
 		/*
-		 * Controls the WiFi card disable pin which is low active
-		 * as disable signal. The output-high states, the signal
-		 * is active, e.g. card is disabled
+		 * Controls the WiFi card's low-active disable pin.
+		 * The output-low states, the signal is inactive,
+		 * resulting in high signal at power-down pin
 		 */
 		wlan-wdisable-hog {
 			gpio-hog;
 			gpios = <5 GPIO_ACTIVE_LOW>;
-			output-high;
+			output-low;
 			line-name = "WLAN_W_DISABLE#";
 		};
 
 		/*
-		 * Controls the WiFi card reset pin which is low active
-		 * as reset signal. The output-high states, the signal
-		 * is active, e.g. card in reset
+		 * Controls the WiFi card's reset pin.
+		 * The output-low states, the signal is inactive,
+		 * resulting in high signal at power-down pin
 		 */
 		wlan-perst-hog {
 			gpio-hog;
 			gpios = <6 GPIO_ACTIVE_LOW>;
-			output-high;
+			output-low;
 			line-name = "WLAN_PERST#";
 		};
 	};
@@ -755,17 +780,17 @@
 		>;
 	};
 
-	pinctrl_pcf85063: pcf85063grp {
-		fsl,pins = <
-			MX93_PAD_SAI1_RXD0__GPIO1_IO14			0x1000
-		>;
-	};
-
 	pinctrl_mipi_csi: mipicsigrp {
 		fsl,pins = <
 			MX93_PAD_CCM_CLKO3__CCMSRCGPCMIX_CLKO3		0x051e /* MCLK */
 			MX93_PAD_GPIO_IO10__GPIO2_IO10			0x051e /* TRIGGER */
 			MX93_PAD_GPIO_IO11__GPIO2_IO11			0x1400 /* SYNC */
+		>;
+	};
+
+	pinctrl_pcf85063: pcf85063grp {
+		fsl,pins = <
+			MX93_PAD_SAI1_RXD0__GPIO1_IO14			0x1000
 		>;
 	};
 
@@ -783,17 +808,17 @@
 		>;
 	};
 
-	pinctrl_temp_sensor_som: tempsensorsomgrp {
-		fsl,pins = <
-			/* HYS | FSEL_0 | no DSE */
-			MX93_PAD_SAI1_TXFS__GPIO1_IO11			0x1000
-		>;
-	};
-
 	pinctrl_tc9595: tc9595-grp {
 		fsl,pins = <
 			/* HYS | PD | FSEL_0 | no DSE */
 			MX93_PAD_CCM_CLKO4__GPIO4_IO29			0x1400
+		>;
+	};
+
+	pinctrl_temp_sensor_som: tempsensorsomgrp {
+		fsl,pins = <
+			/* HYS | FSEL_0 | no DSE */
+			MX93_PAD_SAI1_TXFS__GPIO1_IO11			0x1000
 		>;
 	};
 

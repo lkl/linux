@@ -33,13 +33,24 @@
 
 /*
  * Max bus-specific overhead incurred by request/responses.
- * I2C requires 1 additional byte for requests.
- * I2C requires 2 additional bytes for responses.
- * SPI requires up to 32 additional bytes for responses.
+ *
+ * Request:
+ * - I2C requires 1 byte (see struct ec_host_request_i2c).
+ * - ISHTP requires 4 bytes (see struct cros_ish_out_msg).
+ *
+ * Response:
+ * - I2C requires 2 bytes (see struct ec_host_response_i2c).
+ * - ISHTP requires 4 bytes (see struct cros_ish_in_msg).
+ * - SPI requires 32 bytes (see EC_MSG_PREAMBLE_COUNT).
  */
 #define EC_PROTO_VERSION_UNKNOWN	0
-#define EC_MAX_REQUEST_OVERHEAD		1
+#define EC_MAX_REQUEST_OVERHEAD		4
 #define EC_MAX_RESPONSE_OVERHEAD	32
+
+/*
+ * ACPI notify value for MKBP host event.
+ */
+#define ACPI_NOTIFY_CROS_EC_MKBP 0x80
 
 /*
  * EC panic is not covered by the standard (0-F) ACPI notify values.
@@ -117,6 +128,7 @@ struct cros_ec_command {
  * @dout_size: Size of dout buffer to allocate (zero to use static dout).
  * @wake_enabled: True if this device can wake the system from sleep.
  * @suspended: True if this device had been suspended.
+ * @registered: True if this device had been registered.
  * @cmd_xfer: Send command to EC and get response.
  *            Returns the number of bytes received if the communication
  *            succeeded, but that doesn't mean the EC was happy with the
@@ -175,6 +187,7 @@ struct cros_ec_device {
 	int dout_size;
 	bool wake_enabled;
 	bool suspended;
+	bool registered;
 	int (*cmd_xfer)(struct cros_ec_device *ec,
 			struct cros_ec_command *msg);
 	int (*pkt_xfer)(struct cros_ec_device *ec,
@@ -246,6 +259,8 @@ int cros_ec_cmd_xfer(struct cros_ec_device *ec_dev,
 int cros_ec_cmd_xfer_status(struct cros_ec_device *ec_dev,
 			    struct cros_ec_command *msg);
 
+int cros_ec_rwsig_continue(struct cros_ec_device *ec_dev);
+
 int cros_ec_query_all(struct cros_ec_device *ec_dev);
 
 int cros_ec_get_next_event(struct cros_ec_device *ec_dev,
@@ -264,6 +279,8 @@ int cros_ec_cmd(struct cros_ec_device *ec_dev, unsigned int version, int command
 int cros_ec_cmd_readmem(struct cros_ec_device *ec_dev, u8 offset, u8 size, void *dest);
 
 int cros_ec_get_cmd_versions(struct cros_ec_device *ec_dev, u16 cmd);
+
+bool cros_ec_device_registered(struct cros_ec_device *ec_dev);
 
 /**
  * cros_ec_get_time_ns() - Return time in ns.

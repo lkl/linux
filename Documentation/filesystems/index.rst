@@ -29,6 +29,7 @@ algorithms work.
    fiemap
    files
    locks
+   multigrain-ts
    mount_api
    quota
    seq_file
@@ -71,7 +72,6 @@ Documentation for filesystem implementations.
    afs
    autofs
    autofs-mount-control
-   bcachefs/index
    befs
    bfs
    btrfs
@@ -95,8 +95,7 @@ Documentation for filesystem implementations.
    hfs
    hfsplus
    hpfs
-   fuse
-   fuse-io
+   fuse/index
    inotify
    isofs
    nilfs2
@@ -111,12 +110,12 @@ Documentation for filesystem implementations.
    qnx6
    ramfs-rootfs-initramfs
    relay
+   resctrl
    romfs
    smb/index
    spufs/index
    squashfs
    sysfs
-   sysv-fs
    tmpfs
    ubifs
    ubifs-authentication

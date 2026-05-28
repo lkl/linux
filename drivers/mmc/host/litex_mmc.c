@@ -506,11 +506,6 @@ use_polling:
 	return 0;
 }
 
-static void litex_mmc_free_host_wrapper(void *mmc)
-{
-	mmc_free_host(mmc);
-}
-
 static int litex_mmc_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -525,14 +520,9 @@ static int litex_mmc_probe(struct platform_device *pdev)
 	 * If for some reason we need to modify max_blk_count, we must also
 	 * re-calculate `max_[req,seg]_size = max_blk_size * max_blk_count;`
 	 */
-	mmc = mmc_alloc_host(sizeof(struct litex_mmc_host), dev);
+	mmc = devm_mmc_alloc_host(dev, sizeof(*host));
 	if (!mmc)
 		return -ENOMEM;
-
-	ret = devm_add_action_or_reset(dev, litex_mmc_free_host_wrapper, mmc);
-	if (ret)
-		return dev_err_probe(dev, ret,
-				     "Can't register mmc_free_host action\n");
 
 	host = mmc_priv(mmc);
 	host->mmc = mmc;
@@ -644,7 +634,7 @@ MODULE_DEVICE_TABLE(of, litex_match);
 
 static struct platform_driver litex_mmc_driver = {
 	.probe = litex_mmc_probe,
-	.remove_new = litex_mmc_remove,
+	.remove = litex_mmc_remove,
 	.driver = {
 		.name = "litex-mmc",
 		.of_match_table = litex_match,

@@ -844,8 +844,6 @@ static const struct vb2_ops vb2_qops = {
 	.buf_init	= buffer_init,
 	.buf_prepare	= buffer_prepare,
 	.buf_queue	= saa7134_vb2_buffer_queue,
-	.wait_prepare	= vb2_ops_wait_prepare,
-	.wait_finish	= vb2_ops_wait_finish,
 	.start_streaming = saa7134_vb2_start_streaming,
 	.stop_streaming = saa7134_vb2_stop_streaming,
 };
@@ -1304,7 +1302,7 @@ static int saa7134_g_pixelaspect(struct file *file, void *priv,
 	return 0;
 }
 
-static int saa7134_g_selection(struct file *file, void *f, struct v4l2_selection *sel)
+static int saa7134_g_selection(struct file *file, void *priv, struct v4l2_selection *sel)
 {
 	struct saa7134_dev *dev = video_drvdata(file);
 
@@ -1327,7 +1325,7 @@ static int saa7134_g_selection(struct file *file, void *f, struct v4l2_selection
 	return 0;
 }
 
-static int saa7134_s_selection(struct file *file, void *f, struct v4l2_selection *sel)
+static int saa7134_s_selection(struct file *file, void *priv, struct v4l2_selection *sel)
 {
 	struct saa7134_dev *dev = video_drvdata(file);
 	struct v4l2_rect *b = &dev->crop_bounds;
@@ -1743,7 +1741,7 @@ int saa7134_video_init1(struct saa7134_dev *dev)
 
 void saa7134_video_fini(struct saa7134_dev *dev)
 {
-	del_timer_sync(&dev->video_q.timeout);
+	timer_delete_sync(&dev->video_q.timeout);
 	/* free stuff */
 	saa7134_pgtable_free(dev->pci, &dev->video_q.pt);
 	saa7134_pgtable_free(dev->pci, &dev->vbi_q.pt);

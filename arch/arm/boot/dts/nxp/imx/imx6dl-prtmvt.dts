@@ -557,7 +557,6 @@
 
 &usbh1 {
 	vbus-supply = <&reg_h1_vbus>;
-	pinctrl-names = "default";
 	phy_type = "utmi";
 	dr_mode = "host";
 	disable-over-current;
@@ -773,7 +772,7 @@
 		>;
 	};
 
-	pinctrl_pca9539: pca9539 {
+	pinctrl_pca9539: pca9539grp {
 		fsl,pins = <
 			MX6QDL_PAD_GPIO_19__GPIO4_IO05			0x1b0b0
 		>;

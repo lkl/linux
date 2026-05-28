@@ -2,15 +2,6 @@
 /*
  * Support for Intel Camera Imaging ISP subsystem.
  * Copyright (c) 2015, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #ifndef __IA_CSS_SC_PARAM_H
@@ -31,7 +22,7 @@ struct sh_css_isp_sc_params {
  * vec_slice is used for 2 adjacent vectors of shading gains.
  * The number of shift times by vec_slice is 8.
  *     Max grid cell bqs to support the shading table centerting: N = 32
- *     CEIL_DIV(N-1, ISP_SLICE_NELEMS) = CEIL_DIV(31, 4) = 8
+ *     DIV_ROUND_UP(N-1, ISP_SLICE_NELEMS) = DIV_ROUND_UP(31, 4) = 8
  */
 #define SH_CSS_SC_INTERPED_GAIN_HOR_SLICE_TIMES   8
 

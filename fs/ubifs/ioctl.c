@@ -130,7 +130,7 @@ static int setflags(struct inode *inode, int flags)
 	return err;
 }
 
-int ubifs_fileattr_get(struct dentry *dentry, struct fileattr *fa)
+int ubifs_fileattr_get(struct dentry *dentry, struct file_kattr *fa)
 {
 	struct inode *inode = d_inode(dentry);
 	int flags = ubifs2ioctl(ubifs_inode(inode)->flags);
@@ -145,7 +145,7 @@ int ubifs_fileattr_get(struct dentry *dentry, struct fileattr *fa)
 }
 
 int ubifs_fileattr_set(struct mnt_idmap *idmap,
-		       struct dentry *dentry, struct fileattr *fa)
+		       struct dentry *dentry, struct file_kattr *fa)
 {
 	struct inode *inode = d_inode(dentry);
 	int flags = fa->flags;
@@ -213,12 +213,6 @@ long ubifs_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 long ubifs_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	switch (cmd) {
-	case FS_IOC32_GETFLAGS:
-		cmd = FS_IOC_GETFLAGS;
-		break;
-	case FS_IOC32_SETFLAGS:
-		cmd = FS_IOC_SETFLAGS;
-		break;
 	case FS_IOC_SET_ENCRYPTION_POLICY:
 	case FS_IOC_GET_ENCRYPTION_POLICY:
 	case FS_IOC_GET_ENCRYPTION_POLICY_EX:

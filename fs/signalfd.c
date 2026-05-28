@@ -277,31 +277,27 @@ static int do_signalfd4(int ufd, sigset_t *mask, int flags)
 			return ufd;
 		}
 
-		file = anon_inode_getfile("[signalfd]", &signalfd_fops, ctx,
-				       O_RDWR | (flags & O_NONBLOCK));
+		file = anon_inode_getfile_fmode("[signalfd]", &signalfd_fops,
+					ctx, O_RDWR | (flags & O_NONBLOCK),
+					FMODE_NOWAIT);
 		if (IS_ERR(file)) {
 			put_unused_fd(ufd);
 			kfree(ctx);
 			return PTR_ERR(file);
 		}
-		file->f_mode |= FMODE_NOWAIT;
-
 		fd_install(ufd, file);
 	} else {
-		struct fd f = fdget(ufd);
-		if (!fd_file(f))
+		CLASS(fd, f)(ufd);
+		if (fd_empty(f))
 			return -EBADF;
 		ctx = fd_file(f)->private_data;
-		if (fd_file(f)->f_op != &signalfd_fops) {
-			fdput(f);
+		if (fd_file(f)->f_op != &signalfd_fops)
 			return -EINVAL;
-		}
 		spin_lock_irq(&current->sighand->siglock);
 		ctx->sigmask = *mask;
 		spin_unlock_irq(&current->sighand->siglock);
 
 		wake_up(&current->sighand->signalfd_wqh);
-		fdput(f);
 	}
 
 	return ufd;

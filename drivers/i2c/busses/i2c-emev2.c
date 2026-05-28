@@ -351,10 +351,10 @@ static int em_i2c_unreg_slave(struct i2c_client *slave)
 }
 
 static const struct i2c_algorithm em_i2c_algo = {
-	.master_xfer = em_i2c_xfer,
+	.xfer = em_i2c_xfer,
 	.functionality = em_i2c_func,
-	.reg_slave      = em_i2c_reg_slave,
-	.unreg_slave    = em_i2c_unreg_slave,
+	.reg_slave = em_i2c_reg_slave,
+	.unreg_slave = em_i2c_unreg_slave,
 };
 
 static int em_i2c_probe(struct platform_device *pdev)
@@ -425,7 +425,7 @@ static const struct of_device_id em_i2c_ids[] = {
 
 static struct platform_driver em_i2c_driver = {
 	.probe = em_i2c_probe,
-	.remove_new = em_i2c_remove,
+	.remove = em_i2c_remove,
 	.driver = {
 		.name = "em-i2c",
 		.of_match_table = em_i2c_ids,

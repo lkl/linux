@@ -112,14 +112,6 @@ static int bme680_spi_probe(struct spi_device *spi)
 	const struct spi_device_id *id = spi_get_device_id(spi);
 	struct bme680_spi_bus_context *bus_context;
 	struct regmap *regmap;
-	int ret;
-
-	spi->bits_per_word = 8;
-	ret = spi_setup(spi);
-	if (ret < 0) {
-		dev_err(&spi->dev, "spi_setup failed!\n");
-		return ret;
-	}
 
 	bus_context = devm_kzalloc(&spi->dev, sizeof(*bus_context), GFP_KERNEL);
 	if (!bus_context)
@@ -140,13 +132,13 @@ static int bme680_spi_probe(struct spi_device *spi)
 
 static const struct spi_device_id bme680_spi_id[] = {
 	{"bme680", 0},
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(spi, bme680_spi_id);
 
 static const struct of_device_id bme680_of_spi_match[] = {
 	{ .compatible = "bosch,bme680", },
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(of, bme680_of_spi_match);
 
@@ -154,6 +146,7 @@ static struct spi_driver bme680_spi_driver = {
 	.driver = {
 		.name			= "bme680_spi",
 		.of_match_table		= bme680_of_spi_match,
+		.pm = pm_ptr(&bme680_dev_pm_ops),
 	},
 	.probe = bme680_spi_probe,
 	.id_table = bme680_spi_id,
@@ -163,4 +156,4 @@ module_spi_driver(bme680_spi_driver);
 MODULE_AUTHOR("Himanshu Jha <himanshujha199640@gmail.com>");
 MODULE_DESCRIPTION("Bosch BME680 SPI driver");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(IIO_BME680);
+MODULE_IMPORT_NS("IIO_BME680");

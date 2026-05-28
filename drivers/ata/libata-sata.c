@@ -900,14 +900,52 @@ static const char *ata_lpm_policy_names[] = {
 	[ATA_LPM_MIN_POWER]		= "min_power",
 };
 
+/*
+ * Check if a port supports link power management.
+ * Must be called with the port locked.
+ */
+static bool ata_scsi_lpm_supported(struct ata_port *ap)
+{
+	struct ata_link *link;
+	struct ata_device *dev;
+
+	if (ap->flags & ATA_FLAG_NO_LPM)
+		return false;
+
+	ata_for_each_link(link, ap, EDGE) {
+		ata_for_each_dev(dev, &ap->link, ENABLED) {
+			if (dev->quirks & ATA_QUIRK_NOLPM)
+				return false;
+		}
+	}
+
+	return true;
+}
+
+static ssize_t ata_scsi_lpm_supported_show(struct device *dev,
+				 struct device_attribute *attr, char *buf)
+{
+	struct Scsi_Host *shost = class_to_shost(dev);
+	struct ata_port *ap = ata_shost_to_port(shost);
+	unsigned long flags;
+	bool supported;
+
+	spin_lock_irqsave(ap->lock, flags);
+	supported = ata_scsi_lpm_supported(ap);
+	spin_unlock_irqrestore(ap->lock, flags);
+
+	return sysfs_emit(buf, "%d\n", supported);
+}
+DEVICE_ATTR(link_power_management_supported, S_IRUGO,
+	    ata_scsi_lpm_supported_show, NULL);
+EXPORT_SYMBOL_GPL(dev_attr_link_power_management_supported);
+
 static ssize_t ata_scsi_lpm_store(struct device *device,
 				  struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
 	struct Scsi_Host *shost = class_to_shost(device);
 	struct ata_port *ap = ata_shost_to_port(shost);
-	struct ata_link *link;
-	struct ata_device *dev;
 	enum ata_lpm_policy policy;
 	unsigned long flags;
 
@@ -924,13 +962,9 @@ static ssize_t ata_scsi_lpm_store(struct device *device,
 
 	spin_lock_irqsave(ap->lock, flags);
 
-	ata_for_each_link(link, ap, EDGE) {
-		ata_for_each_dev(dev, &ap->link, ENABLED) {
-			if (dev->quirks & ATA_QUIRK_NOLPM) {
-				count = -EOPNOTSUPP;
-				goto out_unlock;
-			}
-		}
+	if (!ata_scsi_lpm_supported(ap)) {
+		count = -EOPNOTSUPP;
+		goto out_unlock;
 	}
 
 	ap->target_lpm_policy = policy;
@@ -1313,7 +1347,7 @@ int ata_scsi_change_queue_depth(struct scsi_device *sdev, int queue_depth)
 EXPORT_SYMBOL_GPL(ata_scsi_change_queue_depth);
 
 /**
- *	ata_sas_device_configure - Default device_configure routine for libata
+ *	ata_sas_sdev_configure - Default sdev_configure routine for libata
  *				   devices
  *	@sdev: SCSI device to configure
  *	@lim: queue limits
@@ -1323,14 +1357,14 @@ EXPORT_SYMBOL_GPL(ata_scsi_change_queue_depth);
  *	Zero.
  */
 
-int ata_sas_device_configure(struct scsi_device *sdev, struct queue_limits *lim,
-		struct ata_port *ap)
+int ata_sas_sdev_configure(struct scsi_device *sdev, struct queue_limits *lim,
+			   struct ata_port *ap)
 {
 	ata_scsi_sdev_config(sdev);
 
 	return ata_scsi_dev_config(sdev, lim, ap->link.device);
 }
-EXPORT_SYMBOL_GPL(ata_sas_device_configure);
+EXPORT_SYMBOL_GPL(ata_sas_sdev_configure);
 
 /**
  *	ata_sas_queuecmd - Issue SCSI cdb to libata-managed device
@@ -1509,7 +1543,10 @@ int ata_eh_get_ncq_success_sense(struct ata_link *link)
 	struct ata_queued_cmd *qc;
 	unsigned int err_mask, tag;
 	u8 *sense, sk = 0, asc = 0, ascq = 0;
-	u64 sense_valid, val;
+	u16 extended_sense;
+	bool aux_icc_valid;
+	u32 sense_valid;
+	u64 val;
 	int ret = 0;
 
 	err_mask = ata_read_log_page(dev, ATA_LOG_SENSE_NCQ, 0, buf, 2);
@@ -1527,8 +1564,9 @@ int ata_eh_get_ncq_success_sense(struct ata_link *link)
 		return -EIO;
 	}
 
-	sense_valid = (u64)buf[8] | ((u64)buf[9] << 8) |
-		((u64)buf[10] << 16) | ((u64)buf[11] << 24);
+	sense_valid = get_unaligned_le32(&buf[8]);
+	extended_sense = get_unaligned_le16(&buf[14]);
+	aux_icc_valid = extended_sense & BIT(15);
 
 	ata_qc_for_each_raw(ap, qc, tag) {
 		if (!(qc->flags & ATA_QCFLAG_EH) ||
@@ -1541,7 +1579,7 @@ int ata_eh_get_ncq_success_sense(struct ata_link *link)
 		 * If the command does not have any sense data, clear ATA_SENSE.
 		 * Keep ATA_QCFLAG_EH_SUCCESS_CMD so that command is finished.
 		 */
-		if (!(sense_valid & (1ULL << tag))) {
+		if (!(sense_valid & BIT(tag))) {
 			qc->result_tf.status &= ~ATA_SENSE;
 			continue;
 		}
@@ -1555,6 +1593,17 @@ int ata_eh_get_ncq_success_sense(struct ata_link *link)
 			ret = -EIO;
 			continue;
 		}
+
+		qc->result_tf.nsect = sense[6];
+		qc->result_tf.hob_nsect = sense[7];
+		qc->result_tf.lbal = sense[8];
+		qc->result_tf.lbam = sense[9];
+		qc->result_tf.lbah = sense[10];
+		qc->result_tf.hob_lbal = sense[11];
+		qc->result_tf.hob_lbam = sense[12];
+		qc->result_tf.hob_lbah = sense[13];
+		if (aux_icc_valid)
+			qc->result_tf.auxiliary = get_unaligned_le32(&sense[16]);
 
 		/* Set sense without also setting scsicmd->result */
 		scsi_build_sense_buffer(dev->flags & ATA_DFLAG_D_SENSE,
@@ -1619,7 +1668,7 @@ void ata_eh_analyze_ncq_error(struct ata_link *link)
 		return;
 	}
 
-	if (!(link->sactive & (1 << tag))) {
+	if (!(link->sactive & BIT(tag))) {
 		ata_link_err(link, "log page 10h reported inactive tag %d\n",
 			     tag);
 		return;
@@ -1644,8 +1693,6 @@ void ata_eh_analyze_ncq_error(struct ata_link *link)
 		if (ata_scsi_sense_is_valid(sense_key, asc, ascq)) {
 			ata_scsi_set_sense(dev, qc->scsicmd, sense_key, asc,
 					   ascq);
-			ata_scsi_set_sense_information(dev, qc->scsicmd,
-						       &qc->result_tf);
 			qc->flags |= ATA_QCFLAG_SENSE_VALID;
 		}
 	}
@@ -1686,6 +1733,6 @@ const struct ata_port_operations sata_port_ops = {
 	.inherits		= &ata_base_port_ops,
 
 	.qc_defer		= ata_std_qc_defer,
-	.hardreset		= sata_std_hardreset,
+	.reset.hardreset	= sata_std_hardreset,
 };
 EXPORT_SYMBOL_GPL(sata_port_ops);

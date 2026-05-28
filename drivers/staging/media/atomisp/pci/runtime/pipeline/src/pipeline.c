@@ -2,15 +2,6 @@
 /*
  * Support for Intel Camera Imaging ISP subsystem.
  * Copyright (c) 2010 - 2015, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #include "hmm.h"
@@ -207,7 +198,6 @@ int ia_css_pipeline_request_stop(struct ia_css_pipeline *pipeline)
 	ia_css_debug_dtrace(IA_CSS_DEBUG_TRACE,
 			    "ia_css_pipeline_request_stop() enter: pipeline=%p\n",
 			    pipeline);
-	pipeline->stop_requested = true;
 
 	/* Send stop event to the sp*/
 	/* This needs improvement, stop on all the pipes available
@@ -672,7 +662,6 @@ static void pipeline_init_defaults(
 
 	pipeline->pipe_id = pipe_id;
 	pipeline->stages = NULL;
-	pipeline->stop_requested = false;
 	pipeline->current_stage = NULL;
 
 	memcpy(&pipeline->in_frame, &ia_css_default_frame,

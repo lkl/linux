@@ -11,6 +11,7 @@
 #include "etnaviv_gpu.h"
 #include "etnaviv_sched.h"
 #include "state.xml.h"
+#include "state_hi.xml.h"
 
 static int etnaviv_job_hang_limit = 0;
 module_param_named(job_hang_limit, etnaviv_job_hang_limit, int , 0444);
@@ -35,15 +36,15 @@ static enum drm_gpu_sched_stat etnaviv_sched_timedout_job(struct drm_sched_job
 {
 	struct etnaviv_gem_submit *submit = to_etnaviv_submit(sched_job);
 	struct etnaviv_gpu *gpu = submit->gpu;
-	u32 dma_addr;
+	u32 dma_addr, primid = 0;
 	int change;
 
 	/*
-	 * If the GPU managed to complete this jobs fence, the timout is
-	 * spurious. Bail out.
+	 * If the GPU managed to complete this jobs fence, the timeout has
+	 * fired before free-job worker. The timeout is spurious, so bail out.
 	 */
 	if (dma_fence_is_signaled(submit->out_fence))
-		goto out_no_timeout;
+		return DRM_GPU_SCHED_STAT_NO_HANG;
 
 	/*
 	 * If the GPU is still making forward progress on the front-end (which
@@ -52,12 +53,24 @@ static enum drm_gpu_sched_stat etnaviv_sched_timedout_job(struct drm_sched_job
 	 */
 	dma_addr = gpu_read(gpu, VIVS_FE_DMA_ADDRESS);
 	change = dma_addr - gpu->hangcheck_dma_addr;
+	if (submit->exec_state == ETNA_PIPE_3D) {
+		/* guard against concurrent usage from perfmon_sample */
+		mutex_lock(&gpu->lock);
+		gpu_write(gpu, VIVS_MC_PROFILE_CONFIG0,
+			  VIVS_MC_PROFILE_CONFIG0_FE_CURRENT_PRIM <<
+			  VIVS_MC_PROFILE_CONFIG0_FE__SHIFT);
+		primid = gpu_read(gpu, VIVS_MC_PROFILE_FE_READ);
+		mutex_unlock(&gpu->lock);
+	}
 	if (gpu->state == ETNA_GPU_STATE_RUNNING &&
 	    (gpu->completed_fence != gpu->hangcheck_fence ||
-	     change < 0 || change > 16)) {
+	     change < 0 || change > 16 ||
+	     (submit->exec_state == ETNA_PIPE_3D &&
+	      gpu->hangcheck_primid != primid))) {
 		gpu->hangcheck_dma_addr = dma_addr;
+		gpu->hangcheck_primid = primid;
 		gpu->hangcheck_fence = gpu->completed_fence;
-		goto out_no_timeout;
+		return DRM_GPU_SCHED_STAT_NO_HANG;
 	}
 
 	/* block scheduler */
@@ -72,12 +85,8 @@ static enum drm_gpu_sched_stat etnaviv_sched_timedout_job(struct drm_sched_job
 
 	drm_sched_resubmit_jobs(&gpu->sched);
 
-	drm_sched_start(&gpu->sched);
-	return DRM_GPU_SCHED_STAT_NOMINAL;
-
-out_no_timeout:
-	list_add(&sched_job->list, &sched_job->sched->pending_list);
-	return DRM_GPU_SCHED_STAT_NOMINAL;
+	drm_sched_start(&gpu->sched, 0);
+	return DRM_GPU_SCHED_STAT_RESET;
 }
 
 static void etnaviv_sched_free_job(struct drm_sched_job *sched_job)
@@ -131,17 +140,17 @@ out_unlock:
 
 int etnaviv_sched_init(struct etnaviv_gpu *gpu)
 {
-	int ret;
+	const struct drm_sched_init_args args = {
+		.ops = &etnaviv_sched_ops,
+		.num_rqs = DRM_SCHED_PRIORITY_COUNT,
+		.credit_limit = etnaviv_hw_jobs_limit,
+		.hang_limit = etnaviv_job_hang_limit,
+		.timeout = msecs_to_jiffies(500),
+		.name = dev_name(gpu->dev),
+		.dev = gpu->dev,
+	};
 
-	ret = drm_sched_init(&gpu->sched, &etnaviv_sched_ops, NULL,
-			     DRM_SCHED_PRIORITY_COUNT,
-			     etnaviv_hw_jobs_limit, etnaviv_job_hang_limit,
-			     msecs_to_jiffies(500), NULL, NULL,
-			     dev_name(gpu->dev), gpu->dev);
-	if (ret)
-		return ret;
-
-	return 0;
+	return drm_sched_init(&gpu->sched, &args);
 }
 
 void etnaviv_sched_fini(struct etnaviv_gpu *gpu)

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
- * Copyright (C) 2012-2014, 2018-2022, 2024 Intel Corporation
+ * Copyright (C) 2012-2014, 2018-2022, 2024-2025 Intel Corporation
  * Copyright (C) 2017 Intel Deutschland GmbH
  */
 #ifndef __iwl_fw_api_mac_h__
@@ -17,7 +17,7 @@
 #define NUM_MAC_INDEX_CDB	(NUM_MAC_INDEX_DRIVER + 2)
 
 #define IWL_STATION_COUNT_MAX	16
-#define IWL_MVM_INVALID_STA		0xFF
+#define IWL_INVALID_STA		0xFF
 
 enum iwl_ac {
 	AC_BK,
@@ -287,9 +287,9 @@ struct iwl_ac_qos {
 	__le16 cw_min;
 	__le16 cw_max;
 	u8 aifsn;
-	u8 fifos_mask;
+	u8 fifos_mask; /* not in use since _VER_3 */
 	__le16 edca_txop;
-} __packed; /* AC_QOS_API_S_VER_2 */
+} __packed; /* AC_QOS_API_S_VER_2, _VER_3 */
 
 /**
  * struct iwl_mac_ctx_cmd - command structure to configure MAC contexts

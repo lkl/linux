@@ -520,12 +520,14 @@ static int ip101a_g_match_phy_device(struct phy_device *phydev, bool ip101a)
 	return ip101a == !ret;
 }
 
-static int ip101a_match_phy_device(struct phy_device *phydev)
+static int ip101a_match_phy_device(struct phy_device *phydev,
+				   const struct phy_driver *phydrv)
 {
 	return ip101a_g_match_phy_device(phydev, true);
 }
 
-static int ip101g_match_phy_device(struct phy_device *phydev)
+static int ip101g_match_phy_device(struct phy_device *phydev,
+				   const struct phy_driver *phydrv)
 {
 	return ip101a_g_match_phy_device(phydev, false);
 }
@@ -540,8 +542,7 @@ static void ip101g_get_strings(struct phy_device *phydev, u8 *data)
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(ip101g_hw_stats); i++)
-		strscpy(data + i * ETH_GSTRING_LEN,
-			ip101g_hw_stats[i].name, ETH_GSTRING_LEN);
+		ethtool_puts(&data, ip101g_hw_stats[i].name);
 }
 
 static u64 ip101g_get_stat(struct phy_device *phydev, int i)
@@ -624,7 +625,7 @@ static struct phy_driver icplus_driver[] = {
 
 module_phy_driver(icplus_driver);
 
-static struct mdio_device_id __maybe_unused icplus_tbl[] = {
+static const struct mdio_device_id __maybe_unused icplus_tbl[] = {
 	{ PHY_ID_MATCH_MODEL(IP175C_PHY_ID) },
 	{ PHY_ID_MATCH_MODEL(IP1001_PHY_ID) },
 	{ PHY_ID_MATCH_EXACT(IP101A_PHY_ID) },

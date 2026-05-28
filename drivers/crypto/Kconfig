@@ -95,6 +95,9 @@ config PKEY
 	    loaded when a CEX crypto card is available.
 	  - A pkey EP11 kernel module (pkey-ep11.ko) which is automatically
 	    loaded when a CEX crypto card is available.
+	  - A pkey UV kernel module (pkey-uv.ko) which is automatically
+	    loaded when the Ultravisor feature is available within a
+	    protected execution environment.
 
 	  Select this option if you want to enable the kernel and userspace
 	  API for protected key handling.
@@ -152,6 +155,24 @@ config PKEY_PCKMO
 	  this option unless you are sure you never need to derive protected
 	  keys from clear key values directly via PCKMO.
 
+config PKEY_UV
+	tristate "PKEY UV support handler"
+	depends on PKEY
+	depends on S390_UV_UAPI
+	help
+	  This is the PKEY Ultravisor support handler for deriving protected
+	  keys from secrets stored within the Ultravisor (UV).
+
+	  This module works together with the UV device and supports the
+	  retrieval of protected keys from secrets stored within the
+	  UV firmware layer. This service is only available within
+	  a protected execution guest and thus this module will fail upon
+	  modprobe if no protected execution environment is detected.
+
+	  Enable this option if you intend to run this kernel with an KVM
+	  guest with protected execution and you want to use UV retrievable
+	  secrets via PKEY API.
+
 config CRYPTO_PAES_S390
 	tristate "PAES cipher algorithms"
 	depends on S390
@@ -159,12 +180,26 @@ config CRYPTO_PAES_S390
 	depends on PKEY
 	select CRYPTO_ALGAPI
 	select CRYPTO_SKCIPHER
+	select CRYPTO_ENGINE
 	help
 	  This is the s390 hardware accelerated implementation of the
 	  AES cipher algorithms for use with protected key.
 
 	  Select this option if you want to use the paes cipher
 	  for example to use protected key encrypted devices.
+
+config CRYPTO_PHMAC_S390
+	tristate "PHMAC cipher algorithms"
+	depends on S390
+	depends on PKEY
+	select CRYPTO_HASH
+	select CRYPTO_ENGINE
+	help
+	  This is the s390 hardware accelerated implementation of the
+	  protected key HMAC support for SHA224, SHA256, SHA384 and SHA512.
+
+	  Select this option if you want to use the phmac digests
+	  for example to use dm-integrity with secure/protected keys.
 
 config S390_PRNG
 	tristate "Pseudo random number generator device driver"
@@ -178,23 +213,6 @@ config S390_PRNG
 	  pseudo-random-number device through the char device /dev/prandom.
 
 	  It is available as of z9.
-
-config CRYPTO_DEV_NIAGARA2
-	tristate "Niagara2 Stream Processing Unit driver"
-	select CRYPTO_LIB_DES
-	select CRYPTO_SKCIPHER
-	select CRYPTO_HASH
-	select CRYPTO_MD5
-	select CRYPTO_SHA1
-	select CRYPTO_SHA256
-	depends on SPARC64
-	help
-	  Each core of a Niagara2 processor contains a Stream
-	  Processing Unit, which itself contains several cryptographic
-	  sub-units.  One set provides the Modular Arithmetic Unit,
-	  used for SSL offload.  The other set provides the Cipher
-	  Group, which can perform encryption, decryption, hashing,
-	  checksumming, and raw copies.
 
 config CRYPTO_DEV_SL3516
 	tristate "Storlink SL3516 crypto offloader"
@@ -421,7 +439,7 @@ config CRYPTO_DEV_ATMEL_AUTHENC
 
 config CRYPTO_DEV_ATMEL_AES
 	tristate "Support for Atmel AES hw accelerator"
-	depends on ARCH_AT91 || COMPILE_TEST
+	depends on ARCH_MICROCHIP || COMPILE_TEST
 	select CRYPTO_AES
 	select CRYPTO_AEAD
 	select CRYPTO_SKCIPHER
@@ -525,13 +543,6 @@ source "drivers/crypto/cavium/cpt/Kconfig"
 source "drivers/crypto/cavium/nitrox/Kconfig"
 source "drivers/crypto/marvell/Kconfig"
 source "drivers/crypto/intel/Kconfig"
-
-config CRYPTO_DEV_CAVIUM_ZIP
-	tristate "Cavium ZIP driver"
-	depends on PCI && 64BIT && (ARM64 || COMPILE_TEST)
-	help
-	  Select this option if you want to enable compression/decompression
-	  acceleration on Cavium's ARM based SoCs
 
 config CRYPTO_DEV_QCE
 	tristate "Qualcomm crypto engine accelerator"
@@ -714,6 +725,18 @@ config CRYPTO_DEV_TEGRA
 	  Select this to enable Tegra Security Engine which accelerates various
 	  AES encryption/decryption and HASH algorithms.
 
+config CRYPTO_DEV_XILINX_TRNG
+	tristate "Support for Xilinx True Random Generator"
+	depends on ZYNQMP_FIRMWARE || COMPILE_TEST
+	select CRYPTO_RNG
+	select HW_RANDOM
+	help
+	  Xilinx Versal SoC driver provides kernel-side support for True Random Number
+	  Generator and Pseudo random Number in CTR_DRBG mode as defined in NIST SP800-90A.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called xilinx-trng.
+
 config CRYPTO_DEV_ZYNQMP_AES
 	tristate "Support for Xilinx ZynqMP AES hw accelerator"
 	depends on ZYNQMP_FIRMWARE || COMPILE_TEST
@@ -829,6 +852,7 @@ config CRYPTO_DEV_CCREE
 	  If unsure say Y.
 
 source "drivers/crypto/hisilicon/Kconfig"
+source "drivers/crypto/loongson/Kconfig"
 
 source "drivers/crypto/amlogic/Kconfig"
 
@@ -851,5 +875,7 @@ config CRYPTO_DEV_SA2UL
 
 source "drivers/crypto/aspeed/Kconfig"
 source "drivers/crypto/starfive/Kconfig"
+source "drivers/crypto/inside-secure/eip93/Kconfig"
+source "drivers/crypto/ti/Kconfig"
 
 endif # CRYPTO_HW

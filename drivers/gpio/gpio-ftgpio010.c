@@ -10,12 +10,14 @@
  * MXC GPIO support. (c) 2008 Daniel Mack <daniel@caiaq.de>
  * Copyright 2008 Juergen Beisert, kernel@pengutronix.de
  */
-#include <linux/gpio/driver.h>
-#include <linux/io.h>
-#include <linux/interrupt.h>
-#include <linux/platform_device.h>
+
 #include <linux/bitops.h>
 #include <linux/clk.h>
+#include <linux/gpio/driver.h>
+#include <linux/gpio/generic.h>
+#include <linux/interrupt.h>
+#include <linux/io.h>
+#include <linux/platform_device.h>
 
 /* GPIO registers definition */
 #define GPIO_DATA_OUT		0x00
@@ -40,13 +42,13 @@
 /**
  * struct ftgpio_gpio - Gemini GPIO state container
  * @dev: containing device for this instance
- * @gc: gpiochip for this instance
+ * @chip: generic GPIO chip for this instance
  * @base: remapped I/O-memory base
  * @clk: silicon clock
  */
 struct ftgpio_gpio {
 	struct device *dev;
-	struct gpio_chip gc;
+	struct gpio_generic_chip chip;
 	void __iomem *base;
 	struct clk *clk;
 };
@@ -233,6 +235,7 @@ static const struct irq_chip ftgpio_irq_chip = {
 
 static int ftgpio_gpio_probe(struct platform_device *pdev)
 {
+	struct gpio_generic_chip_config config;
 	struct device *dev = &pdev->dev;
 	struct ftgpio_gpio *g;
 	struct gpio_irq_chip *girq;
@@ -253,50 +256,46 @@ static int ftgpio_gpio_probe(struct platform_device *pdev)
 	if (irq < 0)
 		return irq;
 
-	g->clk = devm_clk_get(dev, NULL);
-	if (!IS_ERR(g->clk)) {
-		ret = clk_prepare_enable(g->clk);
-		if (ret)
-			return ret;
-	} else if (PTR_ERR(g->clk) == -EPROBE_DEFER) {
+	g->clk = devm_clk_get_enabled(dev, NULL);
+	if (IS_ERR(g->clk) && PTR_ERR(g->clk) == -EPROBE_DEFER)
 		/*
 		 * Percolate deferrals, for anything else,
 		 * just live without the clocking.
 		 */
 		return PTR_ERR(g->clk);
-	}
 
-	ret = bgpio_init(&g->gc, dev, 4,
-			 g->base + GPIO_DATA_IN,
-			 g->base + GPIO_DATA_SET,
-			 g->base + GPIO_DATA_CLR,
-			 g->base + GPIO_DIR,
-			 NULL,
-			 0);
-	if (ret) {
-		dev_err(dev, "unable to init generic GPIO\n");
-		goto dis_clk;
-	}
-	g->gc.label = dev_name(dev);
-	g->gc.base = -1;
-	g->gc.parent = dev;
-	g->gc.owner = THIS_MODULE;
-	/* ngpio is set by bgpio_init() */
+	config = (struct gpio_generic_chip_config) {
+		.dev = dev,
+		.sz = 4,
+		.dat = g->base + GPIO_DATA_IN,
+		.set = g->base + GPIO_DATA_SET,
+		.clr = g->base + GPIO_DATA_CLR,
+		.dirout = g->base + GPIO_DIR,
+	};
+
+	ret = gpio_generic_chip_init(&g->chip, &config);
+	if (ret)
+		return dev_err_probe(dev, ret, "unable to init generic GPIO\n");
+
+	g->chip.gc.label = dev_name(dev);
+	g->chip.gc.base = -1;
+	g->chip.gc.parent = dev;
+	g->chip.gc.owner = THIS_MODULE;
+	/* ngpio is set by gpio_generic_chip_init() */
 
 	/* We need a silicon clock to do debounce */
 	if (!IS_ERR(g->clk))
-		g->gc.set_config = ftgpio_gpio_set_config;
+		g->chip.gc.set_config = ftgpio_gpio_set_config;
 
-	girq = &g->gc.irq;
+	girq = &g->chip.gc.irq;
 	gpio_irq_chip_set_chip(girq, &ftgpio_irq_chip);
 	girq->parent_handler = ftgpio_gpio_irq_handler;
 	girq->num_parents = 1;
 	girq->parents = devm_kcalloc(dev, 1, sizeof(*girq->parents),
 				     GFP_KERNEL);
-	if (!girq->parents) {
-		ret = -ENOMEM;
-		goto dis_clk;
-	}
+	if (!girq->parents)
+		return -ENOMEM;
+
 	girq->default_type = IRQ_TYPE_NONE;
 	girq->handler = handle_bad_irq;
 	girq->parents[0] = irq;
@@ -309,26 +308,7 @@ static int ftgpio_gpio_probe(struct platform_device *pdev)
 	/* Clear any use of debounce */
 	writel(0x0, g->base + GPIO_DEBOUNCE_EN);
 
-	ret = devm_gpiochip_add_data(dev, &g->gc, g);
-	if (ret)
-		goto dis_clk;
-
-	platform_set_drvdata(pdev, g);
-	dev_info(dev, "FTGPIO010 @%p registered\n", g->base);
-
-	return 0;
-
-dis_clk:
-	clk_disable_unprepare(g->clk);
-
-	return ret;
-}
-
-static void ftgpio_gpio_remove(struct platform_device *pdev)
-{
-	struct ftgpio_gpio *g = platform_get_drvdata(pdev);
-
-	clk_disable_unprepare(g->clk);
+	return devm_gpiochip_add_data(dev, &g->chip.gc, g);
 }
 
 static const struct of_device_id ftgpio_gpio_of_match[] = {
@@ -350,6 +330,5 @@ static struct platform_driver ftgpio_gpio_driver = {
 		.of_match_table = ftgpio_gpio_of_match,
 	},
 	.probe = ftgpio_gpio_probe,
-	.remove_new = ftgpio_gpio_remove,
 };
 builtin_platform_driver(ftgpio_gpio_driver);

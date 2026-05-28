@@ -3,17 +3,6 @@
  * Support for Medifield PNW Camera Imaging ISP subsystem.
  *
  * Copyright (c) 2010 Intel Corporation. All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- *
  */
 #ifndef ATOMISP_PLATFORM_H_
 #define ATOMISP_PLATFORM_H_
@@ -183,10 +172,10 @@ void atomisp_unregister_subdev(struct v4l2_subdev *subdev);
 #define IS_BYT	__IS_SOC(INTEL_ATOM_SILVERMONT)
 #define IS_CHT	__IS_SOC(INTEL_ATOM_AIRMONT)
 #define IS_MRFD	__IS_SOC(INTEL_ATOM_SILVERMONT_MID)
-#define IS_MOFD	__IS_SOC(INTEL_ATOM_AIRMONT_MID)
+#define IS_MOFD	__IS_SOC(INTEL_ATOM_SILVERMONT_MID2)
 
 /* Both CHT and MOFD come with ISP2401 */
 #define IS_ISP2401 __IS_SOCS(INTEL_ATOM_AIRMONT, \
-			     INTEL_ATOM_AIRMONT_MID)
+			     INTEL_ATOM_SILVERMONT_MID2)
 
 #endif /* ATOMISP_PLATFORM_H_ */

@@ -22,7 +22,7 @@
 
 static int twl6040gpo_get(struct gpio_chip *chip, unsigned offset)
 {
-	struct twl6040 *twl6040 = dev_get_drvdata(chip->parent->parent);
+	struct twl6040 *twl6040 = gpiochip_get_data(chip);
 	int ret = 0;
 
 	ret = twl6040_reg_read(twl6040, TWL6040_REG_GPOCTL);
@@ -37,29 +37,30 @@ static int twl6040gpo_get_direction(struct gpio_chip *chip, unsigned offset)
 	return GPIO_LINE_DIRECTION_OUT;
 }
 
-static int twl6040gpo_direction_out(struct gpio_chip *chip, unsigned offset,
-				    int value)
+static int twl6040gpo_set(struct gpio_chip *chip, unsigned int offset,
+			  int value)
 {
-	/* This only drives GPOs, and can't change direction */
-	return 0;
-}
-
-static void twl6040gpo_set(struct gpio_chip *chip, unsigned offset, int value)
-{
-	struct twl6040 *twl6040 = dev_get_drvdata(chip->parent->parent);
+	struct twl6040 *twl6040 = gpiochip_get_data(chip);
 	int ret;
 	u8 gpoctl;
 
 	ret = twl6040_reg_read(twl6040, TWL6040_REG_GPOCTL);
 	if (ret < 0)
-		return;
+		return ret;
 
 	if (value)
 		gpoctl = ret | BIT(offset);
 	else
 		gpoctl = ret & ~BIT(offset);
 
-	twl6040_reg_write(twl6040, TWL6040_REG_GPOCTL, gpoctl);
+	return twl6040_reg_write(twl6040, TWL6040_REG_GPOCTL, gpoctl);
+}
+
+static int twl6040gpo_direction_out(struct gpio_chip *chip, unsigned int offset,
+				    int value)
+{
+	/* This only drives GPOs, and can't change direction */
+	return twl6040gpo_set(chip, offset, value);
 }
 
 static struct gpio_chip twl6040gpo_chip = {
@@ -91,7 +92,7 @@ static int gpo_twl6040_probe(struct platform_device *pdev)
 
 	twl6040gpo_chip.parent = &pdev->dev;
 
-	ret = devm_gpiochip_add_data(&pdev->dev, &twl6040gpo_chip, NULL);
+	ret = devm_gpiochip_add_data(&pdev->dev, &twl6040gpo_chip, twl6040);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "could not register gpiochip, %d\n", ret);
 		twl6040gpo_chip.ngpio = 0;

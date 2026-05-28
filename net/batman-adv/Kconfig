@@ -9,7 +9,7 @@
 
 config BATMAN_ADV
 	tristate "B.A.T.M.A.N. Advanced Meshing Protocol"
-	select LIBCRC32C
+	select CRC32
 	help
 	  B.A.T.M.A.N. (better approach to mobile ad-hoc networking) is
 	  a routing protocol for multi-hop ad-hoc mesh networks. The
@@ -52,19 +52,6 @@ config BATMAN_ADV_DAT
 	  mechanism that increases ARP reliability on sparse wireless
 	  mesh networks. If you think that your network does not need
 	  this option you can safely remove it and save some space.
-
-config BATMAN_ADV_NC
-	bool "Network Coding"
-	depends on BATMAN_ADV
-	help
-	  This option enables network coding, a mechanism that aims to
-	  increase the overall network throughput by fusing multiple
-	  packets in one transmission.
-	  Note that interfaces controlled by batman-adv must be manually
-	  configured to have promiscuous mode enabled in order to make
-	  network coding work.
-	  If you think that your network does not need this feature you
-	  can safely disable it and save some space.
 
 config BATMAN_ADV_MCAST
 	bool "Multicast optimisation"

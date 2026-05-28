@@ -162,11 +162,11 @@ static void ltc2952_poweroff_default(struct ltc2952_poweroff *data)
 	data->wde_interval = 300L * NSEC_PER_MSEC;
 	data->trigger_delay = ktime_set(2, 500L * NSEC_PER_MSEC);
 
-	hrtimer_init(&data->timer_trigger, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	data->timer_trigger.function = ltc2952_poweroff_timer_trigger;
+	hrtimer_setup(&data->timer_trigger, ltc2952_poweroff_timer_trigger, CLOCK_MONOTONIC,
+		      HRTIMER_MODE_REL);
 
-	hrtimer_init(&data->timer_wde, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	data->timer_wde.function = ltc2952_poweroff_timer_wde;
+	hrtimer_setup(&data->timer_wde, ltc2952_poweroff_timer_wde, CLOCK_MONOTONIC,
+		      HRTIMER_MODE_REL);
 }
 
 static int ltc2952_poweroff_init(struct platform_device *pdev)
@@ -305,7 +305,7 @@ MODULE_DEVICE_TABLE(of, of_ltc2952_poweroff_match);
 
 static struct platform_driver ltc2952_poweroff_driver = {
 	.probe = ltc2952_poweroff_probe,
-	.remove_new = ltc2952_poweroff_remove,
+	.remove = ltc2952_poweroff_remove,
 	.driver = {
 		.name = "ltc2952-poweroff",
 		.of_match_table = of_ltc2952_poweroff_match,

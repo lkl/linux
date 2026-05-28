@@ -21,7 +21,6 @@
  *
  */
 #include "amdgpu.h"
-#include "amdgpu_atombios.h"
 #include "nbio_v7_0.h"
 
 #include "nbio/nbio_7_0_default.h"
@@ -271,8 +270,19 @@ const struct nbio_hdp_flush_reg nbio_v7_0_hdp_flush_reg = {
 	.ref_and_mask_sdma1 = GPU_HDP_FLUSH_DONE__SDMA1_MASK,
 };
 
+#define regRCC_DEV0_EPF6_STRAP4                                                                         0xd304
+#define regRCC_DEV0_EPF6_STRAP4_BASE_IDX                                                                5
+
 static void nbio_v7_0_init_registers(struct amdgpu_device *adev)
 {
+	uint32_t data;
+
+	switch (amdgpu_ip_version(adev, NBIO_HWIP, 0)) {
+	case IP_VERSION(2, 5, 0):
+		data = RREG32_SOC15(NBIO, 0, regRCC_DEV0_EPF6_STRAP4) & ~BIT(23);
+		WREG32_SOC15(NBIO, 0, regRCC_DEV0_EPF6_STRAP4, data);
+		break;
+	}
 }
 
 #define MMIO_REG_HOLE_OFFSET (0x80000 - PAGE_SIZE)

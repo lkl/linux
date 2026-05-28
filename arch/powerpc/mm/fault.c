@@ -17,6 +17,7 @@
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/string.h>
+#include <linux/string_choices.h>
 #include <linux/types.h>
 #include <linux/pagemap.h>
 #include <linux/ptrace.h>
@@ -218,7 +219,7 @@ static bool bad_kernel_fault(struct pt_regs *regs, unsigned long error_code,
 	// Read/write fault blocked by KUAP is bad, it can never succeed.
 	if (bad_kuap_fault(regs, address, is_write)) {
 		pr_crit_ratelimited("Kernel attempted to %s user page (%lx) - exploit attempt? (uid: %d)\n",
-				    is_write ? "write" : "read", address,
+				    str_write_read(is_write), address,
 				    from_kuid(&init_user_ns, current_uid()));
 
 		// Fault on user outside of certain regions (eg. copy_tofrom_user()) is bad
@@ -439,10 +440,16 @@ static int ___do_page_fault(struct pt_regs *regs, unsigned long address,
 	/*
 	 * The kernel should never take an execute fault nor should it
 	 * take a page fault to a kernel address or a page fault to a user
-	 * address outside of dedicated places
+	 * address outside of dedicated places.
+	 *
+	 * Rather than kfence directly reporting false negatives, search whether
+	 * the NIP belongs to the fixup table for cases where fault could come
+	 * from functions like copy_from_kernel_nofault().
 	 */
 	if (unlikely(!is_user && bad_kernel_fault(regs, error_code, address, is_write))) {
-		if (kfence_handle_page_fault(address, is_write, regs))
+		if (is_kfence_address((void *)address) &&
+		    !search_exception_tables(instruction_pointer(regs)) &&
+		    kfence_handle_page_fault(address, is_write, regs))
 			return 0;
 
 		return SIGSEGV;
@@ -619,7 +626,7 @@ static void __bad_page_fault(struct pt_regs *regs, int sig)
 	case INTERRUPT_DATA_STORAGE:
 	case INTERRUPT_H_DATA_STORAGE:
 		pr_alert("BUG: %s on %s at 0x%08lx\n", msg,
-			 is_write ? "write" : "read", regs->dar);
+			 str_write_read(is_write), regs->dar);
 		break;
 	case INTERRUPT_DATA_SEGMENT:
 		pr_alert("BUG: %s at 0x%08lx\n", msg, regs->dar);

@@ -248,7 +248,6 @@ static const struct regmap_config stm32_cec_regmap_cfg = {
 	.val_bits = 32,
 	.reg_stride = sizeof(u32),
 	.max_register = 0x14,
-	.fast_io = true,
 };
 
 static int stm32_cec_probe(struct platform_device *pdev)
@@ -361,7 +360,7 @@ MODULE_DEVICE_TABLE(of, stm32_cec_of_match);
 
 static struct platform_driver stm32_cec_driver = {
 	.probe  = stm32_cec_probe,
-	.remove_new = stm32_cec_remove,
+	.remove = stm32_cec_remove,
 	.driver = {
 		.name		= CEC_NAME,
 		.of_match_table = stm32_cec_of_match,

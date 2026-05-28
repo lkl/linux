@@ -237,13 +237,13 @@ static void dpot_dac_remove(struct platform_device *pdev)
 
 static const struct of_device_id dpot_dac_match[] = {
 	{ .compatible = "dpot-dac" },
-	{ /* sentinel */ }
+	{ }
 };
 MODULE_DEVICE_TABLE(of, dpot_dac_match);
 
 static struct platform_driver dpot_dac_driver = {
 	.probe = dpot_dac_probe,
-	.remove_new = dpot_dac_remove,
+	.remove = dpot_dac_remove,
 	.driver = {
 		.name = "iio-dpot-dac",
 		.of_match_table = dpot_dac_match,

@@ -5,7 +5,6 @@ bpf-syscall*
 test_verifier
 test_maps
 test_lru_map
-test_lpm_map
 test_tag
 FEATURE-DUMP.libbpf
 FEATURE-DUMP.selftests
@@ -16,16 +15,12 @@ fixdep
 /test_progs-cpuv4
 test_verifier_log
 feature
-test_sock
 urandom_read
 test_sockmap
 test_lirc_mode2_user
-test_flow_dissector
 flow_dissector_load
 test_tcpnotify_user
 test_libbpf
-test_tcp_check_syncookie_user
-test_sysctl
 xdping
 test_cpp
 *.d
@@ -49,3 +44,4 @@ xdp_redirect_multi
 xdp_synproxy
 xdp_hw_metadata
 xdp_features
+verification_cert.h

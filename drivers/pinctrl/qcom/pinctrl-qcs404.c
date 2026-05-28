@@ -1296,7 +1296,7 @@ static const char * const i2s_3_ws_a_groups[] = {
 };
 
 static const struct pinfunction qcs404_functions[] = {
-	MSM_PIN_FUNCTION(gpio),
+	MSM_GPIO_PIN_FUNCTION(gpio),
 	MSM_PIN_FUNCTION(hdmi_tx),
 	MSM_PIN_FUNCTION(hdmi_ddc),
 	MSM_PIN_FUNCTION(blsp_uart_tx_a2),
@@ -1644,7 +1644,6 @@ static struct platform_driver qcs404_pinctrl_driver = {
 		.of_match_table = qcs404_pinctrl_of_match,
 	},
 	.probe = qcs404_pinctrl_probe,
-	.remove_new = msm_pinctrl_remove,
 };
 
 static int __init qcs404_pinctrl_init(void)

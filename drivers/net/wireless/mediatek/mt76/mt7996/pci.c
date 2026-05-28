@@ -16,14 +16,16 @@ static DEFINE_SPINLOCK(hif_lock);
 static u32 hif_idx;
 
 static const struct pci_device_id mt7996_pci_device_table[] = {
-	{ PCI_DEVICE(PCI_VENDOR_ID_MEDIATEK, 0x7990) },
-	{ PCI_DEVICE(PCI_VENDOR_ID_MEDIATEK, 0x7992) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_MEDIATEK, MT7996_DEVICE_ID) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_MEDIATEK, MT7992_DEVICE_ID) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_MEDIATEK, MT7990_DEVICE_ID) },
 	{ },
 };
 
 static const struct pci_device_id mt7996_hif_device_table[] = {
-	{ PCI_DEVICE(PCI_VENDOR_ID_MEDIATEK, 0x7991) },
-	{ PCI_DEVICE(PCI_VENDOR_ID_MEDIATEK, 0x799a) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_MEDIATEK, MT7996_DEVICE_ID_2) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_MEDIATEK, MT7992_DEVICE_ID_2) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_MEDIATEK, MT7990_DEVICE_ID_2) },
 	{ },
 };
 
@@ -63,8 +65,9 @@ static struct mt7996_hif *mt7996_pci_init_hif2(struct pci_dev *pdev)
 {
 	hif_idx++;
 
-	if (!pci_get_device(PCI_VENDOR_ID_MEDIATEK, 0x7991, NULL) &&
-	    !pci_get_device(PCI_VENDOR_ID_MEDIATEK, 0x799a, NULL))
+	if (!pci_get_device(PCI_VENDOR_ID_MEDIATEK, MT7996_DEVICE_ID_2, NULL) &&
+	    !pci_get_device(PCI_VENDOR_ID_MEDIATEK, MT7992_DEVICE_ID_2, NULL) &&
+	    !pci_get_device(PCI_VENDOR_ID_MEDIATEK, MT7990_DEVICE_ID_2, NULL))
 		return NULL;
 
 	writel(hif_idx | MT_PCIE_RECOG_ID_SEM,
@@ -84,6 +87,7 @@ static int mt7996_pci_hif2_probe(struct pci_dev *pdev)
 	hif->dev = &pdev->dev;
 	hif->regs = pcim_iomap_table(pdev)[0];
 	hif->irq = pdev->irq;
+	pcie_bandwidth_available(pdev, NULL, &hif->speed, &hif->width);
 	spin_lock_bh(&hif_lock);
 	list_add(&hif->list, &hif_list);
 	spin_unlock_bh(&hif_lock);
@@ -121,7 +125,9 @@ static int mt7996_pci_probe(struct pci_dev *pdev,
 
 	mt76_pci_disable_aspm(pdev);
 
-	if (id->device == 0x7991 || id->device == 0x799a)
+	if (id->device == MT7996_DEVICE_ID_2 ||
+	    id->device == MT7992_DEVICE_ID_2 ||
+	    id->device == MT7990_DEVICE_ID_2)
 		return mt7996_pci_hif2_probe(pdev);
 
 	dev = mt7996_mmio_probe(&pdev->dev, pcim_iomap_table(pdev)[0],
@@ -132,6 +138,7 @@ static int mt7996_pci_probe(struct pci_dev *pdev,
 	mdev = &dev->mt76;
 	mt7996_wfsys_reset(dev);
 	hif2 = mt7996_pci_init_hif2(pdev);
+	dev->hif2 = hif2;
 
 	ret = mt7996_mmio_wed_init(dev, pdev, false, &irq);
 	if (ret < 0)
@@ -156,7 +163,6 @@ static int mt7996_pci_probe(struct pci_dev *pdev,
 
 	if (hif2) {
 		hif2_dev = container_of(hif2->dev, struct pci_dev, dev);
-		dev->hif2 = hif2;
 
 		ret = mt7996_mmio_wed_init(dev, hif2_dev, true, &hif2_irq);
 		if (ret < 0)
@@ -256,3 +262,5 @@ MODULE_FIRMWARE(MT7992_FIRMWARE_WA);
 MODULE_FIRMWARE(MT7992_FIRMWARE_WM);
 MODULE_FIRMWARE(MT7992_FIRMWARE_DSP);
 MODULE_FIRMWARE(MT7992_ROM_PATCH);
+MODULE_FIRMWARE(MT7990_FIRMWARE_WM);
+MODULE_FIRMWARE(MT7990_ROM_PATCH);

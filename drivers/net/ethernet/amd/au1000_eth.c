@@ -571,7 +571,7 @@ static struct db_dest *au1000_GetFreeDB(struct au1000_private *aup)
 	return pDB;
 }
 
-void au1000_ReleaseDB(struct au1000_private *aup, struct db_dest *pDB)
+static void au1000_ReleaseDB(struct au1000_private *aup, struct db_dest *pDB)
 {
 	struct db_dest *pDBfree = aup->pDBfree;
 	if (pDBfree)
@@ -1363,7 +1363,7 @@ static void au1000_remove(struct platform_device *pdev)
 
 static struct platform_driver au1000_eth_driver = {
 	.probe  = au1000_probe,
-	.remove_new = au1000_remove,
+	.remove = au1000_remove,
 	.driver = {
 		.name   = "au1000-eth",
 	},

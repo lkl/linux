@@ -14,7 +14,8 @@
 #include <linux/cache.h>
 #include <linux/compiler.h>
 #include <linux/container_of.h>
-#include <linux/crc32c.h>
+#include <linux/crc32.h>
+#include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/etherdevice.h>
 #include <linux/gfp.h>
@@ -28,6 +29,7 @@
 #include <linux/net.h>
 #include <linux/netdevice.h>
 #include <linux/netlink.h>
+#include <linux/overflow.h>
 #include <linux/rculist.h>
 #include <linux/rcupdate.h>
 #include <linux/skbuff.h>
@@ -38,7 +40,6 @@
 #include <linux/workqueue.h>
 #include <net/genetlink.h>
 #include <net/netlink.h>
-#include <net/sock.h>
 #include <uapi/linux/batadv_packet.h>
 #include <uapi/linux/batman_adv.h>
 
@@ -46,9 +47,9 @@
 #include "hard-interface.h"
 #include "hash.h"
 #include "log.h"
+#include "mesh-interface.h"
 #include "netlink.h"
 #include "originator.h"
-#include "soft-interface.h"
 #include "tvlv.h"
 
 static struct kmem_cache *batadv_tl_cache __read_mostly;
@@ -160,7 +161,7 @@ batadv_tt_hash_find(struct batadv_hashtable *hash, const u8 *addr,
 
 /**
  * batadv_tt_local_hash_find() - search the local table for a given client
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @addr: the mac address of the client to look for
  * @vid: VLAN identifier
  *
@@ -185,7 +186,7 @@ batadv_tt_local_hash_find(struct batadv_priv *bat_priv, const u8 *addr,
 
 /**
  * batadv_tt_global_hash_find() - search the global table for a given client
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @addr: the mac address of the client to look for
  * @vid: VLAN identifier
  *
@@ -209,23 +210,9 @@ batadv_tt_global_hash_find(struct batadv_priv *bat_priv, const u8 *addr,
 }
 
 /**
- * batadv_tt_local_entry_free_rcu() - free the tt_local_entry
- * @rcu: rcu pointer of the tt_local_entry
- */
-static void batadv_tt_local_entry_free_rcu(struct rcu_head *rcu)
-{
-	struct batadv_tt_local_entry *tt_local_entry;
-
-	tt_local_entry = container_of(rcu, struct batadv_tt_local_entry,
-				      common.rcu);
-
-	kmem_cache_free(batadv_tl_cache, tt_local_entry);
-}
-
-/**
  * batadv_tt_local_entry_release() - release tt_local_entry from lists and queue
  *  for free after rcu grace period
- * @ref: kref pointer of the nc_node
+ * @ref: kref pointer of the batadv_tt_local_entry
  */
 static void batadv_tt_local_entry_release(struct kref *ref)
 {
@@ -234,9 +221,9 @@ static void batadv_tt_local_entry_release(struct kref *ref)
 	tt_local_entry = container_of(ref, struct batadv_tt_local_entry,
 				      common.refcount);
 
-	batadv_softif_vlan_put(tt_local_entry->vlan);
+	batadv_meshif_vlan_put(tt_local_entry->vlan);
 
-	call_rcu(&tt_local_entry->common.rcu, batadv_tt_local_entry_free_rcu);
+	kfree_rcu(tt_local_entry, common.rcu);
 }
 
 /**
@@ -255,23 +242,9 @@ batadv_tt_local_entry_put(struct batadv_tt_local_entry *tt_local_entry)
 }
 
 /**
- * batadv_tt_global_entry_free_rcu() - free the tt_global_entry
- * @rcu: rcu pointer of the tt_global_entry
- */
-static void batadv_tt_global_entry_free_rcu(struct rcu_head *rcu)
-{
-	struct batadv_tt_global_entry *tt_global_entry;
-
-	tt_global_entry = container_of(rcu, struct batadv_tt_global_entry,
-				       common.rcu);
-
-	kmem_cache_free(batadv_tg_cache, tt_global_entry);
-}
-
-/**
  * batadv_tt_global_entry_release() - release tt_global_entry from lists and
  *  queue for free after rcu grace period
- * @ref: kref pointer of the nc_node
+ * @ref: kref pointer of the batadv_tt_global_entry
  */
 void batadv_tt_global_entry_release(struct kref *ref)
 {
@@ -282,12 +255,12 @@ void batadv_tt_global_entry_release(struct kref *ref)
 
 	batadv_tt_global_del_orig_list(tt_global_entry);
 
-	call_rcu(&tt_global_entry->common.rcu, batadv_tt_global_entry_free_rcu);
+	kfree_rcu(tt_global_entry, common.rcu);
 }
 
 /**
  * batadv_tt_global_hash_count() - count the number of orig entries
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @addr: the mac address of the client to count entries for
  * @vid: VLAN identifier
  *
@@ -313,28 +286,28 @@ int batadv_tt_global_hash_count(struct batadv_priv *bat_priv,
 /**
  * batadv_tt_local_size_mod() - change the size by v of the local table
  *  identified by vid
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @vid: the VLAN identifier of the sub-table to change
  * @v: the amount to sum to the local table size
  */
 static void batadv_tt_local_size_mod(struct batadv_priv *bat_priv,
 				     unsigned short vid, int v)
 {
-	struct batadv_softif_vlan *vlan;
+	struct batadv_meshif_vlan *vlan;
 
-	vlan = batadv_softif_vlan_get(bat_priv, vid);
+	vlan = batadv_meshif_vlan_get(bat_priv, vid);
 	if (!vlan)
 		return;
 
 	atomic_add(v, &vlan->tt.num_entries);
 
-	batadv_softif_vlan_put(vlan);
+	batadv_meshif_vlan_put(vlan);
 }
 
 /**
  * batadv_tt_local_size_inc() - increase by one the local table size for the
  *  given vid
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @vid: the VLAN identifier
  */
 static void batadv_tt_local_size_inc(struct batadv_priv *bat_priv,
@@ -346,7 +319,7 @@ static void batadv_tt_local_size_inc(struct batadv_priv *bat_priv,
 /**
  * batadv_tt_local_size_dec() - decrease by one the local table size for the
  *  given vid
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @vid: the VLAN identifier
  */
 static void batadv_tt_local_size_dec(struct batadv_priv *bat_priv,
@@ -408,19 +381,6 @@ static void batadv_tt_global_size_dec(struct batadv_orig_node *orig_node,
 }
 
 /**
- * batadv_tt_orig_list_entry_free_rcu() - free the orig_entry
- * @rcu: rcu pointer of the orig_entry
- */
-static void batadv_tt_orig_list_entry_free_rcu(struct rcu_head *rcu)
-{
-	struct batadv_tt_orig_list_entry *orig_entry;
-
-	orig_entry = container_of(rcu, struct batadv_tt_orig_list_entry, rcu);
-
-	kmem_cache_free(batadv_tt_orig_cache, orig_entry);
-}
-
-/**
  * batadv_tt_orig_list_entry_release() - release tt orig entry from lists and
  *  queue for free after rcu grace period
  * @ref: kref pointer of the tt orig entry
@@ -433,7 +393,7 @@ static void batadv_tt_orig_list_entry_release(struct kref *ref)
 				  refcount);
 
 	batadv_orig_node_put(orig_entry->orig_node);
-	call_rcu(&orig_entry->rcu, batadv_tt_orig_list_entry_free_rcu);
+	kfree_rcu(orig_entry, rcu);
 }
 
 /**
@@ -452,7 +412,7 @@ batadv_tt_orig_list_entry_put(struct batadv_tt_orig_list_entry *orig_entry)
 
 /**
  * batadv_tt_local_event() - store a local TT event (ADD/DEL)
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @tt_local_entry: the TT entry involved in the event
  * @event_flags: flags to store in the event structure
  */
@@ -463,8 +423,8 @@ static void batadv_tt_local_event(struct batadv_priv *bat_priv,
 	struct batadv_tt_change_node *tt_change_node, *entry, *safe;
 	struct batadv_tt_common_entry *common = &tt_local_entry->common;
 	u8 flags = common->flags | event_flags;
-	bool event_removed = false;
 	bool del_op_requested, del_op_entry;
+	size_t changes;
 
 	tt_change_node = kmem_cache_alloc(batadv_tt_change_cache, GFP_ATOMIC);
 	if (!tt_change_node)
@@ -478,51 +438,45 @@ static void batadv_tt_local_event(struct batadv_priv *bat_priv,
 
 	del_op_requested = flags & BATADV_TT_CLIENT_DEL;
 
-	/* check for ADD+DEL or DEL+ADD events */
+	/* check for ADD+DEL, DEL+ADD, ADD+ADD or DEL+DEL events */
 	spin_lock_bh(&bat_priv->tt.changes_list_lock);
+	changes = READ_ONCE(bat_priv->tt.local_changes);
 	list_for_each_entry_safe(entry, safe, &bat_priv->tt.changes_list,
 				 list) {
 		if (!batadv_compare_eth(entry->change.addr, common->addr))
 			continue;
 
-		/* DEL+ADD in the same orig interval have no effect and can be
-		 * removed to avoid silly behaviour on the receiver side. The
-		 * other way around (ADD+DEL) can happen in case of roaming of
-		 * a client still in the NEW state. Roaming of NEW clients is
-		 * now possible due to automatically recognition of "temporary"
-		 * clients
-		 */
 		del_op_entry = entry->change.flags & BATADV_TT_CLIENT_DEL;
-		if (!del_op_requested && del_op_entry)
-			goto del;
-		if (del_op_requested && !del_op_entry)
-			goto del;
-
-		/* this is a second add in the same originator interval. It
-		 * means that flags have been changed: update them!
-		 */
-		if (!del_op_requested && !del_op_entry)
+		if (del_op_requested != del_op_entry) {
+			/* DEL+ADD in the same orig interval have no effect and
+			 * can be removed to avoid silly behaviour on the
+			 * receiver side. The  other way around (ADD+DEL) can
+			 * happen in case of roaming of  a client still in the
+			 * NEW state. Roaming of NEW clients is now possible due
+			 * to automatically recognition of "temporary" clients
+			 */
+			list_del(&entry->list);
+			kmem_cache_free(batadv_tt_change_cache, entry);
+			changes--;
+		} else {
+			/* this is a second add or del in the same originator
+			 * interval. It could mean that flags have been changed
+			 * (e.g. double add): update them
+			 */
 			entry->change.flags = flags;
+		}
 
-		continue;
-del:
-		list_del(&entry->list);
-		kmem_cache_free(batadv_tt_change_cache, entry);
 		kmem_cache_free(batadv_tt_change_cache, tt_change_node);
-		event_removed = true;
-		goto unlock;
+		goto update_changes;
 	}
 
 	/* track the change in the OGMinterval list */
 	list_add_tail(&tt_change_node->list, &bat_priv->tt.changes_list);
+	changes++;
 
-unlock:
+update_changes:
+	WRITE_ONCE(bat_priv->tt.local_changes, changes);
 	spin_unlock_bh(&bat_priv->tt.changes_list_lock);
-
-	if (event_removed)
-		atomic_dec(&bat_priv->tt.local_changes);
-	else
-		atomic_inc(&bat_priv->tt.local_changes);
 }
 
 /**
@@ -550,7 +504,7 @@ static u16 batadv_tt_entries(u16 tt_len)
 /**
  * batadv_tt_local_table_transmit_size() - calculates the local translation
  *  table size when transmitted over the air
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  *
  * Return: local translation table size in bytes.
  */
@@ -558,11 +512,11 @@ static int batadv_tt_local_table_transmit_size(struct batadv_priv *bat_priv)
 {
 	u16 num_vlan = 0;
 	u16 tt_local_entries = 0;
-	struct batadv_softif_vlan *vlan;
+	struct batadv_meshif_vlan *vlan;
 	int hdr_size;
 
 	rcu_read_lock();
-	hlist_for_each_entry_rcu(vlan, &bat_priv->softif_vlan_list, list) {
+	hlist_for_each_entry_rcu(vlan, &bat_priv->meshif_vlan_list, list) {
 		num_vlan++;
 		tt_local_entries += atomic_read(&vlan->tt.num_entries);
 	}
@@ -622,7 +576,7 @@ static void batadv_tt_global_free(struct batadv_priv *bat_priv,
 /**
  * batadv_tt_local_add() - add a new client to the local table or update an
  *  existing client
- * @soft_iface: netdev struct of the mesh interface
+ * @mesh_iface: netdev struct of the mesh interface
  * @addr: the mac address of the client to add
  * @vid: VLAN identifier
  * @ifindex: index of the interface where the client is connected to (useful to
@@ -632,14 +586,14 @@ static void batadv_tt_global_free(struct batadv_priv *bat_priv,
  *
  * Return: true if the client was successfully added, false otherwise.
  */
-bool batadv_tt_local_add(struct net_device *soft_iface, const u8 *addr,
+bool batadv_tt_local_add(struct net_device *mesh_iface, const u8 *addr,
 			 unsigned short vid, int ifindex, u32 mark)
 {
-	struct batadv_priv *bat_priv = netdev_priv(soft_iface);
+	struct batadv_priv *bat_priv = netdev_priv(mesh_iface);
 	struct batadv_tt_local_entry *tt_local;
 	struct batadv_tt_global_entry *tt_global = NULL;
-	struct net *net = dev_net(soft_iface);
-	struct batadv_softif_vlan *vlan;
+	struct net *net = dev_net(mesh_iface);
+	struct batadv_meshif_vlan *vlan;
 	struct net_device *in_dev = NULL;
 	struct batadv_hard_iface *in_hardif = NULL;
 	struct hlist_head *head;
@@ -696,7 +650,7 @@ bool batadv_tt_local_add(struct net_device *soft_iface, const u8 *addr,
 	table_size += batadv_tt_len(1);
 	packet_size_max = atomic_read(&bat_priv->packet_size_max);
 	if (table_size > packet_size_max) {
-		net_ratelimited_function(batadv_info, soft_iface,
+		net_ratelimited_function(batadv_info, mesh_iface,
 					 "Local translation table size (%i) exceeds maximum packet size (%i); Ignoring new local tt entry: %pM\n",
 					 table_size, packet_size_max, addr);
 		goto out;
@@ -707,9 +661,9 @@ bool batadv_tt_local_add(struct net_device *soft_iface, const u8 *addr,
 		goto out;
 
 	/* increase the refcounter of the related vlan */
-	vlan = batadv_softif_vlan_get(bat_priv, vid);
+	vlan = batadv_meshif_vlan_get(bat_priv, vid);
 	if (!vlan) {
-		net_ratelimited_function(batadv_info, soft_iface,
+		net_ratelimited_function(batadv_info, mesh_iface,
 					 "adding TT local entry %pM to non-existent VLAN %d\n",
 					 addr, batadv_print_vid(vid));
 		kmem_cache_free(batadv_tl_cache, tt_local);
@@ -739,7 +693,7 @@ bool batadv_tt_local_add(struct net_device *soft_iface, const u8 *addr,
 	/* the batman interface mac and multicast addresses should never be
 	 * purged
 	 */
-	if (batadv_compare_eth(addr, soft_iface->dev_addr) ||
+	if (batadv_compare_eth(addr, mesh_iface->dev_addr) ||
 	    is_multicast_ether_addr(addr))
 		tt_local->common.flags |= BATADV_TT_CLIENT_NOPURGE;
 
@@ -856,8 +810,7 @@ batadv_tt_prepare_tvlv_global_data(struct batadv_orig_node *orig_node,
 		num_entries += atomic_read(&vlan->tt.num_entries);
 	}
 
-	change_offset = sizeof(**tt_data);
-	change_offset += num_vlan * sizeof(*tt_vlan);
+	change_offset = struct_size(*tt_data, vlan_data, num_vlan);
 
 	/* if tt_len is negative, allocate the space needed by the full table */
 	if (*tt_len < 0)
@@ -876,7 +829,7 @@ batadv_tt_prepare_tvlv_global_data(struct batadv_orig_node *orig_node,
 	(*tt_data)->ttvn = atomic_read(&orig_node->last_ttvn);
 	(*tt_data)->num_vlan = htons(num_vlan);
 
-	tt_vlan = (struct batadv_tvlv_tt_vlan_data *)(*tt_data + 1);
+	tt_vlan = (*tt_data)->vlan_data;
 	hlist_for_each_entry(vlan, &orig_node->vlan_list, list) {
 		tt_vlan->vid = htons(vlan->vid);
 		tt_vlan->crc = htonl(vlan->tt.crc);
@@ -896,7 +849,7 @@ out:
 /**
  * batadv_tt_prepare_tvlv_local_data() - allocate and prepare the TT TVLV for
  *  this node
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @tt_data: uninitialised pointer to the address of the TVLV buffer
  * @tt_change: uninitialised pointer to the address of the area where the TT
  *  changes can be stored
@@ -918,7 +871,7 @@ batadv_tt_prepare_tvlv_local_data(struct batadv_priv *bat_priv,
 				  s32 *tt_len)
 {
 	struct batadv_tvlv_tt_vlan_data *tt_vlan;
-	struct batadv_softif_vlan *vlan;
+	struct batadv_meshif_vlan *vlan;
 	u16 num_vlan = 0;
 	u16 vlan_entries = 0;
 	u16 total_entries = 0;
@@ -926,8 +879,8 @@ batadv_tt_prepare_tvlv_local_data(struct batadv_priv *bat_priv,
 	u8 *tt_change_ptr;
 	int change_offset;
 
-	spin_lock_bh(&bat_priv->softif_vlan_list_lock);
-	hlist_for_each_entry(vlan, &bat_priv->softif_vlan_list, list) {
+	spin_lock_bh(&bat_priv->meshif_vlan_list_lock);
+	hlist_for_each_entry(vlan, &bat_priv->meshif_vlan_list, list) {
 		vlan_entries = atomic_read(&vlan->tt.num_entries);
 		if (vlan_entries < 1)
 			continue;
@@ -936,8 +889,7 @@ batadv_tt_prepare_tvlv_local_data(struct batadv_priv *bat_priv,
 		total_entries += vlan_entries;
 	}
 
-	change_offset = sizeof(**tt_data);
-	change_offset += num_vlan * sizeof(*tt_vlan);
+	change_offset = struct_size(*tt_data, vlan_data, num_vlan);
 
 	/* if tt_len is negative, allocate the space needed by the full table */
 	if (*tt_len < 0)
@@ -956,8 +908,8 @@ batadv_tt_prepare_tvlv_local_data(struct batadv_priv *bat_priv,
 	(*tt_data)->ttvn = atomic_read(&bat_priv->tt.vn);
 	(*tt_data)->num_vlan = htons(num_vlan);
 
-	tt_vlan = (struct batadv_tvlv_tt_vlan_data *)(*tt_data + 1);
-	hlist_for_each_entry(vlan, &bat_priv->softif_vlan_list, list) {
+	tt_vlan = (*tt_data)->vlan_data;
+	hlist_for_each_entry(vlan, &bat_priv->meshif_vlan_list, list) {
 		vlan_entries = atomic_read(&vlan->tt.num_entries);
 		if (vlan_entries < 1)
 			continue;
@@ -973,14 +925,14 @@ batadv_tt_prepare_tvlv_local_data(struct batadv_priv *bat_priv,
 	*tt_change = (struct batadv_tvlv_tt_change *)tt_change_ptr;
 
 out:
-	spin_unlock_bh(&bat_priv->softif_vlan_list_lock);
+	spin_unlock_bh(&bat_priv->meshif_vlan_list_lock);
 	return tvlv_len;
 }
 
 /**
  * batadv_tt_tvlv_container_update() - update the translation table tvlv
  *  container after local tt changes have been committed
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  */
 static void batadv_tt_tvlv_container_update(struct batadv_priv *bat_priv)
 {
@@ -990,16 +942,25 @@ static void batadv_tt_tvlv_container_update(struct batadv_priv *bat_priv)
 	int tt_diff_len, tt_change_len = 0;
 	int tt_diff_entries_num = 0;
 	int tt_diff_entries_count = 0;
+	bool drop_changes = false;
+	size_t tt_extra_len = 0;
 	u16 tvlv_len;
 
-	tt_diff_entries_num = atomic_read(&bat_priv->tt.local_changes);
+	tt_diff_entries_num = READ_ONCE(bat_priv->tt.local_changes);
 	tt_diff_len = batadv_tt_len(tt_diff_entries_num);
 
 	/* if we have too many changes for one packet don't send any
-	 * and wait for the tt table request which will be fragmented
+	 * and wait for the tt table request so we can reply with the full
+	 * (fragmented) table.
+	 *
+	 * The local change history should still be cleaned up so the next
+	 * TT round can start again with a clean state.
 	 */
-	if (tt_diff_len > bat_priv->soft_iface->mtu)
+	if (tt_diff_len > bat_priv->mesh_iface->mtu) {
 		tt_diff_len = 0;
+		tt_diff_entries_num = 0;
+		drop_changes = true;
+	}
 
 	tvlv_len = batadv_tt_prepare_tvlv_local_data(bat_priv, &tt_data,
 						     &tt_change, &tt_diff_len);
@@ -1008,11 +969,11 @@ static void batadv_tt_tvlv_container_update(struct batadv_priv *bat_priv)
 
 	tt_data->flags = BATADV_TT_OGM_DIFF;
 
-	if (tt_diff_len == 0)
+	if (!drop_changes && tt_diff_len == 0)
 		goto container_register;
 
 	spin_lock_bh(&bat_priv->tt.changes_list_lock);
-	atomic_set(&bat_priv->tt.local_changes, 0);
+	WRITE_ONCE(bat_priv->tt.local_changes, 0);
 
 	list_for_each_entry_safe(entry, safe, &bat_priv->tt.changes_list,
 				 list) {
@@ -1027,6 +988,9 @@ static void batadv_tt_tvlv_container_update(struct batadv_priv *bat_priv)
 	}
 	spin_unlock_bh(&bat_priv->tt.changes_list_lock);
 
+	tt_extra_len = batadv_tt_len(tt_diff_entries_num -
+				     tt_diff_entries_count);
+
 	/* Keep the buffer for possible tt_request */
 	spin_lock_bh(&bat_priv->tt.last_changeset_lock);
 	kfree(bat_priv->tt.last_changeset);
@@ -1035,6 +999,7 @@ static void batadv_tt_tvlv_container_update(struct batadv_priv *bat_priv)
 	tt_change_len = batadv_tt_len(tt_diff_entries_count);
 	/* check whether this new OGM has no changes due to size problems */
 	if (tt_diff_entries_count > 0) {
+		tt_diff_len -= tt_extra_len;
 		/* if kmalloc() fails we will reply with the full table
 		 * instead of providing the diff
 		 */
@@ -1047,6 +1012,8 @@ static void batadv_tt_tvlv_container_update(struct batadv_priv *bat_priv)
 	}
 	spin_unlock_bh(&bat_priv->tt.last_changeset_lock);
 
+	/* Remove extra packet space for OGM */
+	tvlv_len -= tt_extra_len;
 container_register:
 	batadv_tvlv_container_register(bat_priv, BATADV_TVLV_TT, 1, tt_data,
 				       tvlv_len);
@@ -1058,7 +1025,7 @@ container_register:
  * @msg :Netlink message to dump into
  * @portid: Port making netlink request
  * @cb: Control block containing additional options
- * @bat_priv: The bat priv with all the soft interface information
+ * @bat_priv: The bat priv with all the mesh interface information
  * @common: tt local & tt global common data
  *
  * Return: Error code, or 0 on success
@@ -1070,7 +1037,7 @@ batadv_tt_local_dump_entry(struct sk_buff *msg, u32 portid,
 			   struct batadv_tt_common_entry *common)
 {
 	void *hdr;
-	struct batadv_softif_vlan *vlan;
+	struct batadv_meshif_vlan *vlan;
 	struct batadv_tt_local_entry *local;
 	unsigned int last_seen_msecs;
 	u32 crc;
@@ -1078,13 +1045,13 @@ batadv_tt_local_dump_entry(struct sk_buff *msg, u32 portid,
 	local = container_of(common, struct batadv_tt_local_entry, common);
 	last_seen_msecs = jiffies_to_msecs(jiffies - local->last_seen);
 
-	vlan = batadv_softif_vlan_get(bat_priv, common->vid);
+	vlan = batadv_meshif_vlan_get(bat_priv, common->vid);
 	if (!vlan)
 		return 0;
 
 	crc = vlan->tt.crc;
 
-	batadv_softif_vlan_put(vlan);
+	batadv_meshif_vlan_put(vlan);
 
 	hdr = genlmsg_put(msg, portid, cb->nlh->nlmsg_seq,
 			  &batadv_netlink_family,  NLM_F_MULTI,
@@ -1117,7 +1084,7 @@ batadv_tt_local_dump_entry(struct sk_buff *msg, u32 portid,
  * @msg: Netlink message to dump into
  * @portid: Port making netlink request
  * @cb: Control block containing additional options
- * @bat_priv: The bat priv with all the soft interface information
+ * @bat_priv: The bat priv with all the mesh interface information
  * @hash: hash to dump
  * @bucket: bucket index to dump
  * @idx_s: Number of entries to skip
@@ -1163,28 +1130,20 @@ batadv_tt_local_dump_bucket(struct sk_buff *msg, u32 portid,
  */
 int batadv_tt_local_dump(struct sk_buff *msg, struct netlink_callback *cb)
 {
-	struct net *net = sock_net(cb->skb->sk);
-	struct net_device *soft_iface;
+	struct net_device *mesh_iface;
 	struct batadv_priv *bat_priv;
 	struct batadv_hard_iface *primary_if = NULL;
 	struct batadv_hashtable *hash;
 	int ret;
-	int ifindex;
 	int bucket = cb->args[0];
 	int idx = cb->args[1];
 	int portid = NETLINK_CB(cb->skb).portid;
 
-	ifindex = batadv_netlink_get_ifindex(cb->nlh, BATADV_ATTR_MESH_IFINDEX);
-	if (!ifindex)
-		return -EINVAL;
+	mesh_iface = batadv_netlink_get_meshif(cb);
+	if (IS_ERR(mesh_iface))
+		return PTR_ERR(mesh_iface);
 
-	soft_iface = dev_get_by_index(net, ifindex);
-	if (!soft_iface || !batadv_softif_is_valid(soft_iface)) {
-		ret = -ENODEV;
-		goto out;
-	}
-
-	bat_priv = netdev_priv(soft_iface);
+	bat_priv = netdev_priv(mesh_iface);
 
 	primary_if = batadv_primary_if_get_selected(bat_priv);
 	if (!primary_if || primary_if->if_status != BATADV_IF_ACTIVE) {
@@ -1206,7 +1165,7 @@ int batadv_tt_local_dump(struct sk_buff *msg, struct netlink_callback *cb)
 
  out:
 	batadv_hardif_put(primary_if);
-	dev_put(soft_iface);
+	dev_put(mesh_iface);
 
 	cb->args[0] = bucket;
 	cb->args[1] = idx;
@@ -1235,7 +1194,7 @@ batadv_tt_local_set_pending(struct batadv_priv *bat_priv,
 
 /**
  * batadv_tt_local_remove() - logically remove an entry from the local table
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @addr: the MAC address of the client to remove
  * @vid: VLAN identifier
  * @message: message to append to the log on deletion
@@ -1300,7 +1259,7 @@ out:
 
 /**
  * batadv_tt_local_purge_list() - purge inactive tt local entries
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @head: pointer to the list containing the local tt entries
  * @timeout: parameter deciding whether a given tt local entry is considered
  *  inactive or not
@@ -1335,7 +1294,7 @@ static void batadv_tt_local_purge_list(struct batadv_priv *bat_priv,
 
 /**
  * batadv_tt_local_purge() - purge inactive tt local entries
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @timeout: parameter deciding whether a given tt local entry is considered
  *  inactive or not
  */
@@ -1422,7 +1381,7 @@ static void batadv_tt_changes_list_free(struct batadv_priv *bat_priv)
 		kmem_cache_free(batadv_tt_change_cache, entry);
 	}
 
-	atomic_set(&bat_priv->tt.local_changes, 0);
+	WRITE_ONCE(bat_priv->tt.local_changes, 0);
 	spin_unlock_bh(&bat_priv->tt.changes_list_lock);
 }
 
@@ -1570,7 +1529,7 @@ out:
 
 /**
  * batadv_tt_global_add() - add a new TT global entry or update an existing one
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @orig_node: the originator announcing the client
  * @tt_addr: the mac address of the non-mesh client
  * @vid: VLAN identifier
@@ -1743,7 +1702,7 @@ out:
 
 /**
  * batadv_transtable_best_orig() - Get best originator list entry from tt entry
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @tt_global_entry: global translation table entry to be analyzed
  *
  * This function assumes the caller holds rcu_read_lock().
@@ -1850,7 +1809,7 @@ batadv_tt_global_dump_subentry(struct sk_buff *msg, u32 portid, u32 seq,
  * @msg: Netlink message to dump into
  * @portid: Port making netlink request
  * @seq: Sequence number of netlink message
- * @bat_priv: The bat priv with all the soft interface information
+ * @bat_priv: The bat priv with all the mesh interface information
  * @common: tt local & tt global common data
  * @sub_s: Number of entries to skip
  *
@@ -1895,7 +1854,7 @@ batadv_tt_global_dump_entry(struct sk_buff *msg, u32 portid, u32 seq,
  * @msg: Netlink message to dump into
  * @portid: Port making netlink request
  * @seq: Sequence number of netlink message
- * @bat_priv: The bat priv with all the soft interface information
+ * @bat_priv: The bat priv with all the mesh interface information
  * @head: Pointer to the list containing the global tt entries
  * @idx_s: Number of entries to skip
  * @sub: Number of entries to skip
@@ -1938,30 +1897,22 @@ batadv_tt_global_dump_bucket(struct sk_buff *msg, u32 portid, u32 seq,
  */
 int batadv_tt_global_dump(struct sk_buff *msg, struct netlink_callback *cb)
 {
-	struct net *net = sock_net(cb->skb->sk);
-	struct net_device *soft_iface;
+	struct net_device *mesh_iface;
 	struct batadv_priv *bat_priv;
 	struct batadv_hard_iface *primary_if = NULL;
 	struct batadv_hashtable *hash;
 	struct hlist_head *head;
 	int ret;
-	int ifindex;
 	int bucket = cb->args[0];
 	int idx = cb->args[1];
 	int sub = cb->args[2];
 	int portid = NETLINK_CB(cb->skb).portid;
 
-	ifindex = batadv_netlink_get_ifindex(cb->nlh, BATADV_ATTR_MESH_IFINDEX);
-	if (!ifindex)
-		return -EINVAL;
+	mesh_iface = batadv_netlink_get_meshif(cb);
+	if (IS_ERR(mesh_iface))
+		return PTR_ERR(mesh_iface);
 
-	soft_iface = dev_get_by_index(net, ifindex);
-	if (!soft_iface || !batadv_softif_is_valid(soft_iface)) {
-		ret = -ENODEV;
-		goto out;
-	}
-
-	bat_priv = netdev_priv(soft_iface);
+	bat_priv = netdev_priv(mesh_iface);
 
 	primary_if = batadv_primary_if_get_selected(bat_priv);
 	if (!primary_if || primary_if->if_status != BATADV_IF_ACTIVE) {
@@ -1986,7 +1937,7 @@ int batadv_tt_global_dump(struct sk_buff *msg, struct netlink_callback *cb)
 
  out:
 	batadv_hardif_put(primary_if);
-	dev_put(soft_iface);
+	dev_put(mesh_iface);
 
 	cb->args[0] = bucket;
 	cb->args[1] = idx;
@@ -2039,7 +1990,7 @@ batadv_tt_global_del_orig_list(struct batadv_tt_global_entry *tt_global_entry)
 
 /**
  * batadv_tt_global_del_orig_node() - remove orig_node from a global tt entry
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @tt_global_entry: the global entry to remove the orig_node from
  * @orig_node: the originator announcing the client
  * @message: message to append to the log on deletion
@@ -2118,7 +2069,7 @@ batadv_tt_global_del_roaming(struct batadv_priv *bat_priv,
 
 /**
  * batadv_tt_global_del() - remove a client from the global table
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @orig_node: an originator serving this client
  * @addr: the mac address of the client
  * @vid: VLAN identifier
@@ -2183,7 +2134,7 @@ out:
 /**
  * batadv_tt_global_del_orig() - remove all the TT global entries belonging to
  *  the given originator matching the provided vid
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @orig_node: the originator owning the entries to remove
  * @match_vid: the VLAN identifier to match. If negative all the entries will be
  *  removed
@@ -2354,7 +2305,7 @@ _batadv_is_ap_isolated(struct batadv_tt_local_entry *tt_local_entry,
 
 /**
  * batadv_transtable_search() - get the mesh destination for a given client
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @src: mac address of the source client
  * @addr: mac address of the destination client
  * @vid: VLAN identifier
@@ -2413,7 +2364,7 @@ out:
 /**
  * batadv_tt_global_crc() - calculates the checksum of the local table belonging
  *  to the given orig_node
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @orig_node: originator for which the CRC should be computed
  * @vid: VLAN identifier for which the CRC32 has to be computed
  *
@@ -2507,7 +2458,7 @@ static u32 batadv_tt_global_crc(struct batadv_priv *bat_priv,
 
 /**
  * batadv_tt_local_crc() - calculates the checksum of the local table
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @vid: VLAN identifier for which the CRC32 has to be computed
  *
  * For details about the computation, please refer to the documentation for
@@ -2642,7 +2593,7 @@ static void batadv_tt_req_purge(struct batadv_priv *bat_priv)
 
 /**
  * batadv_tt_req_node_new() - search and possibly create a tt_req_node object
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @orig_node: orig node this request is being issued for
  *
  * Return: the pointer to the new tt_req_node struct if no request
@@ -2738,7 +2689,7 @@ static bool batadv_tt_global_valid(const void *entry_ptr,
 /**
  * batadv_tt_tvlv_generate() - fill the tvlv buff with the tt entries from the
  *  specified tt hash
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @hash: hash table containing the tt entries
  * @tt_len: expected tvlv tt data buffer length in number of bytes
  * @tvlv_buff: pointer to the buffer to fill with the TT data
@@ -2747,14 +2698,16 @@ static bool batadv_tt_global_valid(const void *entry_ptr,
  *
  * Fills the tvlv buff with the tt entries from the specified hash. If valid_cb
  * is not provided then this becomes a no-op.
+ *
+ * Return: Remaining unused length in tvlv_buff.
  */
-static void batadv_tt_tvlv_generate(struct batadv_priv *bat_priv,
-				    struct batadv_hashtable *hash,
-				    void *tvlv_buff, u16 tt_len,
-				    bool (*valid_cb)(const void *,
-						     const void *,
-						     u8 *flags),
-				    void *cb_data)
+static u16 batadv_tt_tvlv_generate(struct batadv_priv *bat_priv,
+				   struct batadv_hashtable *hash,
+				   void *tvlv_buff, u16 tt_len,
+				   bool (*valid_cb)(const void *,
+						    const void *,
+						    u8 *flags),
+				   void *cb_data)
 {
 	struct batadv_tt_common_entry *tt_common_entry;
 	struct batadv_tvlv_tt_change *tt_change;
@@ -2768,7 +2721,7 @@ static void batadv_tt_tvlv_generate(struct batadv_priv *bat_priv,
 	tt_change = tvlv_buff;
 
 	if (!valid_cb)
-		return;
+		return tt_len;
 
 	rcu_read_lock();
 	for (i = 0; i < hash->size; i++) {
@@ -2794,6 +2747,8 @@ static void batadv_tt_tvlv_generate(struct batadv_priv *bat_priv,
 		}
 	}
 	rcu_read_unlock();
+
+	return batadv_tt_len(tt_tot - tt_num_entries);
 }
 
 /**
@@ -2855,15 +2810,15 @@ static bool batadv_tt_global_check_crc(struct batadv_orig_node *orig_node,
 
 /**
  * batadv_tt_local_update_crc() - update all the local CRCs
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  */
 static void batadv_tt_local_update_crc(struct batadv_priv *bat_priv)
 {
-	struct batadv_softif_vlan *vlan;
+	struct batadv_meshif_vlan *vlan;
 
 	/* recompute the global CRC for each VLAN */
 	rcu_read_lock();
-	hlist_for_each_entry_rcu(vlan, &bat_priv->softif_vlan_list, list) {
+	hlist_for_each_entry_rcu(vlan, &bat_priv->meshif_vlan_list, list) {
 		vlan->tt.crc = batadv_tt_local_crc(bat_priv, vlan->vid);
 	}
 	rcu_read_unlock();
@@ -2871,7 +2826,7 @@ static void batadv_tt_local_update_crc(struct batadv_priv *bat_priv)
 
 /**
  * batadv_tt_global_update_crc() - update all the global CRCs for this orig_node
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @orig_node: the orig_node for which the CRCs have to be updated
  */
 static void batadv_tt_global_update_crc(struct batadv_priv *bat_priv,
@@ -2898,7 +2853,7 @@ static void batadv_tt_global_update_crc(struct batadv_priv *bat_priv,
 
 /**
  * batadv_send_tt_request() - send a TT Request message to a given node
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @dst_orig_node: the destination of the message
  * @ttvn: the version number that the source of the message is looking for
  * @tt_vlan: pointer to the first tvlv VLAN object to request
@@ -2916,7 +2871,6 @@ static bool batadv_send_tt_request(struct batadv_priv *bat_priv,
 {
 	struct batadv_tvlv_tt_data *tvlv_tt_data = NULL;
 	struct batadv_tt_req_node *tt_req_node = NULL;
-	struct batadv_tvlv_tt_vlan_data *tt_vlan_req;
 	struct batadv_hard_iface *primary_if;
 	bool ret = false;
 	int i, size;
@@ -2932,7 +2886,7 @@ static bool batadv_send_tt_request(struct batadv_priv *bat_priv,
 	if (!tt_req_node)
 		goto out;
 
-	size = sizeof(*tvlv_tt_data) + sizeof(*tt_vlan_req) * num_vlan;
+	size = struct_size(tvlv_tt_data, vlan_data, num_vlan);
 	tvlv_tt_data = kzalloc(size, GFP_ATOMIC);
 	if (!tvlv_tt_data)
 		goto out;
@@ -2944,12 +2898,10 @@ static bool batadv_send_tt_request(struct batadv_priv *bat_priv,
 	/* send all the CRCs within the request. This is needed by intermediate
 	 * nodes to ensure they have the correct table before replying
 	 */
-	tt_vlan_req = (struct batadv_tvlv_tt_vlan_data *)(tvlv_tt_data + 1);
 	for (i = 0; i < num_vlan; i++) {
-		tt_vlan_req->vid = tt_vlan->vid;
-		tt_vlan_req->crc = tt_vlan->crc;
+		tvlv_tt_data->vlan_data[i].vid = tt_vlan->vid;
+		tvlv_tt_data->vlan_data[i].crc = tt_vlan->crc;
 
-		tt_vlan_req++;
 		tt_vlan++;
 	}
 
@@ -2986,7 +2938,7 @@ out:
 /**
  * batadv_send_other_tt_response() - send reply to tt request concerning another
  *  node's translation table
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @tt_data: tt data containing the tt request information
  * @req_src: mac address of tt request sender
  * @req_dst: mac address of tt request recipient
@@ -3001,7 +2953,6 @@ static bool batadv_send_other_tt_response(struct batadv_priv *bat_priv,
 	struct batadv_orig_node *res_dst_orig_node = NULL;
 	struct batadv_tvlv_tt_change *tt_change;
 	struct batadv_tvlv_tt_data *tvlv_tt_data = NULL;
-	struct batadv_tvlv_tt_vlan_data *tt_vlan;
 	bool ret = false, full_table;
 	u8 orig_ttvn, req_ttvn;
 	u16 tvlv_len;
@@ -3024,10 +2975,9 @@ static bool batadv_send_other_tt_response(struct batadv_priv *bat_priv,
 	orig_ttvn = (u8)atomic_read(&req_dst_orig_node->last_ttvn);
 	req_ttvn = tt_data->ttvn;
 
-	tt_vlan = (struct batadv_tvlv_tt_vlan_data *)(tt_data + 1);
 	/* this node doesn't have the requested data */
 	if (orig_ttvn != req_ttvn ||
-	    !batadv_tt_global_check_crc(req_dst_orig_node, tt_vlan,
+	    !batadv_tt_global_check_crc(req_dst_orig_node, tt_data->vlan_data,
 					ntohs(tt_data->num_vlan)))
 		goto out;
 
@@ -3069,16 +3019,17 @@ static bool batadv_send_other_tt_response(struct batadv_priv *bat_priv,
 			goto out;
 
 		/* fill the rest of the tvlv with the real TT entries */
-		batadv_tt_tvlv_generate(bat_priv, bat_priv->tt.global_hash,
-					tt_change, tt_len,
-					batadv_tt_global_valid,
-					req_dst_orig_node);
+		tvlv_len -= batadv_tt_tvlv_generate(bat_priv,
+						    bat_priv->tt.global_hash,
+						    tt_change, tt_len,
+						    batadv_tt_global_valid,
+						    req_dst_orig_node);
 	}
 
 	/* Don't send the response, if larger than fragmented packet. */
 	tt_len = sizeof(struct batadv_unicast_tvlv_packet) + tvlv_len;
 	if (tt_len > atomic_read(&bat_priv->packet_size_max)) {
-		net_ratelimited_function(batadv_info, bat_priv->soft_iface,
+		net_ratelimited_function(batadv_info, bat_priv->mesh_iface,
 					 "Ignoring TT_REQUEST from %pM; Response size exceeds max packet size.\n",
 					 res_dst_orig_node->orig);
 		goto out;
@@ -3117,7 +3068,7 @@ out:
 /**
  * batadv_send_my_tt_response() - send reply to tt request concerning this
  *  node's translation table
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @tt_data: tt data containing the tt request information
  * @req_src: mac address of tt request sender
  *
@@ -3196,9 +3147,11 @@ static bool batadv_send_my_tt_response(struct batadv_priv *bat_priv,
 			goto out;
 
 		/* fill the rest of the tvlv with the real TT entries */
-		batadv_tt_tvlv_generate(bat_priv, bat_priv->tt.local_hash,
-					tt_change, tt_len,
-					batadv_tt_local_valid, NULL);
+		tvlv_len -= batadv_tt_tvlv_generate(bat_priv,
+						    bat_priv->tt.local_hash,
+						    tt_change, tt_len,
+						    batadv_tt_local_valid,
+						    NULL);
 	}
 
 	tvlv_tt_data->flags = BATADV_TT_RESPONSE;
@@ -3232,7 +3185,7 @@ out:
 
 /**
  * batadv_send_tt_response() - send reply to tt request
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @tt_data: tt data containing the tt request information
  * @req_src: mac address of tt request sender
  * @req_dst: mac address of tt request recipient
@@ -3327,7 +3280,7 @@ static void batadv_tt_update_changes(struct batadv_priv *bat_priv,
 
 /**
  * batadv_is_my_client() - check if a client is served by the local node
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @addr: the mac address of the client to check
  * @vid: VLAN identifier
  *
@@ -3356,7 +3309,7 @@ out:
 
 /**
  * batadv_handle_tt_response() - process incoming tt reply
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @tt_data: tt data containing the tt request information
  * @resp_src: mac address of tt reply sender
  * @num_entries: number of tt change entries appended to the tt data
@@ -3370,7 +3323,6 @@ static void batadv_handle_tt_response(struct batadv_priv *bat_priv,
 	struct batadv_orig_node *orig_node = NULL;
 	struct batadv_tvlv_tt_change *tt_change;
 	u8 *tvlv_ptr = (u8 *)tt_data;
-	u16 change_offset;
 
 	batadv_dbg(BATADV_DBG_TT, bat_priv,
 		   "Received TT_RESPONSE from %pM for ttvn %d t_size: %d [%c]\n",
@@ -3383,10 +3335,7 @@ static void batadv_handle_tt_response(struct batadv_priv *bat_priv,
 
 	spin_lock_bh(&orig_node->tt_lock);
 
-	change_offset = sizeof(struct batadv_tvlv_tt_vlan_data);
-	change_offset *= ntohs(tt_data->num_vlan);
-	change_offset += sizeof(*tt_data);
-	tvlv_ptr += change_offset;
+	tvlv_ptr += struct_size(tt_data, vlan_data, ntohs(tt_data->num_vlan));
 
 	tt_change = (struct batadv_tvlv_tt_change *)tvlv_ptr;
 	if (tt_data->flags & BATADV_TT_FULL_TABLE) {
@@ -3448,7 +3397,7 @@ static void batadv_tt_roam_purge(struct batadv_priv *bat_priv)
 
 /**
  * batadv_tt_check_roam_count() - check if a client has roamed too frequently
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @client: mac address of the roaming client
  *
  * This function checks whether the client already reached the
@@ -3503,7 +3452,7 @@ unlock:
 
 /**
  * batadv_send_roam_adv() - send a roaming advertisement message
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @client: mac address of the roaming client
  * @vid: VLAN identifier
  * @orig_node: message destination
@@ -3567,8 +3516,8 @@ static void batadv_tt_purge(struct work_struct *work)
 }
 
 /**
- * batadv_tt_free() - Free translation table of soft interface
- * @bat_priv: the bat priv with all the soft interface information
+ * batadv_tt_free() - Free translation table of mesh interface
+ * @bat_priv: the bat priv with all the mesh interface information
  */
 void batadv_tt_free(struct batadv_priv *bat_priv)
 {
@@ -3591,7 +3540,7 @@ void batadv_tt_free(struct batadv_priv *bat_priv)
 /**
  * batadv_tt_local_set_flags() - set or unset the specified flags on the local
  *  table and possibly count them in the TT size
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @flags: the flag to switch
  * @enable: whether to set or unset the flag
  * @count: whether to increase the TT size by the number of changed entries
@@ -3677,7 +3626,7 @@ static void batadv_tt_local_purge_pending_clients(struct batadv_priv *bat_priv)
 /**
  * batadv_tt_local_commit_changes_nolock() - commit all pending local tt changes
  *  which have been queued in the time since the last commit
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  *
  * Caller must hold tt->commit_lock.
  */
@@ -3685,7 +3634,7 @@ static void batadv_tt_local_commit_changes_nolock(struct batadv_priv *bat_priv)
 {
 	lockdep_assert_held(&bat_priv->tt.commit_lock);
 
-	if (atomic_read(&bat_priv->tt.local_changes) < 1) {
+	if (READ_ONCE(bat_priv->tt.local_changes) == 0) {
 		if (!batadv_atomic_dec_not_zero(&bat_priv->tt.ogm_append_cnt))
 			batadv_tt_tvlv_container_update(bat_priv);
 		return;
@@ -3710,7 +3659,7 @@ static void batadv_tt_local_commit_changes_nolock(struct batadv_priv *bat_priv)
 /**
  * batadv_tt_local_commit_changes() - commit all pending local tt changes which
  *  have been queued in the time since the last commit
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  */
 void batadv_tt_local_commit_changes(struct batadv_priv *bat_priv)
 {
@@ -3721,7 +3670,7 @@ void batadv_tt_local_commit_changes(struct batadv_priv *bat_priv)
 
 /**
  * batadv_is_ap_isolated() - Check if packet from upper layer should be dropped
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @src: source mac address of packet
  * @dst: destination mac address of packet
  * @vid: vlan id of packet
@@ -3733,10 +3682,10 @@ bool batadv_is_ap_isolated(struct batadv_priv *bat_priv, u8 *src, u8 *dst,
 {
 	struct batadv_tt_local_entry *tt_local_entry;
 	struct batadv_tt_global_entry *tt_global_entry;
-	struct batadv_softif_vlan *vlan;
+	struct batadv_meshif_vlan *vlan;
 	bool ret = false;
 
-	vlan = batadv_softif_vlan_get(bat_priv, vid);
+	vlan = batadv_meshif_vlan_get(bat_priv, vid);
 	if (!vlan)
 		return false;
 
@@ -3758,14 +3707,14 @@ bool batadv_is_ap_isolated(struct batadv_priv *bat_priv, u8 *src, u8 *dst,
 local_entry_put:
 	batadv_tt_local_entry_put(tt_local_entry);
 vlan_put:
-	batadv_softif_vlan_put(vlan);
+	batadv_meshif_vlan_put(vlan);
 	return ret;
 }
 
 /**
  * batadv_tt_update_orig() - update global translation table with new tt
  *  information received via ogms
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @orig_node: the orig_node of the ogm
  * @tt_buff: pointer to the first tvlv VLAN entry
  * @tt_num_vlan: number of tvlv VLAN entries
@@ -3849,7 +3798,7 @@ request_table:
 
 /**
  * batadv_tt_global_client_is_roaming() - check if a client is marked as roaming
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @addr: the mac address of the client to check
  * @vid: VLAN identifier
  *
@@ -3875,7 +3824,7 @@ out:
 
 /**
  * batadv_tt_local_client_is_roaming() - tells whether the client is roaming
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @addr: the mac address of the local client to query
  * @vid: VLAN identifier
  *
@@ -3901,7 +3850,7 @@ out:
 
 /**
  * batadv_tt_add_temporary_global_entry() - Add temporary entry to global TT
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @orig_node: orig node which the temporary entry should be associated with
  * @addr: mac address of the client
  * @vid: VLAN id of the new temporary global translation table
@@ -3934,14 +3883,14 @@ bool batadv_tt_add_temporary_global_entry(struct batadv_priv *bat_priv,
 /**
  * batadv_tt_local_resize_to_mtu() - resize the local translation table fit the
  *  maximum packet size that can be transported through the mesh
- * @soft_iface: netdev struct of the mesh interface
+ * @mesh_iface: netdev struct of the mesh interface
  *
  * Remove entries older than 'timeout' and half timeout if more entries need
  * to be removed.
  */
-void batadv_tt_local_resize_to_mtu(struct net_device *soft_iface)
+void batadv_tt_local_resize_to_mtu(struct net_device *mesh_iface)
 {
-	struct batadv_priv *bat_priv = netdev_priv(soft_iface);
+	struct batadv_priv *bat_priv = netdev_priv(mesh_iface);
 	int packet_size_max = atomic_read(&bat_priv->packet_size_max);
 	int table_size, timeout = BATADV_TT_LOCAL_TIMEOUT / 2;
 	bool reduced = false;
@@ -3958,7 +3907,7 @@ void batadv_tt_local_resize_to_mtu(struct net_device *soft_iface)
 
 		timeout /= 2;
 		reduced = true;
-		net_ratelimited_function(batadv_info, soft_iface,
+		net_ratelimited_function(batadv_info, mesh_iface,
 					 "Forced to purge local tt entries to fit new maximum fragment MTU (%i)\n",
 					 packet_size_max);
 	}
@@ -3974,7 +3923,7 @@ void batadv_tt_local_resize_to_mtu(struct net_device *soft_iface)
 
 /**
  * batadv_tt_tvlv_ogm_handler_v1() - process incoming tt tvlv container
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @orig: the orig_node of the ogm
  * @flags: flags indicating the tvlv state (see batadv_tvlv_handler_flags)
  * @tvlv_value: tvlv buffer containing the gateway data
@@ -3985,36 +3934,35 @@ static void batadv_tt_tvlv_ogm_handler_v1(struct batadv_priv *bat_priv,
 					  u8 flags, void *tvlv_value,
 					  u16 tvlv_value_len)
 {
-	struct batadv_tvlv_tt_vlan_data *tt_vlan;
 	struct batadv_tvlv_tt_change *tt_change;
 	struct batadv_tvlv_tt_data *tt_data;
 	u16 num_entries, num_vlan;
+	size_t tt_data_sz;
 
 	if (tvlv_value_len < sizeof(*tt_data))
 		return;
 
 	tt_data = tvlv_value;
-	tvlv_value_len -= sizeof(*tt_data);
-
 	num_vlan = ntohs(tt_data->num_vlan);
 
-	if (tvlv_value_len < sizeof(*tt_vlan) * num_vlan)
+	tt_data_sz = struct_size(tt_data, vlan_data, num_vlan);
+	if (tvlv_value_len < tt_data_sz)
 		return;
 
-	tt_vlan = (struct batadv_tvlv_tt_vlan_data *)(tt_data + 1);
-	tt_change = (struct batadv_tvlv_tt_change *)(tt_vlan + num_vlan);
-	tvlv_value_len -= sizeof(*tt_vlan) * num_vlan;
+	tt_change = (struct batadv_tvlv_tt_change *)((void *)tt_data
+						     + tt_data_sz);
+	tvlv_value_len -= tt_data_sz;
 
 	num_entries = batadv_tt_entries(tvlv_value_len);
 
-	batadv_tt_update_orig(bat_priv, orig, tt_vlan, num_vlan, tt_change,
-			      num_entries, tt_data->ttvn);
+	batadv_tt_update_orig(bat_priv, orig, tt_data->vlan_data, num_vlan,
+			      tt_change, num_entries, tt_data->ttvn);
 }
 
 /**
  * batadv_tt_tvlv_unicast_handler_v1() - process incoming (unicast) tt tvlv
  *  container
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @src: mac address of tt tvlv sender
  * @dst: mac address of tt tvlv recipient
  * @tvlv_value: tvlv buffer containing the tt data
@@ -4039,8 +3987,8 @@ static int batadv_tt_tvlv_unicast_handler_v1(struct batadv_priv *bat_priv,
 	tt_data = tvlv_value;
 	tvlv_value_len -= sizeof(*tt_data);
 
-	tt_vlan_len = sizeof(struct batadv_tvlv_tt_vlan_data);
-	tt_vlan_len *= ntohs(tt_data->num_vlan);
+	tt_vlan_len = flex_array_size(tt_data, vlan_data,
+				      ntohs(tt_data->num_vlan));
 
 	if (tvlv_value_len < tt_vlan_len)
 		return NET_RX_SUCCESS;
@@ -4096,7 +4044,7 @@ static int batadv_tt_tvlv_unicast_handler_v1(struct batadv_priv *bat_priv,
 /**
  * batadv_roam_tvlv_unicast_handler_v1() - process incoming tt roam tvlv
  *  container
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @src: mac address of tt tvlv sender
  * @dst: mac address of tt tvlv recipient
  * @tvlv_value: tvlv buffer containing the tt data
@@ -4145,7 +4093,7 @@ out:
 
 /**
  * batadv_tt_init() - initialise the translation table internals
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  *
  * Return: 0 on success or negative error number in case of failure.
  */
@@ -4183,7 +4131,7 @@ int batadv_tt_init(struct batadv_priv *bat_priv)
 
 /**
  * batadv_tt_global_is_isolated() - check if a client is marked as isolated
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @addr: the mac address of the client
  * @vid: the identifier of the VLAN where this client is connected
  *

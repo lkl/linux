@@ -8,6 +8,9 @@
  *
  */
 
+#include <linux/smp.h>
+#include <linux/suspend.h>
+#include <asm/msr.h>
 #include "core.h"
 
 /* Cannon Lake: PGD PFET Enable Ack Status Register(s) bitmap */
@@ -86,7 +89,7 @@ const struct pmc_bit_map cnp_pfear_map[] = {
 	{}
 };
 
-const struct pmc_bit_map *ext_cnp_pfear_map[] = {
+static const struct pmc_bit_map *ext_cnp_pfear_map[] = {
 	/*
 	 * Check intel_pmc_core_ids[] users of cnp_reg_map for
 	 * a list of core SoCs using this.
@@ -95,7 +98,7 @@ const struct pmc_bit_map *ext_cnp_pfear_map[] = {
 	NULL
 };
 
-const struct pmc_bit_map cnp_slps0_dbg0_map[] = {
+static const struct pmc_bit_map cnp_slps0_dbg0_map[] = {
 	{"AUDIO_D3",		BIT(0)},
 	{"OTG_D3",		BIT(1)},
 	{"XHCI_D3",		BIT(2)},
@@ -108,7 +111,7 @@ const struct pmc_bit_map cnp_slps0_dbg0_map[] = {
 	{}
 };
 
-const struct pmc_bit_map cnp_slps0_dbg1_map[] = {
+static const struct pmc_bit_map cnp_slps0_dbg1_map[] = {
 	{"SDIO_PLL_OFF",	BIT(0)},
 	{"USB2_PLL_OFF",	BIT(1)},
 	{"AUDIO_PLL_OFF",	BIT(2)},
@@ -125,7 +128,7 @@ const struct pmc_bit_map cnp_slps0_dbg1_map[] = {
 	{}
 };
 
-const struct pmc_bit_map cnp_slps0_dbg2_map[] = {
+static const struct pmc_bit_map cnp_slps0_dbg2_map[] = {
 	{"MPHY_CORE_GATED",	BIT(0)},
 	{"CSME_GATED",		BIT(1)},
 	{"USB2_SUS_GATED",	BIT(2)},
@@ -204,8 +207,57 @@ const struct pmc_reg_map cnp_reg_map = {
 	.etr3_offset = ETR3_OFFSET,
 };
 
+
+/*
+ * Disable C1 auto-demotion
+ *
+ * Aggressive C1 auto-demotion may lead to failure to enter the deepest C-state
+ * during suspend-to-idle, causing high power consumption. To prevent this, we
+ * disable C1 auto-demotion during suspend and re-enable on resume.
+ *
+ * Note that, although MSR_PKG_CST_CONFIG_CONTROL has 'package' in its name, it
+ * is actually a per-core MSR on client platforms, affecting only a single CPU.
+ * Therefore, it must be configured on all online CPUs. The online cpu mask is
+ * unchanged during the phase of suspend/resume as user space is frozen.
+ */
+
+static DEFINE_PER_CPU(u64, pkg_cst_config);
+
+static void disable_c1_auto_demote(void *unused)
+{
+	int cpunum = smp_processor_id();
+	u64 val;
+
+	rdmsrq(MSR_PKG_CST_CONFIG_CONTROL, val);
+	per_cpu(pkg_cst_config, cpunum) = val;
+	val &= ~NHM_C1_AUTO_DEMOTE;
+	wrmsrq(MSR_PKG_CST_CONFIG_CONTROL, val);
+
+	pr_debug("%s: cpu:%d cst %llx\n", __func__, cpunum, val);
+}
+
+static void restore_c1_auto_demote(void *unused)
+{
+	int cpunum = smp_processor_id();
+
+	wrmsrq(MSR_PKG_CST_CONFIG_CONTROL, per_cpu(pkg_cst_config, cpunum));
+
+	pr_debug("%s: cpu:%d cst %llx\n", __func__, cpunum,
+		 per_cpu(pkg_cst_config, cpunum));
+}
+
+static void s2idle_cpu_quirk(smp_call_func_t func)
+{
+	if (pm_suspend_via_firmware())
+		return;
+
+	on_each_cpu(func, NULL, true);
+}
+
 void cnl_suspend(struct pmc_dev *pmcdev)
 {
+	s2idle_cpu_quirk(disable_c1_auto_demote);
+
 	/*
 	 * Due to a hardware limitation, the GBE LTR blocks PC10
 	 * when a cable is attached. To unblock PC10 during suspend,
@@ -216,25 +268,16 @@ void cnl_suspend(struct pmc_dev *pmcdev)
 
 int cnl_resume(struct pmc_dev *pmcdev)
 {
+	s2idle_cpu_quirk(restore_c1_auto_demote);
+
 	pmc_core_send_ltr_ignore(pmcdev, 3, 0);
 
 	return pmc_core_resume_common(pmcdev);
 }
 
-int cnp_core_init(struct pmc_dev *pmcdev)
-{
-	struct pmc *pmc = pmcdev->pmcs[PMC_IDX_MAIN];
-	int ret;
+struct pmc_dev_info cnp_pmc_dev = {
+	.map = &cnp_reg_map,
+	.suspend = cnl_suspend,
+	.resume = cnl_resume,
+};
 
-	pmcdev->suspend = cnl_suspend;
-	pmcdev->resume = cnl_resume;
-
-	pmc->map = &cnp_reg_map;
-	ret = get_primary_reg_base(pmc);
-	if (ret)
-		return ret;
-
-	pmc_core_get_low_power_modes(pmcdev);
-
-	return 0;
-}

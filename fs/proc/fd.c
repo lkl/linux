@@ -116,9 +116,7 @@ static bool tid_fd_mode(struct task_struct *task, unsigned fd, fmode_t *mode)
 {
 	struct file *file;
 
-	rcu_read_lock();
-	file = task_lookup_fdget_rcu(task, fd);
-	rcu_read_unlock();
+	file = fget_task(task, fd);
 	if (file) {
 		*mode = file->f_mode;
 		fput(file);
@@ -142,7 +140,8 @@ static void tid_fd_update_inode(struct task_struct *task, struct inode *inode,
 	security_task_to_inode(task, inode);
 }
 
-static int tid_fd_revalidate(struct dentry *dentry, unsigned int flags)
+static int tid_fd_revalidate(struct inode *dir, const struct qstr *name,
+			     struct dentry *dentry, unsigned int flags)
 {
 	struct task_struct *task;
 	struct inode *inode;
@@ -258,19 +257,17 @@ static int proc_readfd_common(struct file *file, struct dir_context *ctx,
 	if (!dir_emit_dots(file, ctx))
 		goto out;
 
-	rcu_read_lock();
 	for (fd = ctx->pos - 2;; fd++) {
 		struct file *f;
 		struct fd_data data;
 		char name[10 + 1];
 		unsigned int len;
 
-		f = task_lookup_next_fdget_rcu(p, &fd);
+		f = fget_task_next(p, &fd);
 		ctx->pos = fd + 2LL;
 		if (!f)
 			break;
 		data.mode = f->f_mode;
-		rcu_read_unlock();
 		fput(f);
 		data.fd = fd;
 
@@ -278,11 +275,9 @@ static int proc_readfd_common(struct file *file, struct dir_context *ctx,
 		if (!proc_fill_cache(file, ctx,
 				     name, len, instantiate, p,
 				     &data))
-			goto out;
+			break;
 		cond_resched();
-		rcu_read_lock();
 	}
-	rcu_read_unlock();
 out:
 	put_task_struct(p);
 	return 0;
@@ -357,18 +352,9 @@ static int proc_fd_getattr(struct mnt_idmap *idmap,
 			u32 request_mask, unsigned int query_flags)
 {
 	struct inode *inode = d_inode(path->dentry);
-	int rv = 0;
 
 	generic_fillattr(&nop_mnt_idmap, request_mask, inode, stat);
-
-	/* If it's a directory, put the number of open fds there */
-	if (S_ISDIR(inode->i_mode)) {
-		rv = proc_readfd_count(inode, &stat->size);
-		if (rv < 0)
-			return rv;
-	}
-
-	return rv;
+	return proc_readfd_count(inode, &stat->size);
 }
 
 const struct inode_operations proc_fd_inode_operations = {

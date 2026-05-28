@@ -162,7 +162,7 @@ bool zpa2326_isreg_writeable(struct device *dev, unsigned int reg)
 		return false;
 	}
 }
-EXPORT_SYMBOL_NS_GPL(zpa2326_isreg_writeable, IIO_ZPA2326);
+EXPORT_SYMBOL_NS_GPL(zpa2326_isreg_writeable, "IIO_ZPA2326");
 
 bool zpa2326_isreg_readable(struct device *dev, unsigned int reg)
 {
@@ -191,7 +191,7 @@ bool zpa2326_isreg_readable(struct device *dev, unsigned int reg)
 		return false;
 	}
 }
-EXPORT_SYMBOL_NS_GPL(zpa2326_isreg_readable, IIO_ZPA2326);
+EXPORT_SYMBOL_NS_GPL(zpa2326_isreg_readable, "IIO_ZPA2326");
 
 bool zpa2326_isreg_precious(struct device *dev, unsigned int reg)
 {
@@ -204,7 +204,7 @@ bool zpa2326_isreg_precious(struct device *dev, unsigned int reg)
 		return false;
 	}
 }
-EXPORT_SYMBOL_NS_GPL(zpa2326_isreg_precious, IIO_ZPA2326);
+EXPORT_SYMBOL_NS_GPL(zpa2326_isreg_precious, "IIO_ZPA2326");
 
 /**
  * zpa2326_enable_device() - Enable device, i.e. get out of low power mode.
@@ -582,8 +582,8 @@ static int zpa2326_fill_sample_buffer(struct iio_dev               *indio_dev,
 	struct {
 		u32 pressure;
 		u16 temperature;
-		u64 timestamp;
-	}   sample;
+		aligned_s64 timestamp;
+	} sample = { };
 	int err;
 
 	if (test_bit(0, indio_dev->active_scan_mask)) {
@@ -616,8 +616,8 @@ static int zpa2326_fill_sample_buffer(struct iio_dev               *indio_dev,
 	 */
 	zpa2326_dbg(indio_dev, "filling raw samples buffer");
 
-	iio_push_to_buffers_with_timestamp(indio_dev, &sample,
-					   private->timestamp);
+	iio_push_to_buffers_with_ts(indio_dev, &sample, sizeof(sample),
+				    private->timestamp);
 
 	return 0;
 }
@@ -649,7 +649,7 @@ const struct dev_pm_ops zpa2326_pm_ops = {
 	SET_RUNTIME_PM_OPS(zpa2326_runtime_suspend, zpa2326_runtime_resume,
 			   NULL)
 };
-EXPORT_SYMBOL_NS_GPL(zpa2326_pm_ops, IIO_ZPA2326);
+EXPORT_SYMBOL_NS_GPL(zpa2326_pm_ops, "IIO_ZPA2326");
 
 /**
  * zpa2326_resume() - Request the PM layer to power supply the device.
@@ -697,7 +697,6 @@ static void zpa2326_suspend(struct iio_dev *indio_dev)
 
 	zpa2326_sleep(indio_dev);
 
-	pm_runtime_mark_last_busy(parent);
 	pm_runtime_put_autosuspend(parent);
 }
 
@@ -708,7 +707,6 @@ static void zpa2326_init_runtime(struct device *parent)
 	pm_runtime_enable(parent);
 	pm_runtime_set_autosuspend_delay(parent, 1000);
 	pm_runtime_use_autosuspend(parent);
-	pm_runtime_mark_last_busy(parent);
 	pm_runtime_put_autosuspend(parent);
 }
 
@@ -1060,9 +1058,8 @@ static int zpa2326_sample_oneshot(struct iio_dev     *indio_dev,
 	int                     ret;
 	struct zpa2326_private *priv;
 
-	ret = iio_device_claim_direct_mode(indio_dev);
-	if (ret)
-		return ret;
+	if (!iio_device_claim_direct(indio_dev))
+		return -EBUSY;
 
 	ret = zpa2326_resume(indio_dev);
 	if (ret < 0)
@@ -1118,7 +1115,7 @@ static int zpa2326_sample_oneshot(struct iio_dev     *indio_dev,
 suspend:
 	zpa2326_suspend(indio_dev);
 release:
-	iio_device_release_direct_mode(indio_dev);
+	iio_device_release_direct(indio_dev);
 
 	return ret;
 }
@@ -1436,7 +1433,6 @@ static int zpa2326_set_frequency(struct iio_dev *indio_dev, int hz)
 {
 	struct zpa2326_private *priv = iio_priv(indio_dev);
 	int                     freq;
-	int                     err;
 
 	/* Check if requested frequency is supported. */
 	for (freq = 0; freq < ARRAY_SIZE(zpa2326_sampling_frequencies); freq++)
@@ -1446,13 +1442,12 @@ static int zpa2326_set_frequency(struct iio_dev *indio_dev, int hz)
 		return -EINVAL;
 
 	/* Don't allow changing frequency if buffered sampling is ongoing. */
-	err = iio_device_claim_direct_mode(indio_dev);
-	if (err)
-		return err;
+	if (!iio_device_claim_direct(indio_dev))
+		return -EBUSY;
 
 	priv->frequency = &zpa2326_sampling_frequencies[freq];
 
-	iio_device_release_direct_mode(indio_dev);
+	iio_device_release_direct(indio_dev);
 
 	return 0;
 }
@@ -1698,7 +1693,7 @@ poweroff:
 
 	return err;
 }
-EXPORT_SYMBOL_NS_GPL(zpa2326_probe, IIO_ZPA2326);
+EXPORT_SYMBOL_NS_GPL(zpa2326_probe, "IIO_ZPA2326");
 
 void zpa2326_remove(const struct device *parent)
 {
@@ -1709,7 +1704,7 @@ void zpa2326_remove(const struct device *parent)
 	zpa2326_sleep(indio_dev);
 	zpa2326_power_off(indio_dev, iio_priv(indio_dev));
 }
-EXPORT_SYMBOL_NS_GPL(zpa2326_remove, IIO_ZPA2326);
+EXPORT_SYMBOL_NS_GPL(zpa2326_remove, "IIO_ZPA2326");
 
 MODULE_AUTHOR("Gregor Boirie <gregor.boirie@parrot.com>");
 MODULE_DESCRIPTION("Core driver for Murata ZPA2326 pressure sensor");

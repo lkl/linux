@@ -52,6 +52,7 @@
 #include <linux/user_namespace.h>
 
 #include "fuse_i.h"
+#include "fuse_dev_i.h"
 
 #define CUSE_CONNTBL_LEN	64
 
@@ -303,8 +304,8 @@ struct cuse_init_args {
 	struct fuse_args_pages ap;
 	struct cuse_init_in in;
 	struct cuse_init_out out;
-	struct page *page;
-	struct fuse_page_desc desc;
+	struct folio *folio;
+	struct fuse_folio_desc desc;
 };
 
 /**
@@ -326,7 +327,7 @@ static void cuse_process_init_reply(struct fuse_mount *fm,
 	struct fuse_args_pages *ap = &ia->ap;
 	struct cuse_conn *cc = fc_to_cc(fc), *pos;
 	struct cuse_init_out *arg = &ia->out;
-	struct page *page = ap->pages[0];
+	struct folio *folio = ap->folios[0];
 	struct cuse_devinfo devinfo = { };
 	struct device *dev;
 	struct cdev *cdev;
@@ -343,7 +344,7 @@ static void cuse_process_init_reply(struct fuse_mount *fm,
 	/* parse init reply */
 	cc->unrestricted_ioctl = arg->flags & CUSE_UNRESTRICTED_IOCTL;
 
-	rc = cuse_parse_devinfo(page_address(page), ap->args.out_args[1].size,
+	rc = cuse_parse_devinfo(folio_address(folio), ap->args.out_args[1].size,
 				&devinfo);
 	if (rc)
 		goto err;
@@ -411,7 +412,7 @@ static void cuse_process_init_reply(struct fuse_mount *fm,
 	kobject_uevent(&dev->kobj, KOBJ_ADD);
 out:
 	kfree(ia);
-	__free_page(page);
+	folio_put(folio);
 	return;
 
 err_cdev:
@@ -429,7 +430,7 @@ err:
 static int cuse_send_init(struct cuse_conn *cc)
 {
 	int rc;
-	struct page *page;
+	struct folio *folio;
 	struct fuse_mount *fm = &cc->fm;
 	struct cuse_init_args *ia;
 	struct fuse_args_pages *ap;
@@ -437,13 +438,14 @@ static int cuse_send_init(struct cuse_conn *cc)
 	BUILD_BUG_ON(CUSE_INIT_INFO_MAX > PAGE_SIZE);
 
 	rc = -ENOMEM;
-	page = alloc_page(GFP_KERNEL | __GFP_ZERO);
-	if (!page)
+
+	folio = folio_alloc(GFP_KERNEL | __GFP_ZERO, 0);
+	if (!folio)
 		goto err;
 
 	ia = kzalloc(sizeof(*ia), GFP_KERNEL);
 	if (!ia)
-		goto err_free_page;
+		goto err_free_folio;
 
 	ap = &ia->ap;
 	ia->in.major = FUSE_KERNEL_VERSION;
@@ -459,18 +461,18 @@ static int cuse_send_init(struct cuse_conn *cc)
 	ap->args.out_args[1].size = CUSE_INIT_INFO_MAX;
 	ap->args.out_argvar = true;
 	ap->args.out_pages = true;
-	ap->num_pages = 1;
-	ap->pages = &ia->page;
+	ap->num_folios = 1;
+	ap->folios = &ia->folio;
 	ap->descs = &ia->desc;
-	ia->page = page;
+	ia->folio = folio;
 	ia->desc.length = ap->args.out_args[1].size;
 	ap->args.end = cuse_process_init_reply;
 
 	rc = fuse_simple_background(fm, &ap->args, GFP_KERNEL);
 	if (rc) {
 		kfree(ia);
-err_free_page:
-		__free_page(page);
+err_free_folio:
+		folio_put(folio);
 	}
 err:
 	return rc;
@@ -546,7 +548,7 @@ static int cuse_channel_open(struct inode *inode, struct file *file)
  */
 static int cuse_channel_release(struct inode *inode, struct file *file)
 {
-	struct fuse_dev *fud = file->private_data;
+	struct fuse_dev *fud = __fuse_get_dev(file);
 	struct cuse_conn *cc = fc_to_cc(fud->fc);
 
 	/* remove from the conntbl, no more access from this point on */

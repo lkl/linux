@@ -152,7 +152,7 @@ static int cxl_mem_probe(struct device *dev)
 		return -ENXIO;
 	}
 
-	if (resource_size(&cxlds->pmem_res) && IS_ENABLED(CONFIG_CXL_PMEM)) {
+	if (cxl_pmem_size(cxlds) && IS_ENABLED(CONFIG_CXL_PMEM)) {
 		rc = devm_cxl_add_nvdimm(parent_port, cxlmd);
 		if (rc) {
 			if (rc == -ENODEV)
@@ -179,6 +179,10 @@ static int cxl_mem_probe(struct device *dev)
 		if (rc)
 			return rc;
 	}
+
+	rc = devm_cxl_memdev_edac_register(cxlmd);
+	if (rc)
+		dev_dbg(dev, "CXL memdev EDAC registration failed rc=%d\n", rc);
 
 	/*
 	 * The kernel may be operating out of CXL memory on this device,
@@ -252,7 +256,7 @@ module_cxl_driver(cxl_mem_driver);
 
 MODULE_DESCRIPTION("CXL: Memory Expansion");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(CXL);
+MODULE_IMPORT_NS("CXL");
 MODULE_ALIAS_CXL(CXL_DEVICE_MEMORY_EXPANDER);
 /*
  * create_endpoint() wants to validate port driver attach immediately after

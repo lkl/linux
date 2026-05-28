@@ -54,18 +54,18 @@ static void micro_key_receive(void *data, int len, unsigned char *msg)
 
 static void micro_key_start(struct ipaq_micro_keys *keys)
 {
-	spin_lock(&keys->micro->lock);
+	guard(spinlock)(&keys->micro->lock);
+
 	keys->micro->key = micro_key_receive;
 	keys->micro->key_data = keys;
-	spin_unlock(&keys->micro->lock);
 }
 
 static void micro_key_stop(struct ipaq_micro_keys *keys)
 {
-	spin_lock(&keys->micro->lock);
+	guard(spinlock)(&keys->micro->lock);
+
 	keys->micro->key = NULL;
 	keys->micro->key_data = NULL;
-	spin_unlock(&keys->micro->lock);
 }
 
 static int micro_key_open(struct input_dev *input)
@@ -102,9 +102,8 @@ static int micro_key_probe(struct platform_device *pdev)
 
 	keys->input->keycodesize = sizeof(micro_keycodes[0]);
 	keys->input->keycodemax = ARRAY_SIZE(micro_keycodes);
-	keys->codes = devm_kmemdup(&pdev->dev, micro_keycodes,
-			   keys->input->keycodesize * keys->input->keycodemax,
-			   GFP_KERNEL);
+	keys->codes = devm_kmemdup_array(&pdev->dev, micro_keycodes, keys->input->keycodemax,
+					 keys->input->keycodesize, GFP_KERNEL);
 	if (!keys->codes)
 		return -ENOMEM;
 
@@ -141,12 +140,10 @@ static int micro_key_resume(struct device *dev)
 	struct ipaq_micro_keys *keys = dev_get_drvdata(dev);
 	struct input_dev *input = keys->input;
 
-	mutex_lock(&input->mutex);
+	guard(mutex)(&input->mutex);
 
 	if (input_device_enabled(input))
 		micro_key_start(keys);
-
-	mutex_unlock(&input->mutex);
 
 	return 0;
 }

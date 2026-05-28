@@ -1,54 +1,225 @@
 # SPDX-License-Identifier: ((GPL-2.0 WITH Linux-syscall-note) OR BSD-3-Clause)
-
+---
 name: ethtool
 
 protocol: genetlink-legacy
 
 doc: Partial family for Ethtool Netlink.
+uapi-header: linux/ethtool_netlink_generated.h
+
+c-family-name: ethtool-genl-name
+c-version-name: ethtool-genl-version
 
 definitions:
   -
     name: udp-tunnel-type
     enum-name:
     type: enum
-    entries: [ vxlan, geneve, vxlan-gpe ]
+    entries: [vxlan, geneve, vxlan-gpe]
+    enum-cnt-name: __ethtool-udp-tunnel-type-cnt
+    render-max: true
   -
     name: stringset
     type: enum
     entries: []
+    header: linux/ethtool.h  # skip rendering, no actual definition
   -
     name: header-flags
     type: flags
-    entries: [ compact-bitsets, omit-reply, stats ]
+    name-prefix: ethtool-flag-
+    doc: common ethtool header flags
+    entries:
+      -
+        name: compact-bitsets
+        doc: use compact bitsets in reply
+      -
+        name: omit-reply
+        doc: provide optional reply for SET or ACT requests
+      -
+        name: stats
+        doc: request statistics, if supported by the driver
   -
     name: module-fw-flash-status
     type: enum
-    entries: [ started, in_progress, completed, error ]
+    doc: plug-in module firmware flashing status
+    header: linux/ethtool.h
+    entries:
+      -
+        name: started
+        doc: The firmware flashing process has started.
+      -
+        name: in-progress
+        doc: The firmware flashing process is in progress.
+      -
+        name: completed
+        doc: The firmware flashing process was completed successfully.
+      -
+        name: error
+        doc: The firmware flashing process was stopped due to an error.
   -
     name: c33-pse-ext-state
-    enum-name:
+    doc: |
+      "groups of PSE extended states functions. IEEE 802.3-2022 33.2.4.4
+      Variables"
     type: enum
     name-prefix: ethtool-c33-pse-ext-state-
+    header: linux/ethtool.h
     entries:
-        - none
-        - error-condition
-        - mr-mps-valid
-        - mr-pse-enable
-        - option-detect-ted
-        - option-vport-lim
-        - ovld-detected
-        - power-not-available
-        - short-detected
+      -
+        name: none
+        doc: none
+      -
+        name: error-condition
+        doc: Group of error_condition states
+      -
+        name: mr-mps-valid
+        doc: Group of mr_mps_valid states
+      -
+        name: mr-pse-enable
+        doc: Group of mr_pse_enable states
+      -
+        name: option-detect-ted
+        doc: Group of option_detect_ted states
+      -
+        name: option-vport-lim
+        doc: Group of option_vport_lim states
+      -
+        name: ovld-detected
+        doc: Group of ovld_detected states
+      -
+        name: power-not-available
+        doc: Group of power_not_available states
+      -
+        name: short-detected
+        doc: Group of short_detected states
   -
     name: phy-upstream-type
-    enum-name:
+    enum-name: phy-upstream
+    header: linux/ethtool.h
     type: enum
-    entries: [ mac, phy ]
+    name-prefix: phy-upstream
+    entries: [mac, phy]
+  -
+    name: tcp-data-split
+    type: enum
+    entries: [unknown, disabled, enabled]
+  -
+    name: hwtstamp-source
+    doc: Source of the hardware timestamp
+    enum-name: hwtstamp-source
+    name-prefix: hwtstamp-source-
+    type: enum
+    entries:
+      -
+        name: netdev
+        doc: |
+          Hardware timestamp comes from a MAC or a device
+          which has MAC and PHY integrated
+        value: 1
+      -
+        name: phylib
+        doc: |
+          Hardware timestamp comes from one PHY device
+          of the network topology
+  -
+    name: pse-event
+    doc: PSE event list for the PSE controller
+    type: flags
+    name-prefix: ethtool-
+    entries:
+      -
+        name: pse-event-over-current
+        doc: PSE output current is too high
+      -
+        name: pse-event-over-temp
+        doc: PSE in over temperature state
+      -
+        name: c33-pse-event-detection
+        doc: |
+          detection process occur on the PSE. IEEE 802.3-2022 33.2.5 and
+          145.2.6 PSE detection of PDs. IEEE 802.3-202 30.9.1.1.5
+          aPSEPowerDetectionStatus
+      -
+        name: c33-pse-event-classification
+        doc: |
+          classification process occur on the PSE. IEEE 802.3-2022 33.2.6
+          and 145.2.8 classification of PDs mutual identification.
+          IEEE 802.3-2022 30.9.1.1.8 aPSEPowerClassification.
+      -
+        name: c33-pse-event-disconnection
+        doc: |
+          PD has been disconnected on the PSE. IEEE 802.3-2022 33.3.8
+          and 145.3.9 PD Maintain Power Signature. IEEE 802.3-2022
+          33.5.1.2.9 MPS Absent. IEEE 802.3-2022 30.9.1.1.20
+          aPSEMPSAbsentCounter.
+      -
+        name: pse-event-over-budget
+        doc: PSE turned off due to over budget situation
+      -
+        name: pse-event-sw-pw-control-error
+        doc: PSE faced an error managing the power control from software
+  -
+    name: input-xfrm
+    doc: RSS hash function transformations.
+    type: flags
+    enum-name:
+    name-prefix: rxh-xfrm-
+    header: linux/ethtool.h
+    entries:
+      -
+        name: sym-xor
+        doc: >-
+          XOR the corresponding source and destination fields of each specified
+          protocol. Both copies of the XOR'ed fields are fed into the RSS and
+          RXHASH calculation. Note that this XORing reduces the input set
+          entropy and could be exploited to reduce the RSS queue spread.
+      -
+        name: sym-or-xor
+        doc: >-
+          Similar to SYM_XOR, except that one copy of the XOR'ed fields is
+          replaced by an OR of the same fields.
+  -
+    name: rxfh-fields
+    name-prefix: rxh-
+    enum-name:
+    header: linux/ethtool.h
+    type: flags
+    entries:
+      -
+        name: l2da
+        value: 1
+      -
+        name: vlan
+      -
+        name: l3-proto
+      -
+        name: ip-src
+      -
+        name: ip-dst
+      -
+        name: l4-b-0-1
+        doc: src port in case of TCP/UDP/SCTP
+      -
+        name: l4-b-2-3
+        doc: dst port in case of TCP/UDP/SCTP
+      -
+        name: gtp-teid
+      -
+        name: ip6-fl
+        doc: IPv6 Flow Label
+      -
+        name: discard
+        value: 31
 
 attribute-sets:
   -
     name: header
+    attr-cnt-name: __ethtool-a-header-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: dev-index
         type: u32
@@ -65,7 +236,12 @@ attribute-sets:
 
   -
     name: bitset-bit
+    attr-cnt-name: __ethtool-a-bitset-bit-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: index
         type: u32
@@ -77,7 +253,12 @@ attribute-sets:
         type: flag
   -
     name: bitset-bits
+    attr-cnt-name: __ethtool-a-bitset-bits-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: bit
         type: nest
@@ -85,7 +266,12 @@ attribute-sets:
         nested-attributes: bitset-bit
   -
     name: bitset
+    attr-cnt-name: __ethtool-a-bitset-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: nomask
         type: flag
@@ -96,10 +282,20 @@ attribute-sets:
         name: bits
         type: nest
         nested-attributes: bitset-bits
-
+      -
+        name: value
+        type: binary
+      -
+        name: mask
+        type: binary
   -
     name: string
+    attr-cnt-name: __ethtool-a-string-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: index
         type: u32
@@ -108,7 +304,16 @@ attribute-sets:
         type: string
   -
     name: strings
+    attr-cnt-name: __ethtool-a-strings-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: string
         type: nest
@@ -116,7 +321,12 @@ attribute-sets:
         nested-attributes: string
   -
     name: stringset
+    attr-cnt-name: __ethtool-a-stringset-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: id
         type: u32
@@ -130,7 +340,12 @@ attribute-sets:
         nested-attributes: strings
   -
     name: stringsets
+    attr-cnt-name: __ethtool-a-stringsets-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: stringset
         type: nest
@@ -138,7 +353,12 @@ attribute-sets:
         nested-attributes: stringset
   -
     name: strset
+    attr-cnt-name: __ethtool-a-strset-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -153,7 +373,12 @@ attribute-sets:
 
   -
     name: privflags
+    attr-cnt-name: __ethtool-a-privflags-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -165,7 +390,12 @@ attribute-sets:
 
   -
     name: rings
+    attr-cnt-name: __ethtool-a-rings-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -200,6 +430,7 @@ attribute-sets:
       -
         name: tcp-data-split
         type: u8
+        enum: tcp-data-split
       -
         name: cqe-size
         type: u32
@@ -215,34 +446,57 @@ attribute-sets:
       -
         name: tx-push-buf-len-max
         type: u32
+      -
+        name: hds-thresh
+        type: u32
+      -
+        name: hds-thresh-max
+        type: u32
 
   -
     name: mm-stat
+    attr-cnt-name: __ethtool-a-mm-stat-cnt
+    doc: MAC Merge (802.3)
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: pad
         type: pad
       -
         name: reassembly-errors
+        doc: aMACMergeFrameAssErrorCount
         type: u64
       -
         name: smd-errors
+        doc: aMACMergeFrameSmdErrorCount
         type: u64
       -
         name: reassembly-ok
+        doc: aMACMergeFrameAssOkCount
         type: u64
       -
         name: rx-frag-count
+        doc: aMACMergeFragCountRx
         type: u64
       -
         name: tx-frag-count
+        doc: aMACMergeFragCountTx
         type: u64
       -
         name: hold-count
+        doc: aMACMergeHoldCount
         type: u64
   -
     name: mm
+    attr-cnt-name: __ethtool-a-mm-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -280,7 +534,12 @@ attribute-sets:
         nested-attributes: mm-stat
   -
     name: linkinfo
+    attr-cnt-name: __ethtool-a-linkinfo-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -302,7 +561,12 @@ attribute-sets:
         type: u8
   -
     name: linkmodes
+    attr-cnt-name: __ethtool-a-linkmodes-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -338,7 +602,12 @@ attribute-sets:
         type: u8
   -
     name: linkstate
+    attr-cnt-name: __ethtool-a-linkstate-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -363,7 +632,12 @@ attribute-sets:
         type: u32
   -
     name: debug
+    attr-cnt-name: __ethtool-a-debug-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -374,7 +648,12 @@ attribute-sets:
         nested-attributes: bitset
   -
     name: wol
+    attr-cnt-name: __ethtool-a-wol-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -388,7 +667,12 @@ attribute-sets:
         type: binary
   -
     name: features
+    attr-cnt-name: __ethtool-a-features-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -411,7 +695,12 @@ attribute-sets:
         nested-attributes: bitset
   -
     name: channels
+    attr-cnt-name: __ethtool-a-channels-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -443,7 +732,12 @@ attribute-sets:
 
   -
     name: irq-moderation
+    attr-cnt-name: __ethtool-a-irq-moderation-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: usec
         type: u32
@@ -455,7 +749,12 @@ attribute-sets:
         type: u32
   -
     name: profile
+    attr-cnt-name: __ethtool-a-profile-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: irq-moderation
         type: nest
@@ -463,7 +762,12 @@ attribute-sets:
         nested-attributes: irq-moderation
   -
     name: coalesce
+    attr-cnt-name: __ethtool-a-coalesce-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -560,7 +864,12 @@ attribute-sets:
 
   -
     name: pause-stat
+    attr-cnt-name: __ethtool-a-pause-stat-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: pad
         type: pad
@@ -572,7 +881,12 @@ attribute-sets:
         type: u64
   -
     name: pause
+    attr-cnt-name: __ethtool-a-pause-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -595,7 +909,12 @@ attribute-sets:
         type: u32
   -
     name: eee
+    attr-cnt-name: __ethtool-a-eee-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -622,7 +941,12 @@ attribute-sets:
         type: u32
   -
     name: ts-stat
+    attr-cnt-name: __ethtool-a-ts-stat-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: tx-pkts
         type: uint
@@ -632,9 +956,31 @@ attribute-sets:
       -
         name: tx-err
         type: uint
+      -
+        name: tx-onestep-pkts-unconfirmed
+        type: uint
+  -
+    name: ts-hwtstamp-provider
+    attr-cnt-name: __ethtool-a-ts-hwtstamp-provider-cnt
+    attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
+      -
+        name: index
+        type: u32
+      -
+        name: qualifier
+        type: u32
   -
     name: tsinfo
+    attr-cnt-name: __ethtool-a-tsinfo-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -658,21 +1004,45 @@ attribute-sets:
         name: stats
         type: nest
         nested-attributes: ts-stat
+      -
+        name: hwtstamp-provider
+        type: nest
+        nested-attributes: ts-hwtstamp-provider
+      -
+        name: hwtstamp-source
+        type: u32
+        enum: hwtstamp-source
+      -
+        name: hwtstamp-phyindex
+        type: u32
   -
     name: cable-result
+    attr-cnt-name: __ethtool-a-cable-result-cnt
     attributes:
       -
+        name: unspec
+        type: unused
+        value: 0
+      -
         name: pair
+        doc: ETHTOOL_A_CABLE_PAIR
         type: u8
       -
         name: code
+        doc: ETHTOOL_A_CABLE_RESULT_CODE
         type: u8
       -
         name: src
+        doc: ETHTOOL_A_CABLE_INF_SRC
         type: u32
   -
     name: cable-fault-length
+    attr-cnt-name: __ethtool-a-cable-fault-length-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: pair
         type: u8
@@ -684,7 +1054,12 @@ attribute-sets:
         type: u32
   -
     name: cable-nest
+    attr-cnt-name: __ethtool-a-cable-nest-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: result
         type: nest
@@ -695,20 +1070,31 @@ attribute-sets:
         nested-attributes: cable-fault-length
   -
     name: cable-test
+    attr-cnt-name: __ethtool-a-cable-test-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
         nested-attributes: header
   -
     name: cable-test-ntf
+    attr-cnt-name: __ethtool-a-cable-test-ntf-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
         nested-attributes: header
       -
         name: status
+        doc: _STARTED/_COMPLETE
         type: u8
       -
         name: nest
@@ -716,7 +1102,12 @@ attribute-sets:
         nested-attributes: cable-nest
   -
     name: cable-test-tdr-cfg
+    attr-cnt-name: __ethtool-a-cable-test-tdr-cfg-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: first
         type: u32
@@ -731,7 +1122,12 @@ attribute-sets:
         type: u8
   -
     name: cable-test-tdr-ntf
+    attr-cnt-name: __ethtool-a-cable-test-tdr-ntf-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -745,7 +1141,12 @@ attribute-sets:
         nested-attributes: cable-nest
   -
     name: cable-test-tdr
+    attr-cnt-name: __ethtool-a-cable-test-tdr-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -756,7 +1157,12 @@ attribute-sets:
         nested-attributes: cable-test-tdr-cfg
   -
     name: tunnel-udp-entry
+    attr-cnt-name: __ethtool-a-tunnel-udp-entry-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: port
         type: u16
@@ -767,7 +1173,12 @@ attribute-sets:
         enum: udp-tunnel-type
   -
     name: tunnel-udp-table
+    attr-cnt-name: __ethtool-a-tunnel-udp-table-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: size
         type: u32
@@ -782,14 +1193,24 @@ attribute-sets:
         nested-attributes: tunnel-udp-entry
   -
     name: tunnel-udp
+    attr-cnt-name: __ethtool-a-tunnel-udp-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: table
         type: nest
         nested-attributes: tunnel-udp-table
   -
     name: tunnel-info
+    attr-cnt-name: __ethtool-a-tunnel-info-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -799,8 +1220,37 @@ attribute-sets:
         type: nest
         nested-attributes: tunnel-udp
   -
-    name: fec-stat
+    name: fec-hist
+    attr-cnt-name: --ethtool-a-fec-hist-cnt
     attributes:
+      -
+        name: pad
+        type: pad
+      -
+        name: bin-low
+        type: u32
+        doc: Low bound of FEC bin (inclusive)
+      -
+        name: bin-high
+        type: u32
+        doc: High bound of FEC bin (inclusive)
+      -
+        name: bin-val
+        type: uint
+        doc: Error count in the bin (optional if per-lane values exist)
+      -
+        name: bin-val-per-lane
+        type: binary
+        sub-type: u64
+        doc: An array of per-lane error counters in the bin (optional)
+  -
+    name: fec-stat
+    attr-cnt-name: __ethtool-a-fec-stat-cnt
+    attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: pad
         type: pad
@@ -816,9 +1266,19 @@ attribute-sets:
         name: corr-bits
         type: binary
         sub-type: u64
+      -
+        name: hist
+        type: nest
+        multi-attr: True
+        nested-attributes: fec-hist
   -
     name: fec
+    attr-cnt-name: __ethtool-a-fec-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -839,7 +1299,12 @@ attribute-sets:
         nested-attributes: fec-stat
   -
     name: module-eeprom
+    attr-cnt-name: __ethtool-a-module-eeprom-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -864,7 +1329,12 @@ attribute-sets:
         type: binary
   -
     name: stats-grp
+    attr-cnt-name: __ethtool-a-stats-grp-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: pad
         type: pad
@@ -877,7 +1347,7 @@ attribute-sets:
       -
         name: stat
         type: u64
-        type-value: [ id ]
+        type-value: [id]
       -
         name: hist-rx
         type: nest
@@ -907,7 +1377,12 @@ attribute-sets:
         name: hist-val
   -
     name: stats
+    attr-cnt-name: __ethtool-a-stats-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: pad
         type: pad
@@ -928,7 +1403,12 @@ attribute-sets:
         type: u32
   -
     name: phc-vclocks
+    attr-cnt-name: __ethtool-a-phc-vclocks-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -942,7 +1422,12 @@ attribute-sets:
         sub-type: s32
   -
     name: module
+    attr-cnt-name: __ethtool-a-module-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -955,7 +1440,13 @@ attribute-sets:
         type: u8
   -
     name: c33-pse-pw-limit
+    attr-cnt-name: __ethtool-a-c33-pse-pw-limit-cnt
+    attr-max-name: __ethtool-a-c33-pse-pw-limit-max
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: min
         type: u32
@@ -964,7 +1455,12 @@ attribute-sets:
         type: u32
   -
     name: pse
+    attr-cnt-name: __ethtool-a-pse-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -1020,9 +1516,143 @@ attribute-sets:
         type: nest
         multi-attr: true
         nested-attributes: c33-pse-pw-limit
+      -
+        name: pse-pw-d-id
+        type: u32
+        name-prefix: ethtool-a-
+      -
+        name: pse-prio-max
+        type: u32
+        name-prefix: ethtool-a-
+      -
+        name: pse-prio
+        type: u32
+        name-prefix: ethtool-a-
+  -
+    name: flow
+    attr-cnt-name: --ethtool-a-flow-cnt
+    doc: |
+      Flow types, corresponding to those defined in the old
+      ethtool header for RXFH and RXNFC as ${PROTO}_FLOW.
+      The values are not matching the old ones to avoid carrying
+      into Netlink the IP_USER_FLOW vs IPV4_FLOW vs IPV4_USER_FLOW confusion.
+    attributes:
+      -
+        name: ether
+        type: uint
+        enum: rxfh-fields
+      -
+        name: ip4
+        type: uint
+        enum: rxfh-fields
+      -
+        name: ip6
+        type: uint
+        enum: rxfh-fields
+      -
+        name: tcp4
+        type: uint
+        enum: rxfh-fields
+      -
+        name: tcp6
+        type: uint
+        enum: rxfh-fields
+      -
+        name: udp4
+        type: uint
+        enum: rxfh-fields
+      -
+        name: udp6
+        type: uint
+        enum: rxfh-fields
+      -
+        name: sctp4
+        type: uint
+        enum: rxfh-fields
+      -
+        name: sctp6
+        type: uint
+        enum: rxfh-fields
+      -
+        name: ah4
+        type: uint
+        enum: rxfh-fields
+      -
+        name: ah6
+        type: uint
+        enum: rxfh-fields
+      -
+        name: esp4
+        type: uint
+        enum: rxfh-fields
+      -
+        name: esp6
+        type: uint
+        enum: rxfh-fields
+      -
+        name: ah-esp4
+        type: uint
+        enum: rxfh-fields
+      -
+        name: ah-esp6
+        type: uint
+        enum: rxfh-fields
+      -
+        name: gtpu4
+        type: uint
+        enum: rxfh-fields
+      -
+        name: gtpu6
+        type: uint
+        enum: rxfh-fields
+      -
+        name: gtpc4
+        type: uint
+        enum: rxfh-fields
+      -
+        name: gtpc6
+        type: uint
+        enum: rxfh-fields
+      -
+        name: gtpc-teid4
+        type: uint
+        enum: rxfh-fields
+      -
+        name: gtpc-teid6
+        type: uint
+        enum: rxfh-fields
+      -
+        name: gtpu-eh4
+        type: uint
+        enum: rxfh-fields
+      -
+        name: gtpu-eh6
+        type: uint
+        enum: rxfh-fields
+      -
+        name: gtpu-ul4
+        type: uint
+        enum: rxfh-fields
+      -
+        name: gtpu-ul6
+        type: uint
+        enum: rxfh-fields
+      -
+        name: gtpu-dl4
+        type: uint
+        enum: rxfh-fields
+      -
+        name: gtpu-dl6
+        type: uint
+        enum: rxfh-fields
   -
     name: rss
+    attr-cnt-name: __ethtool-a-rss-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -1041,14 +1671,24 @@ attribute-sets:
         name: hkey
         type: binary
       -
-        name: input_xfrm
+        name: input-xfrm
         type: u32
+        enum: input-xfrm
       -
         name: start-context
         type: u32
+      -
+        name: flow-hash
+        type: nest
+        nested-attributes: flow
   -
     name: plca
+    attr-cnt-name: __ethtool-a-plca-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -1079,7 +1719,12 @@ attribute-sets:
         type: u32
   -
     name: module-fw-flash
+    attr-cnt-name: __ethtool-a-module-fw-flash-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -1105,7 +1750,12 @@ attribute-sets:
         type: uint
   -
     name: phy
+    attr-cnt-name: __ethtool-a-phy-cnt
     attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
       -
         name: header
         type: nest
@@ -1132,6 +1782,47 @@ attribute-sets:
       -
         name: downstream-sfp-name
         type: string
+  -
+    name: tsconfig
+    attr-cnt-name: __ethtool-a-tsconfig-cnt
+    attributes:
+      -
+        name: unspec
+        type: unused
+        value: 0
+      -
+        name: header
+        type: nest
+        nested-attributes: header
+      -
+        name: hwtstamp-provider
+        type: nest
+        nested-attributes: ts-hwtstamp-provider
+      -
+        name: tx-types
+        type: nest
+        nested-attributes: bitset
+      -
+        name: rx-filters
+        type: nest
+        nested-attributes: bitset
+      -
+        name: hwtstamp-flags
+        type: nest
+        nested-attributes: bitset
+  -
+    name: pse-ntf
+    attr-cnt-name: --ethtool-a-pse-ntf-cnt
+    attributes:
+      -
+        name: header
+        type: nest
+        nested-attributes: header
+      -
+        name: events
+        type: uint
+        enum: pse-event
+        doc: List of events reported by the PSE controller
 
 operations:
   enum-model: directional
@@ -1393,6 +2084,8 @@ operations:
             - rx-push
             - tx-push-buf-len
             - tx-push-buf-len-max
+            - hds-thresh
+            - hds-thresh-max
       dump: *ring-get-op
     -
       name: rings-set
@@ -1573,6 +2266,7 @@ operations:
         request:
           attributes:
             - header
+            - hwtstamp-provider
         reply:
           attributes:
             - header
@@ -1581,6 +2275,9 @@ operations:
             - rx-filters
             - phc-index
             - stats
+            - hwtstamp-provider
+            - hwtstamp-source
+            - hwtstamp-phyindex
       dump: *tsinfo-get-op
     -
       name: cable-test-act
@@ -1679,14 +2376,14 @@ operations:
         request:
           attributes:
             - header
-        reply:
-          attributes:
-            - header
             - offset
             - length
             - page
             - bank
             - i2c-address
+        reply:
+          attributes:
+            - header
             - data
       dump: *module-eeprom-get-op
     -
@@ -1776,6 +2473,9 @@ operations:
             - c33-pse-ext-substate
             - c33-pse-avail-pw-limit
             - c33-pse-pw-limit-ranges
+            - pse-pw-d-id
+            - pse-prio-max
+            - pse-prio
       dump: *pse-get-op
     -
       name: pse-set
@@ -1790,6 +2490,7 @@ operations:
             - podl-pse-admin-control
             - c33-pse-admin-control
             - c33-pse-avail-pw-limit
+            - pse-prio
     -
       name: rss-get
       doc: Get RSS params.
@@ -1808,7 +2509,8 @@ operations:
             - hfunc
             - indir
             - hkey
-            - input_xfrm
+            - input-xfrm
+            - flow-hash
       dump:
         request:
           attributes:
@@ -1951,3 +2653,112 @@ operations:
             - upstream-sfp-name
             - downstream-sfp-name
       dump: *phy-get-op
+    -
+      name: phy-ntf
+      doc: Notification for change in PHY devices.
+      notify: phy-get
+    -
+      name: tsconfig-get
+      doc: Get hwtstamp config.
+
+      attribute-set: tsconfig
+
+      do: &tsconfig-get-op
+        request:
+          attributes:
+            - header
+        reply:
+          attributes: &tsconfig
+            - header
+            - hwtstamp-provider
+            - tx-types
+            - rx-filters
+            - hwtstamp-flags
+      dump: *tsconfig-get-op
+    -
+      name: tsconfig-set
+      doc: Set hwtstamp config.
+
+      attribute-set: tsconfig
+
+      do:
+        request:
+          attributes: *tsconfig
+        reply:
+          attributes: *tsconfig
+    -
+      name: pse-ntf
+      doc: Notification for PSE events.
+
+      attribute-set: pse-ntf
+
+      event:
+        attributes:
+          - header
+          - events
+    -
+      name: rss-set
+      doc: Set RSS params.
+
+      attribute-set: rss
+
+      do:
+        request:
+          attributes:
+            - header
+            - context
+            - hfunc
+            - indir
+            - hkey
+            - input-xfrm
+            - flow-hash
+    -
+      name: rss-ntf
+      doc: |
+        Notification for change in RSS configuration.
+        For additional contexts only modifications use this notification,
+        creation and deletion have dedicated messages.
+      notify: rss-get
+    -
+      name: rss-create-act
+      doc: Create an RSS context.
+      attribute-set: rss
+      do:
+        request: &rss-create-attrs
+          attributes:
+            - header
+            - context
+            - hfunc
+            - indir
+            - hkey
+            - input-xfrm
+        reply: *rss-create-attrs
+    -
+      name: rss-create-ntf
+      doc: |
+        Notification for creation of an additional RSS context.
+      notify: rss-create-act
+    -
+      name: rss-delete-act
+      doc: Delete an RSS context.
+      attribute-set: rss
+      do:
+        request:
+          attributes:
+            - header
+            - context
+    -
+      name: rss-delete-ntf
+      doc: |
+        Notification for deletion of an additional RSS context.
+      attribute-set: rss
+      event:
+        attributes:
+          - header
+          - context
+
+mcast-groups:
+  list:
+    -
+      name: monitor
+      c-define-name: ethtool-mcgrp-monitor-name

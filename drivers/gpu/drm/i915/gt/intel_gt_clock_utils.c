@@ -35,9 +35,7 @@ static u32 gen11_get_crystal_clock_freq(struct intel_uncore *uncore,
 	u32 f24_mhz = 24000000;
 	u32 f25_mhz = 25000000;
 	u32 f38_4_mhz = 38400000;
-	u32 crystal_clock =
-		(rpm_config_reg & GEN11_RPM_CONFIG0_CRYSTAL_CLOCK_FREQ_MASK) >>
-		GEN11_RPM_CONFIG0_CRYSTAL_CLOCK_FREQ_SHIFT;
+	u32 crystal_clock = rpm_config_reg & GEN11_RPM_CONFIG0_CRYSTAL_CLOCK_FREQ_MASK;
 
 	switch (crystal_clock) {
 	case GEN11_RPM_CONFIG0_CRYSTAL_CLOCK_FREQ_24_MHZ:
@@ -80,8 +78,7 @@ static u32 gen11_read_clock_frequency(struct intel_uncore *uncore)
 		 * register increments from this frequency (it might
 		 * increment only every few clock cycle).
 		 */
-		freq >>= 3 - ((c0 & GEN10_RPM_CONFIG0_CTC_SHIFT_PARAMETER_MASK) >>
-			      GEN10_RPM_CONFIG0_CTC_SHIFT_PARAMETER_SHIFT);
+		freq >>= 3 - REG_FIELD_GET(GEN10_RPM_CONFIG0_CTC_SHIFT_PARAMETER_MASK, c0);
 	}
 
 	return freq;
@@ -102,8 +99,7 @@ static u32 gen9_read_clock_frequency(struct intel_uncore *uncore)
 		 * register increments from this frequency (it might
 		 * increment only every few clock cycle).
 		 */
-		freq >>= 3 - ((ctc_reg & CTC_SHIFT_PARAMETER_MASK) >>
-			      CTC_SHIFT_PARAMETER_SHIFT);
+		freq >>= 3 - REG_FIELD_GET(CTC_SHIFT_PARAMETER_MASK, ctc_reg);
 	}
 
 	return freq;
@@ -152,7 +148,7 @@ static u32 gen4_read_clock_frequency(struct intel_uncore *uncore)
 	 *
 	 * Testing on actual hardware has shown there is no /16.
 	 */
-	return DIV_ROUND_CLOSEST(i9xx_fsb_freq(uncore->i915), 4) * 1000;
+	return DIV_ROUND_CLOSEST(intel_fsb_freq(uncore->i915), 4) * 1000;
 }
 
 static u32 read_clock_frequency(struct intel_uncore *uncore)
@@ -209,7 +205,7 @@ static u64 div_u64_roundup(u64 nom, u32 den)
 
 u64 intel_gt_clock_interval_to_ns(const struct intel_gt *gt, u64 count)
 {
-	return div_u64_roundup(count * NSEC_PER_SEC, gt->clock_frequency);
+	return mul_u64_u32_div(count, NSEC_PER_SEC, gt->clock_frequency);
 }
 
 u64 intel_gt_pm_interval_to_ns(const struct intel_gt *gt, u64 count)
@@ -219,7 +215,7 @@ u64 intel_gt_pm_interval_to_ns(const struct intel_gt *gt, u64 count)
 
 u64 intel_gt_ns_to_clock_interval(const struct intel_gt *gt, u64 ns)
 {
-	return div_u64_roundup(gt->clock_frequency * ns, NSEC_PER_SEC);
+	return mul_u64_u32_div(ns, gt->clock_frequency, NSEC_PER_SEC);
 }
 
 u64 intel_gt_ns_to_pm_interval(const struct intel_gt *gt, u64 ns)

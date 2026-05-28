@@ -13,6 +13,7 @@
 #include <linux/device.h>
 #include <linux/devm-helpers.h>
 #include <linux/errno.h>
+#include <linux/gpio/consumer.h>
 #include <linux/gpio/driver.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
@@ -28,7 +29,7 @@
 #define OMNIA_CMD_INT_ARG_LEN		8
 #define FRONT_BUTTON_RELEASE_DELAY_MS	50
 
-static const char * const omnia_mcu_gpio_templates[64] = {
+static const char * const omnia_mcu_gpio_names[64] = {
 	/* GPIOs with value read from the 16-bit wide status */
 	[4]  = "MiniPCIe0 Card Detect",
 	[5]  = "MiniPCIe0 mSATA Indicator",
@@ -195,7 +196,7 @@ static const struct omnia_gpio omnia_gpios[64] = {
 };
 
 /* mapping from interrupts to indexes of GPIOs in the omnia_gpios array */
-const u8 omnia_int_to_gpio_idx[32] = {
+static const u8 omnia_int_to_gpio_idx[32] = {
 	[__bf_shf(OMNIA_INT_CARD_DET)]			= 4,
 	[__bf_shf(OMNIA_INT_MSATA_IND)]			= 5,
 	[__bf_shf(OMNIA_INT_USB30_OVC)]			= 6,
@@ -438,27 +439,28 @@ static int omnia_gpio_get_multiple(struct gpio_chip *gc, unsigned long *mask,
 	return 0;
 }
 
-static void omnia_gpio_set(struct gpio_chip *gc, unsigned int offset, int value)
+static int omnia_gpio_set(struct gpio_chip *gc, unsigned int offset, int value)
 {
 	const struct omnia_gpio *gpio = &omnia_gpios[offset];
 	struct omnia_mcu *mcu = gpiochip_get_data(gc);
 	u16 val, mask;
 
 	if (!gpio->ctl_cmd)
-		return;
+		return -EINVAL;
 
 	mask = BIT(gpio->ctl_bit);
 	val = value ? mask : 0;
 
-	omnia_ctl_cmd(mcu, gpio->ctl_cmd, val, mask);
+	return omnia_ctl_cmd(mcu, gpio->ctl_cmd, val, mask);
 }
 
-static void omnia_gpio_set_multiple(struct gpio_chip *gc, unsigned long *mask,
-				    unsigned long *bits)
+static int omnia_gpio_set_multiple(struct gpio_chip *gc, unsigned long *mask,
+				   unsigned long *bits)
 {
 	unsigned long ctl = 0, ctl_mask = 0, ext_ctl = 0, ext_ctl_mask = 0;
 	struct omnia_mcu *mcu = gpiochip_get_data(gc);
 	unsigned int i;
+	int err;
 
 	for_each_set_bit(i, mask, ARRAY_SIZE(omnia_gpios)) {
 		unsigned long *field, *field_mask;
@@ -487,13 +489,21 @@ static void omnia_gpio_set_multiple(struct gpio_chip *gc, unsigned long *mask,
 
 	guard(mutex)(&mcu->lock);
 
-	if (ctl_mask)
-		omnia_ctl_cmd_locked(mcu, OMNIA_CMD_GENERAL_CONTROL,
-				     ctl, ctl_mask);
+	if (ctl_mask) {
+		err = omnia_ctl_cmd_locked(mcu, OMNIA_CMD_GENERAL_CONTROL,
+					   ctl, ctl_mask);
+		if (err)
+			return err;
+	}
 
-	if (ext_ctl_mask)
-		omnia_ctl_cmd_locked(mcu, OMNIA_CMD_EXT_CONTROL,
-				     ext_ctl, ext_ctl_mask);
+	if (ext_ctl_mask) {
+		err = omnia_ctl_cmd_locked(mcu, OMNIA_CMD_EXT_CONTROL,
+					   ext_ctl, ext_ctl_mask);
+		if (err)
+			return err;
+	}
+
+	return 0;
 }
 
 static bool omnia_gpio_available(struct omnia_mcu *mcu,
@@ -1018,7 +1028,7 @@ int omnia_mcu_register_gpiochip(struct omnia_mcu *mcu)
 	mcu->gc.set_multiple = omnia_gpio_set_multiple;
 	mcu->gc.init_valid_mask = omnia_gpio_init_valid_mask;
 	mcu->gc.can_sleep = true;
-	mcu->gc.names = omnia_mcu_gpio_templates;
+	mcu->gc.names = omnia_mcu_gpio_names;
 	mcu->gc.base = -1;
 	mcu->gc.ngpio = ARRAY_SIZE(omnia_gpios);
 	mcu->gc.label = "Turris Omnia MCU GPIOs";
@@ -1092,4 +1102,22 @@ int omnia_mcu_register_gpiochip(struct omnia_mcu *mcu)
 	}
 
 	return 0;
+}
+
+int omnia_mcu_request_irq(struct omnia_mcu *mcu, u32 spec,
+			  irq_handler_t thread_fn, const char *devname)
+{
+	u8 irq_idx;
+	int irq;
+
+	if (!spec)
+		return -EINVAL;
+
+	irq_idx = omnia_int_to_gpio_idx[ffs(spec) - 1];
+	irq = gpiod_to_irq(gpio_device_get_desc(mcu->gc.gpiodev, irq_idx));
+	if (irq < 0)
+		return irq;
+
+	return devm_request_threaded_irq(&mcu->client->dev, irq, NULL,
+					 thread_fn, IRQF_ONESHOT, devname, mcu);
 }

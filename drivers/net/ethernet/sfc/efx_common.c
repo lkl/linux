@@ -635,22 +635,6 @@ int __efx_reconfigure_port(struct efx_nic *efx)
 	return rc;
 }
 
-/* Reinitialise the MAC to pick up new PHY settings, even if the port is
- * disabled.
- */
-int efx_reconfigure_port(struct efx_nic *efx)
-{
-	int rc;
-
-	EFX_ASSERT_RESET_SERIALISED(efx);
-
-	mutex_lock(&efx->mac_lock);
-	rc = __efx_reconfigure_port(efx);
-	mutex_unlock(&efx->mac_lock);
-
-	return rc;
-}
-
 /**************************************************************************
  *
  * Device reset and suspend
@@ -1019,6 +1003,7 @@ int efx_init_struct(struct efx_nic *efx, struct pci_dev *pci_dev)
 	INIT_LIST_HEAD(&efx->vf_reps);
 	INIT_WORK(&efx->mac_work, efx_mac_work);
 	init_waitqueue_head(&efx->flush_wq);
+	mutex_init(&efx->reflash_mutex);
 
 	efx->tx_queues_per_channel = 1;
 	efx->rxq_entries = EFX_DEFAULT_DMAQ_SIZE;
@@ -1273,9 +1258,6 @@ out:
 
 /* For simplicity and reliability, we always require a slot reset and try to
  * reset the hardware when a pci error affecting the device is detected.
- * We leave both the link_reset and mmio_enabled callback unimplemented:
- * with our request for slot reset the mmio_enabled callback will never be
- * called, and the link_reset callback is not used by AER or EEH mechanisms.
  */
 const struct pci_error_handlers efx_err_handlers = {
 	.error_detected = efx_io_error_detected,

@@ -24,7 +24,7 @@
 #define pr_fmt(fmt)     "hisi_pmu: " fmt
 
 #define HISI_PMU_V2		0x30
-#define HISI_MAX_COUNTERS 0x10
+#define HISI_MAX_COUNTERS	0x18
 #define to_hisi_pmu(p)	(container_of(p, struct hisi_pmu, pmu))
 
 #define HISI_PMU_ATTR(_name, _func, _config)				\
@@ -43,7 +43,8 @@
 		return FIELD_GET(GENMASK_ULL(hi, lo), event->attr.config);  \
 	}
 
-#define HISI_GET_EVENTID(ev) (ev->hw.config_base & 0xff)
+#define HISI_EVENTID_MASK		GENMASK(7, 0)
+#define HISI_GET_EVENTID(ev)		((ev)->hw.config_base & HISI_EVENTID_MASK)
 
 #define HISI_PMU_EVTYPE_BITS		8
 #define HISI_PMU_EVTYPE_SHIFT(idx)	((idx) % 4 * HISI_PMU_EVTYPE_BITS)
@@ -72,6 +73,8 @@ struct hisi_uncore_ops {
 struct hisi_pmu_dev_info {
 	const char *name;
 	const struct attribute_group **attr_groups;
+	u32 counter_bits;
+	u32 check_event;
 	void *private;
 };
 
@@ -81,33 +84,65 @@ struct hisi_pmu_hwevents {
 	const struct attribute_group **attr_groups;
 };
 
+/**
+ * struct hisi_pmu_topology - Describe the topology hierarchy on which the PMU
+ *                            is located.
+ * @sccl_id: ID of the SCCL on which the PMU locate is located.
+ * @sicl_id: ID of the SICL on which the PMU locate is located.
+ * @scl_id:  ID used by the core which is unaware of the SCCL/SICL.
+ * @ccl_id: ID of the CCL (CPU cluster) on which the PMU is located.
+ * @index_id: the ID of the PMU module if there're several PMUs at a
+ *            particularly location in the topology.
+ * @sub_id: submodule ID of the PMU. For example we use this for DDRC PMU v2
+ *          since each DDRC has more than one DMC
+ *
+ * The ID will be -1 if the PMU isn't located on a certain topology.
+ */
+struct hisi_pmu_topology {
+	/*
+	 * SCCL (Super CPU CLuster) and SICL (Super I/O Cluster) are parallel
+	 * so a PMU cannot locate on a SCCL and a SICL. If the SCCL/SICL
+	 * distinction is not relevant, use scl_id instead.
+	 */
+	union {
+		int sccl_id;
+		int sicl_id;
+		int scl_id;
+	};
+	int ccl_id;
+	int index_id;
+	int sub_id;
+};
+
 /* Generic pmu struct for different pmu types */
 struct hisi_pmu {
 	struct pmu pmu;
 	const struct hisi_uncore_ops *ops;
 	const struct hisi_pmu_dev_info *dev_info;
 	struct hisi_pmu_hwevents pmu_events;
-	/* associated_cpus: All CPUs associated with the PMU */
+	struct hisi_pmu_topology topo;
+	/*
+	 * CPUs associated to the PMU and are preferred to use for counting.
+	 * Could be empty if PMU has no association (e.g. PMU on SICL), in
+	 * which case any online CPU will be used.
+	 */
 	cpumask_t associated_cpus;
 	/* CPU used for counting */
 	int on_cpu;
 	int irq;
 	struct device *dev;
 	struct hlist_node node;
-	int sccl_id;
-	int sicl_id;
-	int ccl_id;
 	void __iomem *base;
-	/* the ID of the PMU modules */
-	u32 index_id;
-	/* For DDRC PMU v2: each DDRC has more than one DMC */
-	u32 sub_id;
 	int num_counters;
 	int counter_bits;
 	/* check event code range */
 	int check_event;
 	u32 identifier;
 };
+
+/* Generic implementation of cpumask/identifier group */
+extern const struct attribute_group hisi_pmu_cpumask_attr_group;
+extern const struct attribute_group hisi_pmu_identifier_group;
 
 int hisi_uncore_pmu_get_event_idx(struct perf_event *event);
 void hisi_uncore_pmu_read(struct perf_event *event);
@@ -130,8 +165,10 @@ int hisi_uncore_pmu_offline_cpu(unsigned int cpu, struct hlist_node *node);
 ssize_t hisi_uncore_pmu_identifier_attr_show(struct device *dev,
 					     struct device_attribute *attr,
 					     char *page);
+irqreturn_t hisi_uncore_pmu_isr(int irq, void *data);
 int hisi_uncore_pmu_init_irq(struct hisi_pmu *hisi_pmu,
 			     struct platform_device *pdev);
+void hisi_uncore_pmu_init_topology(struct hisi_pmu *hisi_pmu, struct device *dev);
 
 void hisi_pmu_init(struct hisi_pmu *hisi_pmu, struct module *module);
 #endif /* __HISI_UNCORE_PMU_H__ */

@@ -12,6 +12,7 @@
 #include <linux/mcb.h>
 #include <linux/bitops.h>
 #include <linux/gpio/driver.h>
+#include <linux/gpio/generic.h>
 
 #define MEN_Z127_CTRL	0x00
 #define MEN_Z127_PSR	0x04
@@ -30,7 +31,7 @@
 					 (db <= MEN_Z127_DB_MAX_US))
 
 struct men_z127_gpio {
-	struct gpio_chip gc;
+	struct gpio_generic_chip chip;
 	void __iomem *reg_base;
 	struct resource *mem;
 };
@@ -64,7 +65,7 @@ static int men_z127_debounce(struct gpio_chip *gc, unsigned gpio,
 		debounce /= 50;
 	}
 
-	raw_spin_lock(&gc->bgpio_lock);
+	guard(gpio_generic_lock)(&priv->chip);
 
 	db_en = readl(priv->reg_base + MEN_Z127_DBER);
 
@@ -79,8 +80,6 @@ static int men_z127_debounce(struct gpio_chip *gc, unsigned gpio,
 	writel(db_en, priv->reg_base + MEN_Z127_DBER);
 	writel(db_cnt, priv->reg_base + GPIO_TO_DBCNT_REG(gpio));
 
-	raw_spin_unlock(&gc->bgpio_lock);
-
 	return 0;
 }
 
@@ -91,7 +90,8 @@ static int men_z127_set_single_ended(struct gpio_chip *gc,
 	struct men_z127_gpio *priv = gpiochip_get_data(gc);
 	u32 od_en;
 
-	raw_spin_lock(&gc->bgpio_lock);
+	guard(gpio_generic_lock)(&priv->chip);
+
 	od_en = readl(priv->reg_base + MEN_Z127_ODER);
 
 	if (param == PIN_CONFIG_DRIVE_OPEN_DRAIN)
@@ -101,7 +101,6 @@ static int men_z127_set_single_ended(struct gpio_chip *gc,
 		od_en &= ~BIT(offset);
 
 	writel(od_en, priv->reg_base + MEN_Z127_ODER);
-	raw_spin_unlock(&gc->bgpio_lock);
 
 	return 0;
 }
@@ -127,9 +126,17 @@ static int men_z127_set_config(struct gpio_chip *gc, unsigned offset,
 	return -ENOTSUPP;
 }
 
+static void men_z127_release_mem(void *data)
+{
+	struct resource *res = data;
+
+	mcb_release_mem(res);
+}
+
 static int men_z127_probe(struct mcb_device *mdev,
 			  const struct mcb_device_id *id)
 {
+	struct gpio_generic_chip_config config;
 	struct men_z127_gpio *men_z127_gpio;
 	struct device *dev = &mdev->dev;
 	int ret;
@@ -140,55 +147,42 @@ static int men_z127_probe(struct mcb_device *mdev,
 		return -ENOMEM;
 
 	men_z127_gpio->mem = mcb_request_mem(mdev, dev_name(dev));
-	if (IS_ERR(men_z127_gpio->mem)) {
-		dev_err(dev, "failed to request device memory");
-		return PTR_ERR(men_z127_gpio->mem);
-	}
+	if (IS_ERR(men_z127_gpio->mem))
+		return dev_err_probe(dev, PTR_ERR(men_z127_gpio->mem),
+				     "failed to request device memory");
 
-	men_z127_gpio->reg_base = ioremap(men_z127_gpio->mem->start,
-					  resource_size(men_z127_gpio->mem));
-	if (men_z127_gpio->reg_base == NULL) {
-		ret = -ENXIO;
-		goto err_release;
-	}
+	ret = devm_add_action_or_reset(dev, men_z127_release_mem,
+				       men_z127_gpio->mem);
+	if (ret)
+		return ret;
+
+	men_z127_gpio->reg_base = devm_ioremap(dev, men_z127_gpio->mem->start,
+					resource_size(men_z127_gpio->mem));
+	if (men_z127_gpio->reg_base == NULL)
+		return -ENXIO;
 
 	mcb_set_drvdata(mdev, men_z127_gpio);
 
-	ret = bgpio_init(&men_z127_gpio->gc, &mdev->dev, 4,
-			 men_z127_gpio->reg_base + MEN_Z127_PSR,
-			 men_z127_gpio->reg_base + MEN_Z127_CTRL,
-			 NULL,
-			 men_z127_gpio->reg_base + MEN_Z127_GPIODR,
-			 NULL, 0);
+	config = (struct gpio_generic_chip_config) {
+		.dev = &mdev->dev,
+		.sz = 4,
+		.dat = men_z127_gpio->reg_base + MEN_Z127_PSR,
+		.set = men_z127_gpio->reg_base + MEN_Z127_CTRL,
+		.dirout = men_z127_gpio->reg_base + MEN_Z127_GPIODR,
+	};
+
+	ret = gpio_generic_chip_init(&men_z127_gpio->chip, &config);
 	if (ret)
-		goto err_unmap;
+		return ret;
 
-	men_z127_gpio->gc.set_config = men_z127_set_config;
+	men_z127_gpio->chip.gc.set_config = men_z127_set_config;
 
-	ret = gpiochip_add_data(&men_z127_gpio->gc, men_z127_gpio);
-	if (ret) {
-		dev_err(dev, "failed to register MEN 16Z127 GPIO controller");
-		goto err_unmap;
-	}
-
-	dev_info(dev, "MEN 16Z127 GPIO driver registered");
+	ret = devm_gpiochip_add_data(dev, &men_z127_gpio->chip.gc, men_z127_gpio);
+	if (ret)
+		return dev_err_probe(dev, ret,
+			"failed to register MEN 16Z127 GPIO controller");
 
 	return 0;
-
-err_unmap:
-	iounmap(men_z127_gpio->reg_base);
-err_release:
-	mcb_release_mem(men_z127_gpio->mem);
-	return ret;
-}
-
-static void men_z127_remove(struct mcb_device *mdev)
-{
-	struct men_z127_gpio *men_z127_gpio = mcb_get_drvdata(mdev);
-
-	gpiochip_remove(&men_z127_gpio->gc);
-	iounmap(men_z127_gpio->reg_base);
-	mcb_release_mem(men_z127_gpio->mem);
 }
 
 static const struct mcb_device_id men_z127_ids[] = {
@@ -202,7 +196,6 @@ static struct mcb_driver men_z127_driver = {
 		.name = "z127-gpio",
 	},
 	.probe = men_z127_probe,
-	.remove = men_z127_remove,
 	.id_table = men_z127_ids,
 };
 module_mcb_driver(men_z127_driver);
@@ -211,4 +204,4 @@ MODULE_AUTHOR("Andreas Werner <andreas.werner@men.de>");
 MODULE_DESCRIPTION("MEN 16z127 GPIO Controller");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("mcb:16z127");
-MODULE_IMPORT_NS(MCB);
+MODULE_IMPORT_NS("MCB");

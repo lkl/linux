@@ -51,8 +51,7 @@ xfs_attr_grab_log_assist(
 		return error;
 	xfs_set_using_logged_xattrs(mp);
 
-	xfs_warn_mount(mp, XFS_OPSTATE_WARNED_LARP,
- "EXPERIMENTAL logged extended attributes feature in use. Use at your own risk!");
+	xfs_warn_experimental(mp, XFS_EXPERIMENTAL_LARP);
 
 	return 0;
 }
@@ -244,7 +243,7 @@ __xfs_xattr_put_listent(
 	offset = context->buffer + context->count;
 	memcpy(offset, prefix, prefix_len);
 	offset += prefix_len;
-	strncpy(offset, (char *)name, namelen);			/* real name */
+	memcpy(offset, (char *)name, namelen);			/* real name */
 	offset += namelen;
 	*offset = '\0';
 

@@ -23,6 +23,7 @@
 #include <linux/uaccess.h>
 #include <linux/kdb.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/ctype.h>
 #include "kdb_private.h"
 
@@ -246,11 +247,41 @@ void kdb_symbol_print(unsigned long addr, const kdb_symtab_t *symtab_p,
  */
 char *kdb_strdup(const char *str, gfp_t type)
 {
-	int n = strlen(str)+1;
+	size_t n = strlen(str) + 1;
 	char *s = kmalloc(n, type);
 	if (!s)
 		return NULL;
-	return strcpy(s, str);
+	memcpy(s, str, n);
+	return s;
+}
+
+/*
+ * kdb_strdup_dequote - same as kdb_strdup(), but trims surrounding quotes from
+ *			the input string if present.
+ * Remarks:
+ *	Quotes are only removed if there is both a leading and a trailing quote.
+ */
+char *kdb_strdup_dequote(const char *str, gfp_t type)
+{
+	size_t len = strlen(str);
+	char *s;
+
+	if (str[0] == '"' && len > 1 && str[len - 1] == '"') {
+		/* trim both leading and trailing quotes */
+		str++;
+		len -= 2;
+	}
+
+	len++; /* add space for NUL terminator */
+
+	s = kmalloc(len, type);
+	if (!s)
+		return NULL;
+
+	memcpy(s, str, len - 1);
+	s[len - 1] = '\0';
+
+	return s;
 }
 
 /*
@@ -305,7 +336,7 @@ int kdb_putarea_size(unsigned long addr, void *res, size_t size)
 
 /*
  * kdb_getphys - Read data from a physical address. Validate the
- * 	address is in range, use kmap_atomic() to get data
+ *	address is in range, use kmap_local_page() to get data
  * 	similar to kdb_getarea() - but for phys addresses
  * Inputs:
  * 	res	Pointer to the word to receive the result
@@ -324,9 +355,9 @@ static int kdb_getphys(void *res, unsigned long addr, size_t size)
 	if (!pfn_valid(pfn))
 		return 1;
 	page = pfn_to_page(pfn);
-	vaddr = kmap_atomic(page);
+	vaddr = kmap_local_page(page);
 	memcpy(res, vaddr + (addr & (PAGE_SIZE - 1)), size);
-	kunmap_atomic(vaddr);
+	kunmap_local(vaddr);
 
 	return 0;
 }
@@ -535,22 +566,4 @@ bool kdb_task_state(const struct task_struct *p, const char *mask)
 		return true;
 
 	return strchr(mask, state);
-}
-
-/* Maintain a small stack of kdb_flags to allow recursion without disturbing
- * the global kdb state.
- */
-
-static int kdb_flags_stack[4], kdb_flags_index;
-
-void kdb_save_flags(void)
-{
-	BUG_ON(kdb_flags_index >= ARRAY_SIZE(kdb_flags_stack));
-	kdb_flags_stack[kdb_flags_index++] = kdb_flags;
-}
-
-void kdb_restore_flags(void)
-{
-	BUG_ON(kdb_flags_index <= 0);
-	kdb_flags = kdb_flags_stack[--kdb_flags_index];
 }

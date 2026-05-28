@@ -382,6 +382,24 @@ int iio_read_channel_scale(struct iio_channel *chan, int *val,
 			   int *val2);
 
 /**
+ * iio_multiply_value() - Multiply an IIO value
+ * @result:	Destination pointer for the multiplication result
+ * @multiplier:	Multiplier.
+ * @type:	One of the IIO_VAL_* constants. This decides how the @val and
+ *		@val2 parameters are interpreted.
+ * @val:	Value being multiplied.
+ * @val2:	Value being multiplied. @val2 use depends on type.
+ *
+ * Multiply an IIO value with a s64 multiplier storing the result as
+ * IIO_VAL_INT. This is typically used for scaling.
+ *
+ * Returns:
+ * IIO_VAL_INT on success or a negative error-number on failure.
+ */
+int iio_multiply_value(int *result, s64 multiplier,
+		       unsigned int type, int val, int val2);
+
+/**
  * iio_convert_raw_to_processed() - Converts a raw value to a processed value
  * @chan:		The channel being queried
  * @raw:		The raw IIO to convert
@@ -418,7 +436,7 @@ unsigned int iio_get_channel_ext_info_count(struct iio_channel *chan);
  * @chan:		The channel being queried.
  * @attr:		The ext_info attribute to read.
  * @buf:		Where to store the attribute value. Assumed to hold
- *			at least PAGE_SIZE bytes.
+ *			at least PAGE_SIZE bytes and to be aligned at PAGE_SIZE.
  *
  * Returns the number of bytes written to buf (perhaps w/o zero termination;
  * it need not even be a string), or an error code.
@@ -445,7 +463,7 @@ ssize_t iio_write_channel_ext_info(struct iio_channel *chan, const char *attr,
  * iio_read_channel_label() - read label for a given channel
  * @chan:		The channel being queried.
  * @buf:		Where to store the attribute value. Assumed to hold
- *			at least PAGE_SIZE bytes.
+ *			at least PAGE_SIZE bytes and to be aligned at PAGE_SIZE.
  *
  * Returns the number of bytes written to buf, or an error code.
  */

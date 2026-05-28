@@ -448,8 +448,8 @@ static u32 meson_i2c_func(struct i2c_adapter *adap)
 }
 
 static const struct i2c_algorithm meson_i2c_algorithm = {
-	.master_xfer = meson_i2c_xfer,
-	.master_xfer_atomic = meson_i2c_xfer_atomic,
+	.xfer = meson_i2c_xfer,
+	.xfer_atomic = meson_i2c_xfer_atomic,
 	.functionality = meson_i2c_func,
 };
 
@@ -565,7 +565,7 @@ MODULE_DEVICE_TABLE(of, meson_i2c_match);
 
 static struct platform_driver meson_i2c_driver = {
 	.probe   = meson_i2c_probe,
-	.remove_new = meson_i2c_remove,
+	.remove = meson_i2c_remove,
 	.driver  = {
 		.name  = "meson-i2c",
 		.of_match_table = meson_i2c_match,

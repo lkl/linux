@@ -35,7 +35,7 @@ jobs:
             shell: msys2 {0}
           - displayTargetName: clang-build
             os: unix
-            runs_on: ubuntu-22.04
+            runs_on: ubuntu-24.04
             shell: bash
             build_options: "LLVM=1 CROSS_COMPILE=x86_64-linux-gnu"
     timeout-minutes: 100
@@ -69,8 +69,12 @@ jobs:
             dosfstools
             mingw-w64-x86_64-ccache
 
+
+      - name: Enable Case Sensitivity
+        if: runner.os == 'Windows'
+        run: fsutil.exe file setCaseSensitiveInfo "$env:GITHUB_WORKSPACE" enable
+        shell: powershell
       - name: Checkout
-        if: runner.os == 'Linux'
         uses: actions/checkout@v4
       - name: Install pip dependencies
         run: pip install ${{ matrix.pip_option }} yamlish junit-xml
@@ -86,19 +90,6 @@ jobs:
           $procLog = Start-Process "powershell" "Get-Content -Path ${{ env.log }} -Wait" -NoNewWindow -PassThru
           $procMain.WaitForExit()
           $procLog.Kill()
-      - name: Partial Clone
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: |
-          REPO="https://${GITHUB_ACTOR}:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git"
-          BRANCH="${GITHUB_REF/#refs\/heads\//}"
-
-          git init .
-          git remote add origin $REPO
-          git config core.sparseCheckout true
-          echo -e '/*\n!*aux.*' >> .git/info/sparse-checkout
-          git -c protocol.version=2 fetch --no-tags --prune --progress --depth=10 origin +${GITHUB_SHA}:refs/remotes/origin/${BRANCH}
-          git checkout --progress --force -B $BRANCH refs/remotes/origin/$BRANCH
 
       - uses: actions/cache@v4
         with:
@@ -186,7 +177,7 @@ jobs:
         run: tools/lkl/scripts/checkpatch.sh
 
   fuzzers:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: fuzzers
     env:
       PROTOBUF_MUTATOR_DIR: /tmp/libprotobuf-mutator

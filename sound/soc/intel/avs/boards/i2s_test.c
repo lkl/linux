@@ -14,8 +14,8 @@
 #include <sound/soc-dapm.h>
 #include "../utils.h"
 
-static int avs_create_dai_link(struct device *dev, const char *platform_name, int ssp_port,
-			       int tdm_slot, struct snd_soc_dai_link **dai_link)
+static int avs_create_dai_link(struct device *dev, int ssp_port, int tdm_slot,
+			       struct snd_soc_dai_link **dai_link)
 {
 	struct snd_soc_dai_link_component *platform;
 	struct snd_soc_dai_link *dl;
@@ -24,8 +24,6 @@ static int avs_create_dai_link(struct device *dev, const char *platform_name, in
 	platform = devm_kzalloc(dev, sizeof(*platform), GFP_KERNEL);
 	if (!dl || !platform)
 		return -ENOMEM;
-
-	platform->name = platform_name;
 
 	dl->name = devm_kasprintf(dev, GFP_KERNEL,
 				  AVS_STRING_FMT("SSP", "-Codec", ssp_port, tdm_slot));
@@ -39,6 +37,7 @@ static int avs_create_dai_link(struct device *dev, const char *platform_name, in
 	if (!dl->cpus->dai_name || !dl->codecs->name || !dl->codecs->dai_name)
 		return -ENOMEM;
 
+	platform->name = dev_name(dev);
 	dl->num_cpus = 1;
 	dl->num_codecs = 1;
 	dl->platforms = platform;
@@ -46,8 +45,6 @@ static int avs_create_dai_link(struct device *dev, const char *platform_name, in
 	dl->id = 0;
 	dl->nonatomic = 1;
 	dl->no_pcm = 1;
-	dl->dpcm_capture = 1;
-	dl->dpcm_playback = 1;
 
 	*dai_link = dl;
 
@@ -58,13 +55,13 @@ static int avs_i2s_test_probe(struct platform_device *pdev)
 {
 	struct snd_soc_dai_link *dai_link;
 	struct snd_soc_acpi_mach *mach;
+	struct avs_mach_pdata *pdata;
 	struct snd_soc_card *card;
 	struct device *dev = &pdev->dev;
-	const char *pname;
 	int ssp_port, tdm_slot, ret;
 
 	mach = dev_get_platdata(dev);
-	pname = mach->mach_params.platform;
+	pdata = mach->pdata;
 
 	if (!avs_mach_singular_ssp(mach)) {
 		dev_err(dev, "Invalid SSP configuration\n");
@@ -82,12 +79,19 @@ static int avs_i2s_test_probe(struct platform_device *pdev)
 	if (!card)
 		return -ENOMEM;
 
-	card->name = devm_kasprintf(dev, GFP_KERNEL,
-				    AVS_STRING_FMT("ssp", "-loopback", ssp_port, tdm_slot));
+	if (pdata->obsolete_card_names) {
+		card->name = devm_kasprintf(dev, GFP_KERNEL,
+					    AVS_STRING_FMT("ssp", "-loopback", ssp_port, tdm_slot));
+	} else {
+		card->driver_name = "avs_i2s_test";
+		card->long_name = card->name = devm_kasprintf(dev, GFP_KERNEL,
+							      AVS_STRING_FMT("AVS I2S TEST-", "",
+									     ssp_port, tdm_slot));
+	}
 	if (!card->name)
 		return -ENOMEM;
 
-	ret = avs_create_dai_link(dev, pname, ssp_port, tdm_slot, &dai_link);
+	ret = avs_create_dai_link(dev, ssp_port, tdm_slot, &dai_link);
 	if (ret) {
 		dev_err(dev, "Failed to create dai link: %d\n", ret);
 		return ret;
@@ -99,11 +103,7 @@ static int avs_i2s_test_probe(struct platform_device *pdev)
 	card->num_links = 1;
 	card->fully_routed = true;
 
-	ret = snd_soc_fixup_dai_links_platform_name(card, pname);
-	if (ret)
-		return ret;
-
-	return devm_snd_soc_register_card(dev, card);
+	return devm_snd_soc_register_deferrable_card(dev, card);
 }
 
 static const struct platform_device_id avs_i2s_test_driver_ids[] = {

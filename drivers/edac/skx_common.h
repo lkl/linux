@@ -29,23 +29,18 @@
 #define GET_BITFIELD(v, lo, hi) \
 	(((v) & GENMASK_ULL((hi), (lo))) >> (lo))
 
-#define SKX_NUM_IMC		2	/* Memory controllers per socket */
 #define SKX_NUM_CHANNELS	3	/* Channels per memory controller */
 #define SKX_NUM_DIMMS		2	/* Max DIMMS per channel */
 
-#define I10NM_NUM_DDR_IMC	12
 #define I10NM_NUM_DDR_CHANNELS	2
 #define I10NM_NUM_DDR_DIMMS	2
 
-#define I10NM_NUM_HBM_IMC	16
 #define I10NM_NUM_HBM_CHANNELS	2
 #define I10NM_NUM_HBM_DIMMS	1
 
-#define I10NM_NUM_IMC		(I10NM_NUM_DDR_IMC + I10NM_NUM_HBM_IMC)
 #define I10NM_NUM_CHANNELS	MAX(I10NM_NUM_DDR_CHANNELS, I10NM_NUM_HBM_CHANNELS)
 #define I10NM_NUM_DIMMS		MAX(I10NM_NUM_DDR_DIMMS, I10NM_NUM_HBM_DIMMS)
 
-#define NUM_IMC		MAX(SKX_NUM_IMC, I10NM_NUM_IMC)
 #define NUM_CHANNELS	MAX(SKX_NUM_CHANNELS, I10NM_NUM_CHANNELS)
 #define NUM_DIMMS	MAX(SKX_NUM_DIMMS, I10NM_NUM_DIMMS)
 
@@ -79,6 +74,47 @@
  */
 #define MCACOD_EXT_MEM_ERR	0x280
 
+/* Max RRL register sets per {,sub-,pseudo-}channel. */
+#define NUM_RRL_SET		4
+/* Max RRL registers per set. */
+#define NUM_RRL_REG		6
+/* Max correctable error count registers. */
+#define NUM_CECNT_REG		8
+
+/* Modes of RRL register set. */
+enum rrl_mode {
+	/* Last read error from patrol scrub. */
+	LRE_SCRUB,
+	/* Last read error from demand. */
+	LRE_DEMAND,
+	/* First read error from patrol scrub. */
+	FRE_SCRUB,
+	/* First read error from demand. */
+	FRE_DEMAND,
+};
+
+/* RRL registers per {,sub-,pseudo-}channel. */
+struct reg_rrl {
+	/* RRL register parts. */
+	int set_num, reg_num;
+	enum rrl_mode modes[NUM_RRL_SET];
+	u32 offsets[NUM_RRL_SET][NUM_RRL_REG];
+	/* RRL register widths in byte per set. */
+	u8 widths[NUM_RRL_REG];
+	/* RRL control bits of the first register per set. */
+	u32 v_mask;
+	u32 uc_mask;
+	u32 over_mask;
+	u32 en_patspr_mask;
+	u32 noover_mask;
+	u32 en_mask;
+
+	/* CORRERRCNT register parts. */
+	int cecnt_num;
+	u32 cecnt_offsets[NUM_CECNT_REG];
+	u8 cecnt_widths[NUM_CECNT_REG];
+};
+
 /*
  * Each cpu socket contains some pci devices that provide global
  * information, and also some that are local to each of the two
@@ -93,6 +129,7 @@ struct skx_dev {
 	struct pci_dev *uracu; /* for i10nm CPU */
 	struct pci_dev *pcu_cr3; /* for HBM memory detection */
 	u32 mcroute;
+	int num_imc;
 	struct skx_imc {
 		struct mem_ctl_info *mci;
 		struct pci_dev *mdev; /* for i10nm CPU */
@@ -103,13 +140,25 @@ struct skx_dev {
 		bool hbm_mc;
 		u8 mc;	/* system wide mc# */
 		u8 lmc;	/* socket relative mc# */
-		u8 src_id, node_id;
+		u8 src_id;
+		/*
+		 * Some server BIOS may hide certain memory controllers, and the
+		 * EDAC driver skips those hidden memory controllers. However, the
+		 * ADXL still decodes memory error address using physical memory
+		 * controller indices. The mapping table is used to convert the
+		 * physical indices (reported by ADXL) to the logical indices
+		 * (used the EDAC driver) of present memory controllers during the
+		 * error handling process.
+		 */
+		u8 mc_mapping;
 		struct skx_channel {
 			struct pci_dev	*cdev;
 			struct pci_dev	*edev;
-			u32 retry_rd_err_log_s;
-			u32 retry_rd_err_log_d;
-			u32 retry_rd_err_log_d2;
+			/*
+			 * Two groups of RRL control registers per channel to save default RRL
+			 * settings of two {sub-,pseudo-}channels in Linux RRL control mode.
+			 */
+			u32 rrl_ctl[2][NUM_RRL_SET];
 			struct skx_dimm {
 				u8 close_pg;
 				u8 bank_xor_enable;
@@ -118,7 +167,7 @@ struct skx_dev {
 				u8 colbits;
 			} dimms[NUM_DIMMS];
 		} chan[NUM_CHANNELS];
-	} imc[NUM_IMC];
+	} imc[];
 };
 
 struct skx_pvt {
@@ -144,6 +193,13 @@ enum {
 	INDEX_NM_DIMM,
 	INDEX_NM_CS,
 	INDEX_MAX
+};
+
+enum error_source {
+	ERR_SRC_1LM,
+	ERR_SRC_2LM_NM,
+	ERR_SRC_2LM_FM,
+	ERR_SRC_NOT_MEMORY,
 };
 
 #define BIT_NM_MEMCTRL	BIT_ULL(INDEX_NM_MEMCTRL)
@@ -215,14 +271,10 @@ struct res_config {
 	/* HBM mdev device BDF */
 	struct pci_bdf hbm_mdev_bdf;
 	int sad_all_offset;
-	/* Offsets of retry_rd_err_log registers */
-	u32 *offsets_scrub;
-	u32 *offsets_scrub_hbm0;
-	u32 *offsets_scrub_hbm1;
-	u32 *offsets_demand;
-	u32 *offsets_demand2;
-	u32 *offsets_demand_hbm0;
-	u32 *offsets_demand_hbm1;
+	/* RRL register sets per DDR channel */
+	struct reg_rrl *reg_rrl_ddr;
+	/* RRL register sets per HBM channel */
+	struct reg_rrl *reg_rrl_hbm[2];
 };
 
 typedef int (*get_dimm_config_f)(struct mem_ctl_info *mci,
@@ -234,9 +286,10 @@ int skx_adxl_get(void);
 void skx_adxl_put(void);
 void skx_set_decode(skx_decode_f decode, skx_show_retry_log_f show_retry_log);
 void skx_set_mem_cfg(bool mem_cfg_2lm);
+void skx_set_res_cfg(struct res_config *cfg);
+void skx_set_mc_mapping(struct skx_dev *d, u8 pmc, u8 lmc);
 
 int skx_get_src_id(struct skx_dev *d, int off, u8 *id);
-int skx_get_node_id(struct skx_dev *d, u8 *id);
 
 int skx_get_all_bus_mappings(struct res_config *cfg, struct list_head **list);
 

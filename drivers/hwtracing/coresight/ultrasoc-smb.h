@@ -7,6 +7,7 @@
 #ifndef _ULTRASOC_SMB_H
 #define _ULTRASOC_SMB_H
 
+#include <linux/bitfield.h>
 #include <linux/miscdevice.h>
 #include <linux/spinlock.h>
 
@@ -115,7 +116,7 @@ struct smb_drv_data {
 	struct coresight_device	*csdev;
 	struct smb_data_buffer sdb;
 	struct miscdevice miscdev;
-	spinlock_t spinlock;
+	raw_spinlock_t spinlock;
 	bool reading;
 	pid_t pid;
 };

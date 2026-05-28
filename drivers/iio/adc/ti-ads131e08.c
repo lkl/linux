@@ -102,7 +102,7 @@ struct ads131e08_state {
 	struct completion completion;
 	struct {
 		u8 data[ADS131E08_NUM_DATA_BYTES_MAX];
-		s64 ts __aligned(8);
+		aligned_s64 ts;
 	} tmp_buf;
 
 	u8 tx_buf[3] __aligned(IIO_DMA_MINALIGN);
@@ -505,12 +505,11 @@ static int ads131e08_read_raw(struct iio_dev *indio_dev,
 
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
-		ret = iio_device_claim_direct_mode(indio_dev);
-		if (ret)
-			return ret;
+		if (!iio_device_claim_direct(indio_dev))
+			return -EBUSY;
 
 		ret = ads131e08_read_direct(indio_dev, channel, value);
-		iio_device_release_direct_mode(indio_dev);
+		iio_device_release_direct(indio_dev);
 		if (ret)
 			return ret;
 
@@ -551,12 +550,11 @@ static int ads131e08_write_raw(struct iio_dev *indio_dev,
 
 	switch (mask) {
 	case IIO_CHAN_INFO_SAMP_FREQ:
-		ret = iio_device_claim_direct_mode(indio_dev);
-		if (ret)
-			return ret;
+		if (!iio_device_claim_direct(indio_dev))
+			return -EBUSY;
 
 		ret = ads131e08_set_data_rate(st, value);
-		iio_device_release_direct_mode(indio_dev);
+		iio_device_release_direct(indio_dev);
 		return ret;
 
 	default:
@@ -627,7 +625,7 @@ static irqreturn_t ads131e08_trigger_handler(int irq, void *private)
 	 * 16 bits of data into the buffer.
 	 */
 	unsigned int num_bytes = ADS131E08_NUM_DATA_BYTES(st->data_rate);
-	u8 tweek_offset = num_bytes == 2 ? 1 : 0;
+	u8 tweak_offset = num_bytes == 2 ? 1 : 0;
 
 	if (iio_trigger_using_own(indio_dev))
 		ret = ads131e08_read_data(st, st->readback_len);
@@ -642,32 +640,32 @@ static irqreturn_t ads131e08_trigger_handler(int irq, void *private)
 		dest = st->tmp_buf.data + i * ADS131E08_NUM_STORAGE_BYTES;
 
 		/*
-		 * Tweek offset is 0:
+		 * Tweak offset is 0:
 		 * +---+---+---+---+
 		 * |D0 |D1 |D2 | X | (3 data bytes)
 		 * +---+---+---+---+
 		 *  a+0 a+1 a+2 a+3
 		 *
-		 * Tweek offset is 1:
+		 * Tweak offset is 1:
 		 * +---+---+---+---+
 		 * |P0 |D0 |D1 | X | (one padding byte and 2 data bytes)
 		 * +---+---+---+---+
 		 *  a+0 a+1 a+2 a+3
 		 */
-		memcpy(dest + tweek_offset, src, num_bytes);
+		memcpy(dest + tweak_offset, src, num_bytes);
 
 		/*
 		 * Data conversion from 16 bits of data to 24 bits of data
 		 * is done by sign extension (properly filling padding byte).
 		 */
-		if (tweek_offset)
+		if (tweak_offset)
 			*dest = *src & BIT(7) ? 0xff : 0x00;
 
 		i++;
 	}
 
-	iio_push_to_buffers_with_timestamp(indio_dev, st->tmp_buf.data,
-		iio_get_time_ns(indio_dev));
+	iio_push_to_buffers_with_ts(indio_dev, &st->tmp_buf, sizeof(st->tmp_buf),
+				    iio_get_time_ns(indio_dev));
 
 out:
 	iio_trigger_notify_done(indio_dev->trig);
@@ -809,10 +807,8 @@ static int ads131e08_probe(struct spi_device *spi)
 	}
 
 	indio_dev = devm_iio_device_alloc(&spi->dev, sizeof(*st));
-	if (!indio_dev) {
-		dev_err(&spi->dev, "failed to allocate IIO device\n");
+	if (!indio_dev)
 		return -ENOMEM;
-	}
 
 	st = iio_priv(indio_dev);
 	st->info = info;
@@ -843,10 +839,8 @@ static int ads131e08_probe(struct spi_device *spi)
 
 	st->trig = devm_iio_trigger_alloc(&spi->dev, "%s-dev%d",
 		indio_dev->name, iio_device_id(indio_dev));
-	if (!st->trig) {
-		dev_err(&spi->dev, "failed to allocate IIO trigger\n");
+	if (!st->trig)
 		return -ENOMEM;
-	}
 
 	st->trig->ops = &ads131e08_trigger_ops;
 	st->trig->dev.parent = &spi->dev;

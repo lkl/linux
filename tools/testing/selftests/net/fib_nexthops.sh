@@ -76,11 +76,13 @@ log_test()
 		printf "TEST: %-60s  [ OK ]\n" "${msg}"
 		nsuccess=$((nsuccess+1))
 	else
-		ret=1
-		nfail=$((nfail+1))
 		if [[ $rc -eq $ksft_skip ]]; then
+			[[ $ret -eq 0 ]] && ret=$ksft_skip
+			nskip=$((nskip+1))
 			printf "TEST: %-60s  [SKIP]\n" "${msg}"
 		else
+			ret=1
+			nfail=$((nfail+1))
 			printf "TEST: %-60s  [FAIL]\n" "${msg}"
 		fi
 
@@ -465,8 +467,8 @@ ipv6_fdb_grp_fcnal()
 	log_test $? 0 "Get Fdb nexthop group by id"
 
 	# fdb nexthop group can only contain fdb nexthops
-	run_cmd "$IP nexthop add id 63 via 2001:db8:91::4"
-	run_cmd "$IP nexthop add id 64 via 2001:db8:91::5"
+	run_cmd "$IP nexthop add id 63 via 2001:db8:91::4 dev veth1"
+	run_cmd "$IP nexthop add id 64 via 2001:db8:91::5 dev veth1"
 	run_cmd "$IP nexthop add id 103 group 63/64 fdb"
 	log_test $? 2 "Fdb Nexthop group with non-fdb nexthops"
 
@@ -491,6 +493,26 @@ ipv6_fdb_grp_fcnal()
 	# fdb nexthop with encap
 	run_cmd "$IP nexthop add id 69 encap mpls 101 via 2001:db8:91::8 dev veth1 fdb"
 	log_test $? 2 "Fdb Nexthop with encap"
+
+	# Replace FDB nexthop to non-FDB and vice versa
+	run_cmd "$IP nexthop add id 70 via 2001:db8:91::2 fdb"
+	run_cmd "$IP nexthop replace id 70 via 2001:db8:91::2 dev veth1"
+	log_test $? 0 "Replace FDB nexthop to non-FDB nexthop"
+	run_cmd "$IP nexthop replace id 70 via 2001:db8:91::2 fdb"
+	log_test $? 0 "Replace non-FDB nexthop to FDB nexthop"
+
+	# Replace FDB nexthop address while in a group
+	run_cmd "$IP nexthop add id 71 group 70 fdb"
+	run_cmd "$IP nexthop replace id 70 via 2001:db8:91::3 fdb"
+	log_test $? 0 "Replace FDB nexthop address while in a group"
+
+	# Cannot replace FDB nexthop to non-FDB and vice versa while in a group
+	run_cmd "$IP nexthop replace id 70 via 2001:db8:91::2 dev veth1"
+	log_test $? 2 "Replace FDB nexthop to non-FDB nexthop while in a group"
+	run_cmd "$IP nexthop add id 72 via 2001:db8:91::2 dev veth1"
+	run_cmd "$IP nexthop add id 73 group 72"
+	run_cmd "$IP nexthop replace id 72 via 2001:db8:91::2 fdb"
+	log_test $? 2 "Replace non-FDB nexthop to FDB nexthop while in a group"
 
 	run_cmd "$IP link add name vx10 type vxlan id 1010 local 2001:db8:91::9 remote 2001:db8:91::10 dstport 4789 nolearning noudpcsum tos inherit ttl 100"
 	run_cmd "$BRIDGE fdb add 02:02:00:00:00:13 dev vx10 nhid 102 self"
@@ -545,15 +567,15 @@ ipv4_fdb_grp_fcnal()
 	log_test $? 0 "Get Fdb nexthop group by id"
 
 	# fdb nexthop group can only contain fdb nexthops
-	run_cmd "$IP nexthop add id 14 via 172.16.1.2"
-	run_cmd "$IP nexthop add id 15 via 172.16.1.3"
+	run_cmd "$IP nexthop add id 14 via 172.16.1.2 dev veth1"
+	run_cmd "$IP nexthop add id 15 via 172.16.1.3 dev veth1"
 	run_cmd "$IP nexthop add id 103 group 14/15 fdb"
 	log_test $? 2 "Fdb Nexthop group with non-fdb nexthops"
 
 	# Non fdb nexthop group can not contain fdb nexthops
 	run_cmd "$IP nexthop add id 16 via 172.16.1.2 fdb"
 	run_cmd "$IP nexthop add id 17 via 172.16.1.3 fdb"
-	run_cmd "$IP nexthop add id 104 group 14/15"
+	run_cmd "$IP nexthop add id 104 group 16/17"
 	log_test $? 2 "Non-Fdb Nexthop group with fdb nexthops"
 
 	# fdb nexthop cannot have blackhole
@@ -572,6 +594,26 @@ ipv4_fdb_grp_fcnal()
 	run_cmd "$IP nexthop add id 17 encap mpls 101 via 172.16.1.2 dev veth1 fdb"
 	log_test $? 2 "Fdb Nexthop with encap"
 
+	# Replace FDB nexthop to non-FDB and vice versa
+	run_cmd "$IP nexthop add id 18 via 172.16.1.2 fdb"
+	run_cmd "$IP nexthop replace id 18 via 172.16.1.2 dev veth1"
+	log_test $? 0 "Replace FDB nexthop to non-FDB nexthop"
+	run_cmd "$IP nexthop replace id 18 via 172.16.1.2 fdb"
+	log_test $? 0 "Replace non-FDB nexthop to FDB nexthop"
+
+	# Replace FDB nexthop address while in a group
+	run_cmd "$IP nexthop add id 19 group 18 fdb"
+	run_cmd "$IP nexthop replace id 18 via 172.16.1.3 fdb"
+	log_test $? 0 "Replace FDB nexthop address while in a group"
+
+	# Cannot replace FDB nexthop to non-FDB and vice versa while in a group
+	run_cmd "$IP nexthop replace id 18 via 172.16.1.2 dev veth1"
+	log_test $? 2 "Replace FDB nexthop to non-FDB nexthop while in a group"
+	run_cmd "$IP nexthop add id 20 via 172.16.1.2 dev veth1"
+	run_cmd "$IP nexthop add id 21 group 20"
+	run_cmd "$IP nexthop replace id 20 via 172.16.1.2 fdb"
+	log_test $? 2 "Replace non-FDB nexthop to FDB nexthop while in a group"
+
 	run_cmd "$IP link add name vx10 type vxlan id 1010 local 10.0.0.1 remote 10.0.0.2 dstport 4789 nolearning noudpcsum tos inherit ttl 100"
 	run_cmd "$BRIDGE fdb add 02:02:00:00:00:13 dev vx10 nhid 102 self"
 	log_test $? 0 "Fdb mac add with nexthop group"
@@ -580,7 +622,7 @@ ipv4_fdb_grp_fcnal()
 	run_cmd "$BRIDGE fdb add 02:02:00:00:00:14 dev vx10 nhid 12 self"
 	log_test $? 255 "Fdb mac add with nexthop"
 
-	run_cmd "$IP ro add 172.16.0.0/22 nhid 15"
+	run_cmd "$IP ro add 172.16.0.0/22 nhid 16"
 	log_test $? 2 "Route add with fdb nexthop"
 
 	run_cmd "$IP ro add 172.16.0.0/22 nhid 103"
@@ -741,7 +783,7 @@ ipv6_fcnal()
 	run_cmd "$IP nexthop add id 52 via 2001:db8:92::3"
 	log_test $? 2 "Create nexthop - gw only"
 
-	# gw is not reachable throught given dev
+	# gw is not reachable through given dev
 	run_cmd "$IP nexthop add id 53 via 2001:db8:3::3 dev veth1"
 	log_test $? 2 "Create nexthop - invalid gw+dev combination"
 
@@ -2528,6 +2570,7 @@ done
 if [ "$TESTS" != "none" ]; then
 	printf "\nTests passed: %3d\n" ${nsuccess}
 	printf "Tests failed: %3d\n"   ${nfail}
+	printf "Tests skipped: %2d\n"  ${nskip}
 fi
 
 exit $ret

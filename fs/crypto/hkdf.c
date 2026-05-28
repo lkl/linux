@@ -4,13 +4,12 @@
  * Function"), aka RFC 5869.  See also the original paper (Krawczyk 2010):
  * "Cryptographic Extraction and Key Derivation: The HKDF Scheme".
  *
- * This is used to derive keys from the fscrypt master keys.
+ * This is used to derive keys from the fscrypt master keys (or from the
+ * "software secrets" which hardware derives from the fscrypt master keys, in
+ * the case that the fscrypt master keys are hardware-wrapped keys).
  *
  * Copyright 2019 Google LLC
  */
-
-#include <crypto/hash.h>
-#include <crypto/sha2.h>
 
 #include "fscrypt_private.h"
 
@@ -25,7 +24,6 @@
  * HKDF-SHA512 being much faster than HKDF-SHA256, as the longer digest size of
  * SHA-512 causes HKDF-Expand to only need to do one iteration rather than two.
  */
-#define HKDF_HMAC_ALG		"hmac(sha512)"
 #define HKDF_HASHLEN		SHA512_DIGEST_SIZE
 
 /*
@@ -44,67 +42,25 @@
  * there's no way to persist a random salt per master key from kernel mode.
  */
 
-/* HKDF-Extract (RFC 5869 section 2.2), unsalted */
-static int hkdf_extract(struct crypto_shash *hmac_tfm, const u8 *ikm,
-			unsigned int ikmlen, u8 prk[HKDF_HASHLEN])
+/*
+ * Compute HKDF-Extract using 'master_key' as the input keying material, and
+ * prepare the resulting HMAC key in 'hkdf'.  Afterwards, 'hkdf' can be used for
+ * HKDF-Expand many times without having to recompute HKDF-Extract each time.
+ */
+void fscrypt_init_hkdf(struct hmac_sha512_key *hkdf, const u8 *master_key,
+		       unsigned int master_key_size)
 {
 	static const u8 default_salt[HKDF_HASHLEN];
-	int err;
-
-	err = crypto_shash_setkey(hmac_tfm, default_salt, HKDF_HASHLEN);
-	if (err)
-		return err;
-
-	return crypto_shash_tfm_digest(hmac_tfm, ikm, ikmlen, prk);
-}
-
-/*
- * Compute HKDF-Extract using the given master key as the input keying material,
- * and prepare an HMAC transform object keyed by the resulting pseudorandom key.
- *
- * Afterwards, the keyed HMAC transform object can be used for HKDF-Expand many
- * times without having to recompute HKDF-Extract each time.
- */
-int fscrypt_init_hkdf(struct fscrypt_hkdf *hkdf, const u8 *master_key,
-		      unsigned int master_key_size)
-{
-	struct crypto_shash *hmac_tfm;
 	u8 prk[HKDF_HASHLEN];
-	int err;
 
-	hmac_tfm = crypto_alloc_shash(HKDF_HMAC_ALG, 0, 0);
-	if (IS_ERR(hmac_tfm)) {
-		fscrypt_err(NULL, "Error allocating " HKDF_HMAC_ALG ": %ld",
-			    PTR_ERR(hmac_tfm));
-		return PTR_ERR(hmac_tfm);
-	}
-
-	if (WARN_ON_ONCE(crypto_shash_digestsize(hmac_tfm) != sizeof(prk))) {
-		err = -EINVAL;
-		goto err_free_tfm;
-	}
-
-	err = hkdf_extract(hmac_tfm, master_key, master_key_size, prk);
-	if (err)
-		goto err_free_tfm;
-
-	err = crypto_shash_setkey(hmac_tfm, prk, sizeof(prk));
-	if (err)
-		goto err_free_tfm;
-
-	hkdf->hmac_tfm = hmac_tfm;
-	goto out;
-
-err_free_tfm:
-	crypto_free_shash(hmac_tfm);
-out:
+	hmac_sha512_usingrawkey(default_salt, sizeof(default_salt),
+				master_key, master_key_size, prk);
+	hmac_sha512_preparekey(hkdf, prk, sizeof(prk));
 	memzero_explicit(prk, sizeof(prk));
-	return err;
 }
 
 /*
- * HKDF-Expand (RFC 5869 section 2.3).  This expands the pseudorandom key, which
- * was already keyed into 'hkdf->hmac_tfm' by fscrypt_init_hkdf(), into 'okmlen'
+ * HKDF-Expand (RFC 5869 section 2.3).  Expand the HMAC key 'hkdf' into 'okmlen'
  * bytes of output keying material parameterized by the application-specific
  * 'info' of length 'infolen' bytes, prefixed by "fscrypt\0" and the 'context'
  * byte.  This is thread-safe and may be called by multiple threads in parallel.
@@ -113,70 +69,32 @@ out:
  * adds to its application-specific info strings to guarantee that it doesn't
  * accidentally repeat an info string when using HKDF for different purposes.)
  */
-int fscrypt_hkdf_expand(const struct fscrypt_hkdf *hkdf, u8 context,
-			const u8 *info, unsigned int infolen,
-			u8 *okm, unsigned int okmlen)
+void fscrypt_hkdf_expand(const struct hmac_sha512_key *hkdf, u8 context,
+			 const u8 *info, unsigned int infolen,
+			 u8 *okm, unsigned int okmlen)
 {
-	SHASH_DESC_ON_STACK(desc, hkdf->hmac_tfm);
-	u8 prefix[9];
-	unsigned int i;
-	int err;
-	const u8 *prev = NULL;
+	struct hmac_sha512_ctx ctx;
 	u8 counter = 1;
 	u8 tmp[HKDF_HASHLEN];
 
-	if (WARN_ON_ONCE(okmlen > 255 * HKDF_HASHLEN))
-		return -EINVAL;
+	WARN_ON_ONCE(okmlen > 255 * HKDF_HASHLEN);
 
-	desc->tfm = hkdf->hmac_tfm;
-
-	memcpy(prefix, "fscrypt\0", 8);
-	prefix[8] = context;
-
-	for (i = 0; i < okmlen; i += HKDF_HASHLEN) {
-
-		err = crypto_shash_init(desc);
-		if (err)
-			goto out;
-
-		if (prev) {
-			err = crypto_shash_update(desc, prev, HKDF_HASHLEN);
-			if (err)
-				goto out;
-		}
-
-		err = crypto_shash_update(desc, prefix, sizeof(prefix));
-		if (err)
-			goto out;
-
-		err = crypto_shash_update(desc, info, infolen);
-		if (err)
-			goto out;
-
-		BUILD_BUG_ON(sizeof(counter) != 1);
+	for (unsigned int i = 0; i < okmlen; i += HKDF_HASHLEN) {
+		hmac_sha512_init(&ctx, hkdf);
+		if (i != 0)
+			hmac_sha512_update(&ctx, &okm[i - HKDF_HASHLEN],
+					   HKDF_HASHLEN);
+		hmac_sha512_update(&ctx, "fscrypt\0", 8);
+		hmac_sha512_update(&ctx, &context, 1);
+		hmac_sha512_update(&ctx, info, infolen);
+		hmac_sha512_update(&ctx, &counter, 1);
 		if (okmlen - i < HKDF_HASHLEN) {
-			err = crypto_shash_finup(desc, &counter, 1, tmp);
-			if (err)
-				goto out;
+			hmac_sha512_final(&ctx, tmp);
 			memcpy(&okm[i], tmp, okmlen - i);
 			memzero_explicit(tmp, sizeof(tmp));
 		} else {
-			err = crypto_shash_finup(desc, &counter, 1, &okm[i]);
-			if (err)
-				goto out;
+			hmac_sha512_final(&ctx, &okm[i]);
 		}
 		counter++;
-		prev = &okm[i];
 	}
-	err = 0;
-out:
-	if (unlikely(err))
-		memzero_explicit(okm, okmlen); /* so caller doesn't need to */
-	shash_desc_zero(desc);
-	return err;
-}
-
-void fscrypt_destroy_hkdf(struct fscrypt_hkdf *hkdf)
-{
-	crypto_free_shash(hkdf->hmac_tfm);
 }

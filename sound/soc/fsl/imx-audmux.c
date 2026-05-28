@@ -237,7 +237,7 @@ static int imx_audmux_parse_dt_defaults(struct platform_device *pdev,
 					child);
 			continue;
 		}
-		if (!of_property_read_bool(child, "fsl,port-config")) {
+		if (!of_property_present(child, "fsl,port-config")) {
 			dev_warn(&pdev->dev, "child node \"%pOF\" does not have property fsl,port-config\n",
 					child);
 			continue;
@@ -305,7 +305,7 @@ static int imx_audmux_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	regcache = devm_kzalloc(&pdev->dev, sizeof(u32) * reg_max, GFP_KERNEL);
+	regcache = devm_kcalloc(&pdev->dev, reg_max, sizeof(u32), GFP_KERNEL);
 	if (!regcache)
 		return -ENOMEM;
 

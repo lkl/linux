@@ -26,7 +26,6 @@ static const struct regmap_config zpa2326_regmap_spi_config = {
 	.precious_reg   = zpa2326_isreg_precious,
 	.max_register   = ZPA2326_TEMP_OUT_H_REG,
 	.read_flag_mask = BIT(7) | BIT(6),
-	.cache_type     = REGCACHE_NONE,
 };
 
 static int zpa2326_probe_spi(struct spi_device *spi)
@@ -48,7 +47,6 @@ static int zpa2326_probe_spi(struct spi_device *spi)
 	 */
 	spi->mode = SPI_MODE_3;
 	spi->max_speed_hz = min(spi->max_speed_hz, 1000000U);
-	spi->bits_per_word = 8;
 	err = spi_setup(spi);
 	if (err < 0)
 		return err;
@@ -64,7 +62,7 @@ static void zpa2326_remove_spi(struct spi_device *spi)
 
 static const struct spi_device_id zpa2326_spi_ids[] = {
 	{ "zpa2326", 0 },
-	{ },
+	{ }
 };
 MODULE_DEVICE_TABLE(spi, zpa2326_spi_ids);
 
@@ -89,4 +87,4 @@ module_spi_driver(zpa2326_spi_driver);
 MODULE_AUTHOR("Gregor Boirie <gregor.boirie@parrot.com>");
 MODULE_DESCRIPTION("SPI driver for Murata ZPA2326 pressure sensor");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(IIO_ZPA2326);
+MODULE_IMPORT_NS("IIO_ZPA2326");

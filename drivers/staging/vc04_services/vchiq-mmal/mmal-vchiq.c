@@ -326,7 +326,7 @@ static int bulk_receive(struct vchiq_mmal_instance *instance,
 		 * committed a buffer_to_host operation to the mmal
 		 * port without the buffer to back it up (underflow
 		 * handling) and there is no obvious way to deal with
-		 * this - how is the mmal servie going to react when
+		 * this - how is the mmal service going to react when
 		 * we fail to do the xfer and reschedule a buffer when
 		 * it arrives? perhaps a starved flag to indicate a
 		 * waiting bulk receive?
@@ -551,7 +551,8 @@ static void bulk_abort_cb(struct vchiq_mmal_instance *instance,
 /* incoming event service callback */
 static int mmal_service_callback(struct vchiq_instance *vchiq_instance,
 				 enum vchiq_reason reason, struct vchiq_header *header,
-				 unsigned int handle, void *bulk_ctx)
+				 unsigned int handle, void *cb_data,
+				 void __user *cb_userdata)
 {
 	struct vchiq_mmal_instance *instance = vchiq_get_service_userdata(vchiq_instance, handle);
 	u32 msg_len;
@@ -626,11 +627,11 @@ static int mmal_service_callback(struct vchiq_instance *vchiq_instance,
 		break;
 
 	case VCHIQ_BULK_RECEIVE_DONE:
-		bulk_receive_cb(instance, bulk_ctx);
+		bulk_receive_cb(instance, cb_data);
 		break;
 
 	case VCHIQ_BULK_RECEIVE_ABORTED:
-		bulk_abort_cb(instance, bulk_ctx);
+		bulk_abort_cb(instance, cb_data);
 		break;
 
 	case VCHIQ_SERVICE_CLOSED:

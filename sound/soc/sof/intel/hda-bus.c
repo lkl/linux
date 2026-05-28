@@ -76,7 +76,7 @@ void sof_hda_bus_init(struct snd_sof_dev *sdev, struct device *dev)
 
 	snd_hdac_ext_bus_init(bus, dev, &bus_core_ops, sof_hda_ext_ops);
 
-	if (chip && chip->hw_ip_version == SOF_INTEL_ACE_2_0)
+	if (chip && chip->hw_ip_version >= SOF_INTEL_ACE_2_0)
 		bus->use_pio_for_commands = true;
 #else
 	snd_hdac_ext_bus_init(bus, dev, NULL, NULL);
@@ -99,7 +99,7 @@ void sof_hda_bus_init(struct snd_sof_dev *sdev, struct device *dev)
 	spin_lock_init(&bus->reg_lock);
 #endif /* CONFIG_SND_SOC_SOF_HDA_LINK */
 }
-EXPORT_SYMBOL_NS(sof_hda_bus_init, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(sof_hda_bus_init, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 void sof_hda_bus_exit(struct snd_sof_dev *sdev)
 {
@@ -109,4 +109,4 @@ void sof_hda_bus_exit(struct snd_sof_dev *sdev)
 	snd_hdac_ext_bus_exit(bus);
 #endif
 }
-EXPORT_SYMBOL_NS(sof_hda_bus_exit, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(sof_hda_bus_exit, "SND_SOC_SOF_INTEL_HDA_COMMON");

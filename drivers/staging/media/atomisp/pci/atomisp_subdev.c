@@ -3,17 +3,6 @@
  * Support for Medifield PNW Camera Imaging ISP subsystem.
  *
  * Copyright (c) 2010 Intel Corporation. All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- *
  */
 #include <linux/module.h>
 #include <linux/uaccess.h>
@@ -170,13 +159,6 @@ static int isp_subdev_subscribe_event(struct v4l2_subdev *sd,
 		return -EINVAL;
 
 	return v4l2_event_subscribe(fh, sub, 16, NULL);
-}
-
-static int isp_subdev_unsubscribe_event(struct v4l2_subdev *sd,
-					struct v4l2_fh *fh,
-					struct v4l2_event_subscription *sub)
-{
-	return v4l2_event_unsubscribe(fh, sub);
 }
 
 /*
@@ -586,7 +568,7 @@ static int isp_subdev_set_format(struct v4l2_subdev *sd,
 static const struct v4l2_subdev_core_ops isp_subdev_v4l2_core_ops = {
 	.ioctl = isp_subdev_ioctl,
 	.subscribe_event = isp_subdev_subscribe_event,
-	.unsubscribe_event = isp_subdev_unsubscribe_event,
+	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
 };
 
 /* V4L2 subdev pad operations */

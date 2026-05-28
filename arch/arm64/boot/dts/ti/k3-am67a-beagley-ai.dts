@@ -50,7 +50,13 @@
 			no-map;
 		};
 
-		wkup_r5fss0_core0_memory_region: r5f-memory@a0100000 {
+		wkup_r5fss0_core0_dma_memory_region: memory@a0000000 {
+			compatible = "shared-dma-pool";
+			reg = <0x00 0xa0000000 0x00 0x100000>;
+			no-map;
+		};
+
+		wkup_r5fss0_core0_memory_region: memory@a0100000 {
 			compatible = "shared-dma-pool";
 			reg = <0x00 0xa0100000 0x00 0xf00000>;
 			no-map;
@@ -249,6 +255,7 @@
 };
 
 &main_gpio1 {
+	bootph-all;
 	status = "okay";
 };
 
@@ -391,3 +398,5 @@
 	ti,fails-without-test-cd;
 	status = "okay";
 };
+
+#include "k3-j722s-ti-ipc-firmware.dtsi"

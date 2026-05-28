@@ -29,65 +29,50 @@
 #define AST_IO_VGAGRI			(0x4E)
 
 #define AST_IO_VGACRI			(0x54)
+#define AST_IO_VGACR17_SYNC_ENABLE	BIT(7) /* called "Hardware reset" in docs */
 #define AST_IO_VGACR80_PASSWORD		(0xa8)
+#define AST_IO_VGACR99_VGAMEM_RSRV_MASK	GENMASK(1, 0)
 #define AST_IO_VGACRA1_VGAIO_DISABLED	BIT(1)
 #define AST_IO_VGACRA1_MMIO_ENABLED	BIT(2)
+#define AST_IO_VGACRA3_DVO_ENABLED	BIT(7)
+#define AST_IO_VGACRAA_VGAMEM_SIZE_MASK	GENMASK(1, 0)
 #define AST_IO_VGACRB6_HSYNC_OFF	BIT(0)
 #define AST_IO_VGACRB6_VSYNC_OFF	BIT(1)
 #define AST_IO_VGACRCB_HWC_16BPP	BIT(0) /* set: ARGB4444, cleared: 2bpp palette */
 #define AST_IO_VGACRCB_HWC_ENABLED	BIT(1)
 
-#define AST_IO_VGACRD1_MCU_FW_EXECUTING	BIT(5)
-#define AST_IO_VGACRD7_EDID_VALID_FLAG	BIT(0)
-#define AST_IO_VGACRDC_LINK_SUCCESS	BIT(0)
-#define AST_IO_VGACRDF_HPD		BIT(0)
-#define AST_IO_VGACRE5_EDID_READ_DONE	BIT(0)
+/* mirrors SCU100[7:0] */
+#define AST_IO_VGACRD0_VRAM_INIT_STATUS_MASK	GENMASK(7, 6)
+#define AST_IO_VGACRD0_VRAM_INIT_BY_BMC		BIT(7)
+#define AST_IO_VGACRD0_VRAM_INIT_READY		BIT(6)
+#define AST_IO_VGACRD0_IKVM_WIDESCREEN		BIT(0)
 
-#define AST_IO_VGAIR1_R			(0x5A)
-#define AST_IO_VGAIR1_VREFRESH		BIT(3)
-
-/*
- * Display Transmitter Type
- */
-
-#define TX_TYPE_MASK			GENMASK(3, 1)
-#define NO_TX				(0 << 1)
-#define ITE66121_VBIOS_TX		(1 << 1)
-#define SI164_VBIOS_TX			(2 << 1)
-#define CH7003_VBIOS_TX			(3 << 1)
-#define DP501_VBIOS_TX			(4 << 1)
-#define ANX9807_VBIOS_TX		(5 << 1)
-#define TX_FW_EMBEDDED_FW_TX		(6 << 1)
-#define ASTDP_DPMCU_TX			(7 << 1)
-
-#define AST_VRAM_INIT_STATUS_MASK	GENMASK(7, 6)
-//#define AST_VRAM_INIT_BY_BMC		BIT(7)
-//#define AST_VRAM_INIT_READY		BIT(6)
+#define AST_IO_VGACRD1_MCU_FW_EXECUTING		BIT(5)
+/* Display Transmitter Type */
+#define AST_IO_VGACRD1_TX_TYPE_MASK		GENMASK(3, 1)
+#define AST_IO_VGACRD1_NO_TX			0x00
+#define AST_IO_VGACRD1_TX_ITE66121_VBIOS	0x02
+#define AST_IO_VGACRD1_TX_SIL164_VBIOS		0x04
+#define AST_IO_VGACRD1_TX_CH7003_VBIOS		0x06
+#define AST_IO_VGACRD1_TX_DP501_VBIOS		0x08
+#define AST_IO_VGACRD1_TX_ANX9807_VBIOS		0x0a
+#define AST_IO_VGACRD1_TX_FW_EMBEDDED_FW	0x0c /* special case of DP501 */
+#define AST_IO_VGACRD1_TX_ASTDP			0x0e
+#define AST_IO_VGACRD1_SUPPORTS_WUXGA		BIT(0)
 
 /*
  * AST DisplayPort
  */
+#define AST_IO_VGACRD7_EDID_VALID_FLAG	BIT(0)
+#define AST_IO_VGACRDC_LINK_SUCCESS	BIT(0)
+#define AST_IO_VGACRDF_HPD		BIT(0)
+#define AST_IO_VGACRDF_DP_VIDEO_ENABLE	BIT(4) /* mirrors AST_IO_VGACRE3_DP_VIDEO_ENABLE */
+#define AST_IO_VGACRE0_24BPP		BIT(5) /* 18 bpp, if unset  */
+#define AST_IO_VGACRE3_DP_VIDEO_ENABLE	BIT(0)
+#define AST_IO_VGACRE3_DP_PHY_SLEEP	BIT(4)
+#define AST_IO_VGACRE5_EDID_READ_DONE	BIT(0)
 
-/* Define for Soc scratched reg used on ASTDP */
-#define AST_DP_PHY_SLEEP		BIT(4)
-#define AST_DP_VIDEO_ENABLE		BIT(0)
-
-/*
- * CRDF[b4]: Mirror of AST_DP_VIDEO_ENABLE
- * Precondition:	A. ~AST_DP_PHY_SLEEP  &&
- *			B. DP_HPD &&
- *			C. DP_LINK_SUCCESS
- */
-#define ASTDP_MIRROR_VIDEO_ENABLE	BIT(4)
-
-/*
- * ASTDP setmode registers:
- * CRE0[7:0]: MISC0 ((0x00: 18-bpp) or (0x20: 24-bpp)
- * CRE1[7:0]: MISC1 (default: 0x00)
- * CRE2[7:0]: video format index (0x00 ~ 0x20 or 0x40 ~ 0x50)
- */
-#define ASTDP_MISC0_24bpp		BIT(5)
-#define ASTDP_MISC1			0
-#define ASTDP_AND_CLEAR_MASK		0x00
+#define AST_IO_VGAIR1_R			(0x5A)
+#define AST_IO_VGAIR1_VREFRESH		BIT(3)
 
 #endif

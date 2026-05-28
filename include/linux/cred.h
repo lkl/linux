@@ -148,15 +148,13 @@ struct cred {
 
 extern void __put_cred(struct cred *);
 extern void exit_creds(struct task_struct *);
-extern int copy_creds(struct task_struct *, unsigned long);
+extern int copy_creds(struct task_struct *, u64);
 extern const struct cred *get_task_cred(struct task_struct *);
 extern struct cred *cred_alloc_blank(void);
 extern struct cred *prepare_creds(void);
 extern struct cred *prepare_exec_creds(void);
 extern int commit_creds(struct cred *);
 extern void abort_creds(struct cred *);
-extern const struct cred *override_creds(const struct cred *);
-extern void revert_creds(const struct cred *);
 extern struct cred *prepare_kernel_cred(struct task_struct *);
 extern int set_security_override(struct cred *, u32);
 extern int set_security_override_from_ctx(struct cred *, const char *);
@@ -172,30 +170,14 @@ static inline bool cap_ambient_invariant_ok(const struct cred *cred)
 					  cred->cap_inheritable));
 }
 
-/**
- * get_new_cred_many - Get references on a new set of credentials
- * @cred: The new credentials to reference
- * @nr: Number of references to acquire
- *
- * Get references on the specified set of new credentials.  The caller must
- * release all acquired references.
- */
-static inline struct cred *get_new_cred_many(struct cred *cred, int nr)
+static inline const struct cred *override_creds(const struct cred *override_cred)
 {
-	atomic_long_add(nr, &cred->usage);
-	return cred;
+	return rcu_replace_pointer(current->cred, override_cred, 1);
 }
 
-/**
- * get_new_cred - Get a reference on a new set of credentials
- * @cred: The new credentials to reference
- *
- * Get a reference on the specified set of new credentials.  The caller must
- * release the reference.
- */
-static inline struct cred *get_new_cred(struct cred *cred)
+static inline const struct cred *revert_creds(const struct cred *revert_cred)
 {
-	return get_new_cred_many(cred, 1);
+	return rcu_replace_pointer(current->cred, revert_cred, 1);
 }
 
 /**
@@ -218,7 +200,8 @@ static inline const struct cred *get_cred_many(const struct cred *cred, int nr)
 	if (!cred)
 		return cred;
 	nonconst_cred->non_rcu = 0;
-	return get_new_cred_many(nonconst_cred, nr);
+	atomic_long_add(nr, &nonconst_cred->usage);
+	return cred;
 }
 
 /*
@@ -279,6 +262,8 @@ static inline void put_cred(const struct cred *cred)
 {
 	put_cred_many(cred, 1);
 }
+
+DEFINE_FREE(put_cred, struct cred *, if (!IS_ERR_OR_NULL(_T)) put_cred(_T))
 
 /**
  * current_cred - Access the current task's subjective credentials

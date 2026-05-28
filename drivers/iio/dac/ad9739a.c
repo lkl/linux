@@ -442,13 +442,13 @@ static int ad9739a_probe(struct spi_device *spi)
 
 static const struct of_device_id ad9739a_of_match[] = {
 	{ .compatible = "adi,ad9739a" },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(of, ad9739a_of_match);
 
 static const struct spi_device_id ad9739a_id[] = {
 	{"ad9739a"},
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(spi, ad9739a_id);
 
@@ -466,4 +466,4 @@ MODULE_AUTHOR("Dragos Bogdan <dragos.bogdan@analog.com>");
 MODULE_AUTHOR("Nuno Sa <nuno.sa@analog.com>");
 MODULE_DESCRIPTION("Analog Devices AD9739 DAC");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(IIO_BACKEND);
+MODULE_IMPORT_NS("IIO_BACKEND");

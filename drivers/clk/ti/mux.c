@@ -84,7 +84,7 @@ static int ti_clk_mux_set_parent(struct clk_hw *hw, u8 index)
 }
 
 /**
- * clk_mux_save_context - Save the parent selcted in the mux
+ * clk_mux_save_context - Save the parent selected in the mux
  * @hw: pointer  struct clk_hw
  *
  * Save the parent mux value.
@@ -180,7 +180,7 @@ static void of_mux_clk_setup(struct device_node *node)
 		pr_err("mux-clock %pOFn must have parents\n", node);
 		return;
 	}
-	parent_names = kzalloc((sizeof(char *) * num_parents), GFP_KERNEL);
+	parent_names = kcalloc(num_parents, sizeof(char *), GFP_KERNEL);
 	if (!parent_names)
 		goto cleanup;
 

@@ -268,7 +268,7 @@ static const struct iio_chan_spec ping_chan_spec[] = {
 static const struct of_device_id of_ping_match[] = {
 	{ .compatible = "parallax,ping", .data = &pa_ping_cfg },
 	{ .compatible = "parallax,laserping", .data = &pa_laser_ping_cfg },
-	{},
+	{ }
 };
 
 MODULE_DEVICE_TABLE(of, of_ping_match);
@@ -280,10 +280,8 @@ static int ping_probe(struct platform_device *pdev)
 	struct iio_dev *indio_dev;
 
 	indio_dev = devm_iio_device_alloc(dev, sizeof(struct ping_data));
-	if (!indio_dev) {
-		dev_err(dev, "failed to allocate IIO device\n");
+	if (!indio_dev)
 		return -ENOMEM;
-	}
 
 	data = iio_priv(indio_dev);
 	data->dev = dev;

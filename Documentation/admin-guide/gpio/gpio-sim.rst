@@ -50,8 +50,11 @@ the number of lines exposed by this bank.
 
 **Attribute:** ``/config/gpio-sim/gpio-device/gpio-bankX/lineY/name``
 
-This group represents a single line at the offset Y. The 'name' attribute
-allows to set the line name as represented by the 'gpio-line-names' property.
+**Attribute:** ``/config/gpio-sim/gpio-device/gpio-bankX/lineY/valid``
+
+This group represents a single line at the offset Y. The ``valid`` attribute
+indicates whether the line can be used as GPIO. The ``name`` attribute allows
+to set the line name as represented by the 'gpio-line-names' property.
 
 **Item:** ``/config/gpio-sim/gpio-device/gpio-bankX/lineY/hog``
 
@@ -71,7 +74,7 @@ specific lines. The name of those subdirectories must take the form of:
 ``'line<offset>'`` (e.g. ``'line0'``, ``'line20'``, etc.) as the name will be
 used by the module to assign the config to the specific line at given offset.
 
-Once the confiuration is complete, the ``'live'`` attribute must be set to 1 in
+Once the configuration is complete, the ``'live'`` attribute must be set to 1 in
 order to instantiate the chip. It can be set back to 0 to destroy the simulated
 chip. The module will synchronously wait for the new simulated device to be
 successfully probed and if this doesn't happen, writing to ``'live'`` will

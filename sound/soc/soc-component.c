@@ -13,32 +13,20 @@
 #include <sound/soc.h>
 #include <linux/bitops.h>
 
-#define soc_component_ret(dai, ret) _soc_component_ret(dai, __func__, ret, -1)
-#define soc_component_ret_reg_rw(dai, ret, reg) _soc_component_ret(dai, __func__, ret, reg)
-static inline int _soc_component_ret(struct snd_soc_component *component,
-				     const char *func, int ret, int reg)
+#define soc_component_ret(dai, ret) _soc_component_ret(dai, __func__, ret)
+static inline int _soc_component_ret(struct snd_soc_component *component, const char *func, int ret)
 {
-	/* Positive/Zero values are not errors */
-	if (ret >= 0)
-		return ret;
+	return snd_soc_ret(component->dev, ret,
+			   "at %s() on %s\n", func, component->name);
+}
 
-	/* Negative values might be errors */
-	switch (ret) {
-	case -EPROBE_DEFER:
-	case -ENOTSUPP:
-		break;
-	default:
-		if (reg == -1)
-			dev_err(component->dev,
-				"ASoC: error at %s on %s: %d\n",
-				func, component->name, ret);
-		else
-			dev_err(component->dev,
-				"ASoC: error at %s on %s for register: [0x%08x] %d\n",
-				func, component->name, reg, ret);
-	}
-
-	return ret;
+#define soc_component_ret_reg_rw(dai, ret, reg) _soc_component_ret_reg_rw(dai, __func__, ret, reg)
+static inline int _soc_component_ret_reg_rw(struct snd_soc_component *component,
+					    const char *func, int ret, int reg)
+{
+	return snd_soc_ret(component->dev, ret,
+			   "at %s() on %s for register: [0x%08x]\n",
+			   func, component->name, reg);
 }
 
 static inline int soc_component_field_shift(struct snd_soc_component *component,
@@ -58,7 +46,7 @@ static inline int soc_component_field_shift(struct snd_soc_component *component,
  * In such case, we can update these macros.
  */
 #define soc_component_mark_push(component, substream, tgt)	((component)->mark_##tgt = substream)
-#define soc_component_mark_pop(component, substream, tgt)	((component)->mark_##tgt = NULL)
+#define soc_component_mark_pop(component, tgt)	((component)->mark_##tgt = NULL)
 #define soc_component_mark_match(component, substream, tgt)	((component)->mark_##tgt == substream)
 
 void snd_soc_component_set_aux(struct snd_soc_component *component,
@@ -339,7 +327,7 @@ void snd_soc_component_module_put(struct snd_soc_component *component,
 		module_put(component->dev->driver->owner);
 
 	/* remove the mark from module */
-	soc_component_mark_pop(component, mark, module);
+	soc_component_mark_pop(component, module);
 }
 
 int snd_soc_component_open(struct snd_soc_component *component,
@@ -370,7 +358,7 @@ int snd_soc_component_close(struct snd_soc_component *component,
 		ret = component->driver->close(component, substream);
 
 	/* remove marked substream */
-	soc_component_mark_pop(component, substream, open);
+	soc_component_mark_pop(component, open);
 
 	return soc_component_ret(component, ret);
 }
@@ -515,7 +503,7 @@ void snd_soc_component_compr_free(struct snd_soc_component *component,
 		component->driver->compress_ops->free(component, cstream);
 
 	/* remove marked substream */
-	soc_component_mark_pop(component, cstream, compr_open);
+	soc_component_mark_pop(component, compr_open);
 }
 EXPORT_SYMBOL_GPL(snd_soc_component_compr_free);
 
@@ -649,7 +637,7 @@ int snd_soc_component_compr_ack(struct snd_compr_stream *cstream, size_t bytes)
 EXPORT_SYMBOL_GPL(snd_soc_component_compr_ack);
 
 int snd_soc_component_compr_pointer(struct snd_compr_stream *cstream,
-				    struct snd_compr_tstamp *tstamp)
+				    struct snd_compr_tstamp64 *tstamp)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
@@ -1210,7 +1198,7 @@ void snd_soc_pcm_component_hw_free(struct snd_pcm_substream *substream,
 		}
 
 		/* remove marked substream */
-		soc_component_mark_pop(component, substream, hw_params);
+		soc_component_mark_pop(component, hw_params);
 	}
 }
 
@@ -1254,7 +1242,7 @@ int snd_soc_pcm_component_trigger(struct snd_pcm_substream *substream,
 			r = soc_component_trigger(component, substream, cmd);
 			if (r < 0)
 				ret = r; /* use last ret */
-			soc_component_mark_pop(component, substream, trigger);
+			soc_component_mark_pop(component, trigger);
 		}
 	}
 
@@ -1290,11 +1278,10 @@ void snd_soc_pcm_component_pm_runtime_put(struct snd_soc_pcm_runtime *rtd,
 		if (rollback && !soc_component_mark_match(component, stream, pm))
 			continue;
 
-		pm_runtime_mark_last_busy(component->dev);
 		pm_runtime_put_autosuspend(component->dev);
 
 		/* remove marked stream */
-		soc_component_mark_pop(component, stream, pm);
+		soc_component_mark_pop(component, pm);
 	}
 }
 

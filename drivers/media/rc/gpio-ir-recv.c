@@ -48,10 +48,8 @@ static irqreturn_t gpio_ir_recv_irq(int irq, void *dev_id)
 	if (val >= 0)
 		ir_raw_event_store_edge(gpio_dev->rcdev, val == 1);
 
-	if (pmdev) {
-		pm_runtime_mark_last_busy(pmdev);
+	if (pmdev)
 		pm_runtime_put_autosuspend(pmdev);
-	}
 
 	return IRQ_HANDLED;
 }
@@ -201,7 +199,7 @@ MODULE_DEVICE_TABLE(of, gpio_ir_recv_of_match);
 
 static struct platform_driver gpio_ir_recv_driver = {
 	.probe  = gpio_ir_recv_probe,
-	.remove_new = gpio_ir_recv_remove,
+	.remove = gpio_ir_recv_remove,
 	.driver = {
 		.name   = KBUILD_MODNAME,
 		.of_match_table = gpio_ir_recv_of_match,

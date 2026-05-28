@@ -1071,7 +1071,7 @@ static const struct pinfunction msm8994_functions[] = {
 	MSM_PIN_FUNCTION(uim2),
 	MSM_PIN_FUNCTION(uim3),
 	MSM_PIN_FUNCTION(uim4),
-	MSM_PIN_FUNCTION(gpio),
+	MSM_GPIO_PIN_FUNCTION(gpio),
 };
 
 static const struct msm_pingroup msm8994_groups[] = {
@@ -1343,7 +1343,6 @@ static struct platform_driver msm8994_pinctrl_driver = {
 		.of_match_table = msm8994_pinctrl_of_match,
 	},
 	.probe = msm8994_pinctrl_probe,
-	.remove_new = msm_pinctrl_remove,
 };
 
 static int __init msm8994_pinctrl_init(void)

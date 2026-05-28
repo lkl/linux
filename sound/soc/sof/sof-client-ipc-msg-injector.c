@@ -137,7 +137,6 @@ static int sof_msg_inject_send_message(struct sof_client_dev *cdev)
 	if (ret)
 		dev_err(dev, "IPC message send failed: %d\n", ret);
 
-	pm_runtime_mark_last_busy(dev);
 	err = pm_runtime_put_autosuspend(dev);
 	if (err < 0)
 		dev_err_ratelimited(dev, "debugfs write failed to idle %d\n", err);
@@ -337,4 +336,4 @@ module_auxiliary_driver(sof_msg_inject_client_drv);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("SOF IPC Message Injector Client Driver");
-MODULE_IMPORT_NS(SND_SOC_SOF_CLIENT);
+MODULE_IMPORT_NS("SND_SOC_SOF_CLIENT");

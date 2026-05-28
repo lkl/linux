@@ -4,7 +4,7 @@
  * Copyright 2005-2006, Devicescape Software, Inc.
  * Copyright (c) 2006 Jiri Benc <jbenc@suse.cz>
  * Copyright 2017	Intel Deutschland GmbH
- * Copyright (C) 2019, 2022-2024 Intel Corporation
+ * Copyright (C) 2019, 2022-2025 Intel Corporation
  */
 
 #include <linux/kernel.h>
@@ -28,8 +28,9 @@ module_param(ieee80211_default_rc_algo, charp, 0644);
 MODULE_PARM_DESC(ieee80211_default_rc_algo,
 		 "Default rate control algorithm for mac80211 to use");
 
-void rate_control_rate_init(struct sta_info *sta)
+void rate_control_rate_init(struct link_sta_info *link_sta)
 {
+	struct sta_info *sta = link_sta->sta;
 	struct ieee80211_local *local = sta->sdata->local;
 	struct rate_control_ref *ref = sta->rate_ctrl;
 	struct ieee80211_sta *ista = &sta->sta;
@@ -37,9 +38,13 @@ void rate_control_rate_init(struct sta_info *sta)
 	struct ieee80211_supported_band *sband;
 	struct ieee80211_chanctx_conf *chanctx_conf;
 
-	ieee80211_sta_init_nss(&sta->deflink);
+	ieee80211_sta_init_nss(link_sta);
 
 	if (!ref)
+		return;
+
+	/* SW rate control isn't supported with MLO right now */
+	if (WARN_ON(ieee80211_vif_is_mld(&sta->sdata->vif)))
 		return;
 
 	rcu_read_lock();
@@ -67,6 +72,21 @@ void rate_control_rate_init(struct sta_info *sta)
 	set_sta_flag(sta, WLAN_STA_RATE_CONTROL);
 }
 
+void rate_control_rate_init_all_links(struct sta_info *sta)
+{
+	int link_id;
+
+	for (link_id = 0; link_id < ARRAY_SIZE(sta->link); link_id++) {
+		struct link_sta_info *link_sta;
+
+		link_sta = sdata_dereference(sta->link[link_id], sta->sdata);
+		if (!link_sta)
+			continue;
+
+		rate_control_rate_init(link_sta);
+	}
+}
+
 void rate_control_tx_status(struct ieee80211_local *local,
 			    struct ieee80211_tx_status *st)
 {
@@ -76,6 +96,9 @@ void rate_control_tx_status(struct ieee80211_local *local,
 	struct ieee80211_supported_band *sband;
 
 	if (!ref || !test_sta_flag(sta, WLAN_STA_RATE_CONTROL))
+		return;
+
+	if (st->info->band >= NUM_NL80211_BANDS)
 		return;
 
 	sband = local->hw.wiphy->bands[st->info->band];
@@ -93,15 +116,14 @@ void rate_control_tx_status(struct ieee80211_local *local,
 
 void rate_control_rate_update(struct ieee80211_local *local,
 			      struct ieee80211_supported_band *sband,
-			      struct sta_info *sta, unsigned int link_id,
+			      struct link_sta_info *link_sta,
 			      u32 changed)
 {
 	struct rate_control_ref *ref = local->rate_ctrl;
+	struct sta_info *sta = link_sta->sta;
 	struct ieee80211_sta *ista = &sta->sta;
 	void *priv_sta = sta->rate_ctrl_priv;
 	struct ieee80211_chanctx_conf *chanctx_conf;
-
-	WARN_ON(link_id != 0);
 
 	if (ref && ref->ops->rate_update) {
 		rcu_read_lock();
@@ -120,7 +142,8 @@ void rate_control_rate_update(struct ieee80211_local *local,
 	}
 
 	if (sta->uploaded)
-		drv_sta_rc_update(local, sta->sdata, &sta->sta, changed);
+		drv_link_sta_rc_update(local, sta->sdata, link_sta->pub,
+				       changed);
 }
 
 int ieee80211_rate_control_register(const struct rate_control_ops *ops)
@@ -229,9 +252,8 @@ static ssize_t rcname_read(struct file *file, char __user *userbuf,
 				       ref->ops->name, len);
 }
 
-const struct file_operations rcname_ops = {
+const struct debugfs_short_fops rcname_ops = {
 	.read = rcname_read,
-	.open = simple_open,
 	.llseek = default_llseek,
 };
 #endif
@@ -349,9 +371,8 @@ static void __rate_control_send_low(struct ieee80211_hw *hw,
 				    struct ieee80211_tx_info *info,
 				    u32 rate_mask)
 {
+	u32 rate_flags = 0;
 	int i;
-	u32 rate_flags =
-		ieee80211_chandef_rate_flags(&hw->conf.chandef);
 
 	if (sband->band == NL80211_BAND_S1GHZ) {
 		info->control.rates[0].flags |= IEEE80211_TX_RC_S1G_MCS;
@@ -400,6 +421,9 @@ static bool rate_control_send_low(struct ieee80211_sta *pubsta,
 	struct sta_info *sta;
 	int mcast_rate;
 	bool use_basicrate = false;
+
+	if (!sband)
+		return false;
 
 	if (!pubsta || rc_no_data_or_no_ack_use_min(txrc)) {
 		__rate_control_send_low(txrc->hw, sband, pubsta, info,
@@ -759,14 +783,9 @@ static bool rate_control_cap_mask(struct ieee80211_sub_if_data *sdata,
 				  u8 mcs_mask[IEEE80211_HT_MCS_MASK_LEN],
 				  u16 vht_mask[NL80211_VHT_NSS_MAX])
 {
-	u32 i, flags;
+	u32 i;
 
 	*mask = sdata->rc_rateidx_mask[sband->band];
-	flags = ieee80211_chandef_rate_flags(&sdata->vif.bss_conf.chanreq.oper);
-	for (i = 0; i < sband->n_bitrates; i++) {
-		if ((flags & sband->bitrates[i].flags) != flags)
-			*mask &= ~BIT(i);
-	}
 
 	if (*mask == (1 << sband->n_bitrates) - 1 &&
 	    !sdata->rc_has_mcs_mask[sband->band] &&
@@ -885,6 +904,9 @@ void ieee80211_get_tx_rates(struct ieee80211_vif *vif,
 		return;
 
 	sdata = vif_to_sdata(vif);
+	if (info->band >= NUM_NL80211_BANDS)
+		return;
+
 	sband = sdata->local->hw.wiphy->bands[info->band];
 
 	if (ieee80211_is_tx_data(skb))
@@ -970,8 +992,6 @@ int rate_control_set_rates(struct ieee80211_hw *hw,
 
 	if (sta->uploaded)
 		drv_sta_rate_tbl_update(hw_to_local(hw), sta->sdata, pubsta);
-
-	ieee80211_sta_set_expected_throughput(pubsta, sta_get_expected_throughput(sta));
 
 	return 0;
 }

@@ -4,6 +4,7 @@
 #ifndef __SDW_INTEL_H
 #define __SDW_INTEL_H
 
+#include <linux/acpi.h>
 #include <linux/irqreturn.h>
 #include <linux/soundwire/sdw.h>
 
@@ -188,6 +189,9 @@
 #define SDW_SHIM3_INTEL_VS_ACTMCTL_DOAISE2	BIT(14)
 #define SDW_SHIM3_INTEL_VS_ACTMCTL_CLDE		BIT(15)
 
+/* ACE3+ Mic privacy control and status register */
+#define SDW_SHIM2_INTEL_VS_PVCCS		0x10
+
 /**
  * struct sdw_intel_stream_params_data: configuration passed during
  * the @params_stream callback, e.g. for interaction with DSP
@@ -286,31 +290,28 @@ struct hdac_bus;
  * hardware capabilities after all power dependencies are settled.
  * @link_mask: bit-wise mask listing SoundWire links reported by the
  * Controller
- * @num_slaves: total number of devices exposed across all enabled links
  * @handle: ACPI parent handle
  * @ldev: information for each link (controller-specific and kept
  * opaque here)
- * @ids: array of slave_id, representing Slaves exposed across all enabled
- * links
  * @link_list: list to handle interrupts across all links
  * @shim_lock: mutex to handle concurrent rmw access to shared SHIM registers.
  * @shim_mask: flags to track initialization of SHIM shared registers
  * @shim_base: sdw shim base.
  * @alh_base: sdw alh base.
+ * @peripherals: array representing Peripherals exposed across all enabled links
  */
 struct sdw_intel_ctx {
 	int count;
 	void __iomem *mmio_base;
 	u32 link_mask;
-	int num_slaves;
 	acpi_handle handle;
 	struct sdw_intel_link_dev **ldev;
-	struct sdw_extended_slave_id *ids;
 	struct list_head link_list;
 	struct mutex shim_lock; /* lock for access to shared SHIM registers */
 	u32 shim_mask;
 	u32 shim_base;
 	u32 alh_base;
+	struct sdw_peripherals *peripherals;
 };
 
 /**
@@ -333,6 +334,7 @@ struct sdw_intel_ctx {
  * @shim_base: sdw shim base.
  * @alh_base: sdw alh base.
  * @ext: extended HDaudio link support
+ * @mic_privacy: ACE version supports microphone privacy
  * @hbus: hdac_bus pointer, needed for power management
  * @eml_lock: mutex protecting shared registers in the HDaudio multi-link
  * space
@@ -351,6 +353,7 @@ struct sdw_intel_res {
 	u32 shim_base;
 	u32 alh_base;
 	bool ext;
+	bool mic_privacy;
 	struct hdac_bus *hbus;
 	struct mutex *eml_lock;
 };
@@ -367,7 +370,7 @@ struct sdw_intel_res {
  * on e.g. which machine driver to select (I2S mode, HDaudio or
  * SoundWire).
  */
-int sdw_intel_acpi_scan(acpi_handle *parent_handle,
+int sdw_intel_acpi_scan(acpi_handle parent_handle,
 			struct sdw_intel_acpi_info *info);
 
 void sdw_intel_process_wakeen_event(struct sdw_intel_ctx *ctx);
@@ -438,6 +441,10 @@ struct sdw_intel_hw_ops {
 	bool (*sync_check_cmdsync_unlocked)(struct sdw_intel *sdw);
 
 	void (*program_sdi)(struct sdw_intel *sdw, int dev_num);
+
+	int (*bpt_send_async)(struct sdw_intel *sdw, struct sdw_slave *slave,
+			      struct sdw_bpt_msg *msg);
+	int (*bpt_wait)(struct sdw_intel *sdw, struct sdw_slave *slave, struct sdw_bpt_msg *msg);
 };
 
 extern const struct sdw_intel_hw_ops sdw_intel_cnl_hw_ops;

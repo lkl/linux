@@ -13,8 +13,8 @@
 
 #include <linux/bpf.h>
 #include <linux/fs.h>
-#include "trace_btf.h"
 
+#include "trace_btf.h"
 #include "trace_probe.h"
 
 #undef C
@@ -154,9 +154,12 @@ fail:
 }
 
 static struct trace_probe_log trace_probe_log;
+extern struct mutex dyn_event_ops_mutex;
 
 void trace_probe_log_init(const char *subsystem, int argc, const char **argv)
 {
+	lockdep_assert_held(&dyn_event_ops_mutex);
+
 	trace_probe_log.subsystem = subsystem;
 	trace_probe_log.argc = argc;
 	trace_probe_log.argv = argv;
@@ -165,11 +168,15 @@ void trace_probe_log_init(const char *subsystem, int argc, const char **argv)
 
 void trace_probe_log_clear(void)
 {
+	lockdep_assert_held(&dyn_event_ops_mutex);
+
 	memset(&trace_probe_log, 0, sizeof(trace_probe_log));
 }
 
 void trace_probe_log_set_index(int index)
 {
+	lockdep_assert_held(&dyn_event_ops_mutex);
+
 	trace_probe_log.index = index;
 }
 
@@ -177,6 +184,8 @@ void __trace_probe_log_err(int offset, int err_type)
 {
 	char *command, *p;
 	int i, len = 0, pos = 0;
+
+	lockdep_assert_held(&dyn_event_ops_mutex);
 
 	if (!trace_probe_log.argv)
 		return;
@@ -238,7 +247,25 @@ int traceprobe_split_symbol_offset(char *symbol, long *offset)
 	return 0;
 }
 
-/* @buf must has MAX_EVENT_NAME_LEN size */
+/**
+ * traceprobe_parse_event_name() - Parse a string into group and event names
+ * @pevent: A pointer to the string to be parsed.
+ * @pgroup: A pointer to the group name.
+ * @buf:    A buffer to store the parsed group name.
+ * @offset: The offset of the string in the original user command, for logging.
+ *
+ * This parses a string with the format `[GROUP/][EVENT]` or `[GROUP.][EVENT]`
+ * (either GROUP or EVENT or both must be specified).
+ * Since the parsed group name is stored in @buf, the caller must ensure @buf
+ * is at least MAX_EVENT_NAME_LEN bytes.
+ *
+ * Return: 0 on success, or -EINVAL on failure.
+ *
+ * If success, *@pevent is updated to point to the event name part of the
+ * original string, or NULL if there is no event name.
+ * Also, *@pgroup is updated to point to the parsed group which is stored
+ * in @buf, or NULL if there is no group name.
+ */
 int traceprobe_parse_event_name(const char **pevent, const char **pgroup,
 				char *buf, int offset)
 {
@@ -648,7 +675,7 @@ static int parse_btf_arg(char *varname,
 		ret = query_btf_context(ctx);
 		if (ret < 0 || ctx->nr_params == 0) {
 			trace_probe_log_err(ctx->offset, NO_BTF_ENTRY);
-			return PTR_ERR(params);
+			return -ENOENT;
 		}
 	}
 	params = ctx->params;
@@ -770,11 +797,44 @@ static int check_prepare_btf_string_fetch(char *typename,
 
 #ifdef CONFIG_HAVE_FUNCTION_ARG_ACCESS_API
 
+static void store_entry_arg_at(struct fetch_insn *code, int argnum, int offset)
+{
+	code[0].op = FETCH_OP_ARG;
+	code[0].param = argnum;
+	code[1].op = FETCH_OP_ST_EDATA;
+	code[1].offset = offset;
+}
+
+static int get_entry_arg_max_offset(struct probe_entry_arg *earg)
+{
+	int i, max_offset = 0;
+
+	/*
+	 * earg->code[] array has an operation sequence which is run in
+	 * the entry handler.
+	 * The sequence stopped by FETCH_OP_END and each data stored in
+	 * the entry data buffer by FETCH_OP_ST_EDATA. The FETCH_OP_ST_EDATA
+	 * stores the data at the data buffer + its offset, and all data are
+	 * "unsigned long" size. The offset must be increased when a data is
+	 * stored. Thus we need to find the last FETCH_OP_ST_EDATA in the
+	 * code array.
+	 */
+	for (i = 0; i < earg->size - 1 && earg->code[i].op != FETCH_OP_END; i++) {
+		if (earg->code[i].op == FETCH_OP_ST_EDATA)
+			if (earg->code[i].offset > max_offset)
+				max_offset = earg->code[i].offset;
+	}
+	return max_offset;
+}
+
+/*
+ * Add the entry code to store the 'argnum'th parameter and return the offset
+ * in the entry data buffer where the data will be stored.
+ */
 static int __store_entry_arg(struct trace_probe *tp, int argnum)
 {
 	struct probe_entry_arg *earg = tp->entry_arg;
-	bool match = false;
-	int i, offset;
+	int i, offset, last_offset = 0;
 
 	if (!earg) {
 		earg = kzalloc(sizeof(*tp->entry_arg), GFP_KERNEL);
@@ -791,54 +851,59 @@ static int __store_entry_arg(struct trace_probe *tp, int argnum)
 		for (i = 0; i < earg->size; i++)
 			earg->code[i].op = FETCH_OP_END;
 		tp->entry_arg = earg;
+		store_entry_arg_at(earg->code, argnum, 0);
+		return 0;
 	}
 
-	offset = 0;
-	for (i = 0; i < earg->size - 1; i++) {
-		switch (earg->code[i].op) {
-		case FETCH_OP_END:
-			earg->code[i].op = FETCH_OP_ARG;
-			earg->code[i].param = argnum;
-			earg->code[i + 1].op = FETCH_OP_ST_EDATA;
-			earg->code[i + 1].offset = offset;
-			return offset;
-		case FETCH_OP_ARG:
-			match = (earg->code[i].param == argnum);
-			break;
-		case FETCH_OP_ST_EDATA:
-			offset = earg->code[i].offset;
-			if (match)
-				return offset;
-			offset += sizeof(unsigned long);
-			break;
-		default:
-			break;
-		}
+	/*
+	 * NOTE: if anyone change the following rule, please rewrite this.
+	 * The entry code array is filled with the pair of
+	 *
+	 * [FETCH_OP_ARG(argnum)]
+	 * [FETCH_OP_ST_EDATA(offset of entry data buffer)]
+	 *
+	 * and the rest of entries are filled with [FETCH_OP_END].
+	 * The offset should be incremented, thus the last pair should
+	 * have the largest offset.
+	 */
+
+	/* Search the offset for the sprcified argnum. */
+	for (i = 0; i < earg->size - 1 && earg->code[i].op != FETCH_OP_END; i += 2) {
+		if (WARN_ON_ONCE(earg->code[i].op != FETCH_OP_ARG))
+			return -EINVAL;
+
+		if (earg->code[i].param != argnum)
+			continue;
+
+		if (WARN_ON_ONCE(earg->code[i + 1].op != FETCH_OP_ST_EDATA))
+			return -EINVAL;
+
+		return earg->code[i + 1].offset;
 	}
-	return -ENOSPC;
+	/* Not found, append new entry if possible. */
+	if (i >= earg->size - 1)
+		return -ENOSPC;
+
+	/* The last entry must have the largest offset. */
+	if (i != 0) {
+		if (WARN_ON_ONCE(earg->code[i - 1].op != FETCH_OP_ST_EDATA))
+			return -EINVAL;
+		last_offset = earg->code[i - 1].offset;
+	}
+
+	offset = last_offset + sizeof(unsigned long);
+	store_entry_arg_at(&earg->code[i], argnum, offset);
+	return offset;
 }
 
 int traceprobe_get_entry_data_size(struct trace_probe *tp)
 {
 	struct probe_entry_arg *earg = tp->entry_arg;
-	int i, size = 0;
 
 	if (!earg)
 		return 0;
 
-	for (i = 0; i < earg->size; i++) {
-		switch (earg->code[i].op) {
-		case FETCH_OP_END:
-			goto out;
-		case FETCH_OP_ST_EDATA:
-			size = earg->code[i].offset + sizeof(unsigned long);
-			break;
-		default:
-			break;
-		}
-	}
-out:
-	return size;
+	return get_entry_arg_max_offset(earg) + sizeof(unsigned long);
 }
 
 void store_trace_entry_data(void *edata, struct trace_probe *tp, struct pt_regs *regs)
@@ -1409,7 +1474,7 @@ static int traceprobe_parse_probe_arg_body(const char *argv, ssize_t *size,
 					   struct traceprobe_parse_context *ctx)
 {
 	struct fetch_insn *code, *tmp = NULL;
-	char *type, *arg;
+	char *type, *arg __free(kfree) = NULL;
 	int ret, len;
 
 	len = strlen(argv);
@@ -1426,22 +1491,16 @@ static int traceprobe_parse_probe_arg_body(const char *argv, ssize_t *size,
 		return -ENOMEM;
 
 	parg->comm = kstrdup(arg, GFP_KERNEL);
-	if (!parg->comm) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	if (!parg->comm)
+		return -ENOMEM;
 
 	type = parse_probe_arg_type(arg, parg, ctx);
-	if (IS_ERR(type)) {
-		ret = PTR_ERR(type);
-		goto out;
-	}
+	if (IS_ERR(type))
+		return PTR_ERR(type);
 
 	code = tmp = kcalloc(FETCH_INSN_MAX, sizeof(*code), GFP_KERNEL);
-	if (!code) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	if (!code)
+		return -ENOMEM;
 	code[FETCH_INSN_MAX - 1].op = FETCH_OP_END;
 
 	ctx->last_type = NULL;
@@ -1497,8 +1556,6 @@ fail:
 				kfree(code->data);
 	}
 	kfree(tmp);
-out:
-	kfree(arg);
 
 	return ret;
 }
@@ -1668,7 +1725,7 @@ const char **traceprobe_expand_meta_args(int argc, const char *argv[],
 {
 	const struct btf_param *params = NULL;
 	int i, j, n, used, ret, args_idx = -1;
-	const char **new_argv = NULL;
+	const char **new_argv __free(kfree) = NULL;
 
 	ret = argv_has_var_arg(argc, argv, &args_idx, ctx);
 	if (ret < 0)
@@ -1707,7 +1764,7 @@ const char **traceprobe_expand_meta_args(int argc, const char *argv[],
 				ret = sprint_nth_btf_arg(n, "", buf + used,
 							 bufsize - used, ctx);
 				if (ret < 0)
-					goto error;
+					return ERR_PTR(ret);
 
 				new_argv[j++] = buf + used;
 				used += ret + 1;
@@ -1721,25 +1778,20 @@ const char **traceprobe_expand_meta_args(int argc, const char *argv[],
 			n = simple_strtoul(argv[i] + 4, &type, 10);
 			if (type && !(*type == ':' || *type == '\0')) {
 				trace_probe_log_err(0, BAD_VAR);
-				ret = -ENOENT;
-				goto error;
+				return ERR_PTR(-ENOENT);
 			}
 			/* Note: $argN starts from $arg1 */
 			ret = sprint_nth_btf_arg(n - 1, type, buf + used,
 						 bufsize - used, ctx);
 			if (ret < 0)
-				goto error;
+				return ERR_PTR(ret);
 			new_argv[j++] = buf + used;
 			used += ret + 1;
 		} else
 			new_argv[j++] = argv[i];
 	}
 
-	return new_argv;
-
-error:
-	kfree(new_argv);
-	return ERR_PTR(ret);
+	return_ptr(new_argv);
 }
 
 /* @buf: *buf must be equal to NULL. Caller must to free *buf */
@@ -1747,14 +1799,14 @@ int traceprobe_expand_dentry_args(int argc, const char *argv[], char **buf)
 {
 	int i, used, ret;
 	const int bufsize = MAX_DENTRY_ARGS_LEN;
-	char *tmpbuf = NULL;
+	char *tmpbuf __free(kfree) = NULL;
 
 	if (*buf)
 		return -EINVAL;
 
 	used = 0;
 	for (i = 0; i < argc; i++) {
-		char *tmp;
+		char *tmp __free(kfree) = NULL;
 		char *equal;
 		size_t arg_len;
 
@@ -1769,7 +1821,7 @@ int traceprobe_expand_dentry_args(int argc, const char *argv[], char **buf)
 
 		tmp = kstrdup(argv[i], GFP_KERNEL);
 		if (!tmp)
-			goto nomem;
+			return -ENOMEM;
 
 		equal = strchr(tmp, '=');
 		if (equal)
@@ -1790,18 +1842,14 @@ int traceprobe_expand_dentry_args(int argc, const char *argv[], char **buf)
 				       offsetof(struct file, f_path.dentry),
 				       equal ? equal + 1 : tmp);
 
-		kfree(tmp);
 		if (ret >= bufsize - used)
-			goto nomem;
+			return -ENOMEM;
 		argv[i] = tmpbuf + used;
 		used += ret + 1;
 	}
 
-	*buf = tmpbuf;
+	*buf = no_free_ptr(tmpbuf);
 	return 0;
-nomem:
-	kfree(tmpbuf);
-	return -ENOMEM;
 }
 
 void traceprobe_finish_parse(struct traceprobe_parse_context *ctx)

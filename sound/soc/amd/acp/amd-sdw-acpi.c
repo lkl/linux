@@ -17,8 +17,8 @@
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/export.h>
-#include <linux/fwnode.h>
 #include <linux/module.h>
+#include <linux/property.h>
 #include <linux/soundwire/sdw_amd.h>
 #include <linux/string.h>
 
@@ -56,7 +56,7 @@ int amd_sdw_scan_controller(struct sdw_amd_acpi_info *info)
 	info->link_mask = sdw_bitmap;
 	return 0;
 }
-EXPORT_SYMBOL_NS(amd_sdw_scan_controller, SND_AMD_SOUNDWIRE_ACPI);
+EXPORT_SYMBOL_NS(amd_sdw_scan_controller, "SND_AMD_SOUNDWIRE_ACPI");
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("AMD SoundWire ACPI helpers");

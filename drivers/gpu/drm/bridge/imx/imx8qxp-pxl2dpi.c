@@ -48,6 +48,7 @@ struct imx8qxp_pxl2dpi {
 #define bridge_to_p2d(b)	container_of(b, struct imx8qxp_pxl2dpi, bridge)
 
 static int imx8qxp_pxl2dpi_bridge_attach(struct drm_bridge *bridge,
+					 struct drm_encoder *encoder,
 					 enum drm_bridge_attach_flags flags)
 {
 	struct imx8qxp_pxl2dpi *p2d = bridge->driver_private;
@@ -58,7 +59,7 @@ static int imx8qxp_pxl2dpi_bridge_attach(struct drm_bridge *bridge,
 		return -EINVAL;
 	}
 
-	return drm_bridge_attach(bridge->encoder,
+	return drm_bridge_attach(encoder,
 				 p2d->next_bridge, bridge,
 				 DRM_BRIDGE_ATTACH_NO_CONNECTOR);
 }
@@ -122,9 +123,8 @@ imx8qxp_pxl2dpi_bridge_mode_set(struct drm_bridge *bridge,
 	}
 }
 
-static void
-imx8qxp_pxl2dpi_bridge_atomic_disable(struct drm_bridge *bridge,
-				      struct drm_bridge_state *old_bridge_state)
+static void imx8qxp_pxl2dpi_bridge_atomic_disable(struct drm_bridge *bridge,
+						  struct drm_atomic_state *state)
 {
 	struct imx8qxp_pxl2dpi *p2d = bridge->driver_private;
 	int ret;
@@ -134,8 +134,7 @@ imx8qxp_pxl2dpi_bridge_atomic_disable(struct drm_bridge *bridge,
 		DRM_DEV_ERROR(p2d->dev, "failed to put runtime PM: %d\n", ret);
 
 	if (p2d->companion)
-		p2d->companion->funcs->atomic_disable(p2d->companion,
-							old_bridge_state);
+		p2d->companion->funcs->atomic_disable(p2d->companion, state);
 }
 
 static const u32 imx8qxp_pxl2dpi_bus_output_fmts[] = {
@@ -393,9 +392,10 @@ static int imx8qxp_pxl2dpi_bridge_probe(struct platform_device *pdev)
 	struct device_node *np = dev->of_node;
 	int ret;
 
-	p2d = devm_kzalloc(dev, sizeof(*p2d), GFP_KERNEL);
-	if (!p2d)
-		return -ENOMEM;
+	p2d = devm_drm_bridge_alloc(dev, struct imx8qxp_pxl2dpi, bridge,
+				    &imx8qxp_pxl2dpi_bridge_funcs);
+	if (IS_ERR(p2d))
+		return PTR_ERR(p2d);
 
 	p2d->regmap = syscon_node_to_regmap(np->parent);
 	if (IS_ERR(p2d->regmap)) {
@@ -442,7 +442,6 @@ static int imx8qxp_pxl2dpi_bridge_probe(struct platform_device *pdev)
 	pm_runtime_enable(dev);
 
 	p2d->bridge.driver_private = p2d;
-	p2d->bridge.funcs = &imx8qxp_pxl2dpi_bridge_funcs;
 	p2d->bridge.of_node = np;
 
 	drm_bridge_add(&p2d->bridge);
@@ -467,7 +466,7 @@ MODULE_DEVICE_TABLE(of, imx8qxp_pxl2dpi_dt_ids);
 
 static struct platform_driver imx8qxp_pxl2dpi_bridge_driver = {
 	.probe	= imx8qxp_pxl2dpi_bridge_probe,
-	.remove_new = imx8qxp_pxl2dpi_bridge_remove,
+	.remove = imx8qxp_pxl2dpi_bridge_remove,
 	.driver	= {
 		.of_match_table = imx8qxp_pxl2dpi_dt_ids,
 		.name = DRIVER_NAME,

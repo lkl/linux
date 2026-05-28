@@ -17,7 +17,7 @@
 #define MAX_SIG_SIZE 1024
 
 __u32 monitored_pid;
-__u32 user_keyring_serial;
+__s32 user_keyring_serial;
 __u64 system_keyring_id;
 
 struct data {
@@ -37,7 +37,7 @@ struct {
 char _license[] SEC("license") = "GPL";
 
 SEC("lsm.s/bpf")
-int BPF_PROG(bpf, int cmd, union bpf_attr *attr, unsigned int size)
+int BPF_PROG(bpf, int cmd, union bpf_attr *attr, unsigned int size, bool kernel)
 {
 	struct bpf_dynptr data_ptr, sig_ptr;
 	struct data *data_val;

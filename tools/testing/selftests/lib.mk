@@ -228,4 +228,10 @@ $(OUTPUT)/%:%.S
 	$(LINK.S) $^ $(LDLIBS) -o $@
 endif
 
-.PHONY: run_tests all clean install emit_tests gen_mods_dir clean_mods_dir
+# Extract the expected header directory
+khdr_output := $(patsubst %/usr/include,%,$(filter %/usr/include,$(KHDR_INCLUDES)))
+
+headers:
+	$(Q)$(MAKE) -f $(top_srcdir)/Makefile -C $(khdr_output) headers
+
+.PHONY: run_tests all clean install emit_tests gen_mods_dir clean_mods_dir headers

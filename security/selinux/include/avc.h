@@ -65,6 +65,10 @@ static inline u32 avc_audit_required(u32 requested, struct av_decision *avd,
 				     int result, u32 auditdeny, u32 *deniedp)
 {
 	u32 denied, audited;
+
+	if (avd->flags & AVD_FLAGS_NEVERAUDIT)
+		return 0;
+
 	denied = requested & ~avd->allowed;
 	if (unlikely(denied)) {
 		audited = denied & avd->auditdeny;
@@ -136,8 +140,11 @@ int avc_has_perm_noaudit(u32 ssid, u32 tsid, u16 tclass, u32 requested,
 int avc_has_perm(u32 ssid, u32 tsid, u16 tclass, u32 requested,
 		 struct common_audit_data *auditdata);
 
+#define AVC_EXT_IOCTL	(1 << 0) /* Cache entry for an ioctl extended permission */
+#define AVC_EXT_NLMSG	(1 << 1) /* Cache entry for an nlmsg extended permission */
 int avc_has_extended_perms(u32 ssid, u32 tsid, u16 tclass, u32 requested,
-			   u8 driver, u8 perm, struct common_audit_data *ad);
+			   u8 driver, u8 base_perm, u8 perm,
+			   struct common_audit_data *ad);
 
 u32 avc_policy_seqno(void);
 

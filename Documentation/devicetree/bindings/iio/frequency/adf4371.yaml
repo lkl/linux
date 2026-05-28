@@ -7,7 +7,8 @@ $schema: http://devicetree.org/meta-schemas/core.yaml#
 title: Analog Devices ADF4371/ADF4372 Wideband Synthesizers
 
 maintainers:
-  - Popa Stefan <stefan.popa@analog.com>
+  - Marcelo Schmitt <marcelo.schmitt@analog.com>
+  - Nuno Sá <nuno.sa@analog.com>
 
 description: |
   Analog Devices ADF4371/ADF4372 SPI Wideband Synthesizers
@@ -30,8 +31,9 @@ properties:
 
   clock-names:
     description:
-      Must be "clkin"
-    maxItems: 1
+      Must be "clkin" if the input reference is single ended or "clkin-diff"
+      if the input reference is differential.
+    enum: [clkin, clkin-diff]
 
   adi,mute-till-lock-en:
     type: boolean

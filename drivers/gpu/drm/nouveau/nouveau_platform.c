@@ -30,10 +30,7 @@ static int nouveau_platform_probe(struct platform_device *pdev)
 	func = of_device_get_match_data(&pdev->dev);
 
 	drm = nouveau_platform_device_create(func, pdev, &device);
-	if (IS_ERR(drm))
-		return PTR_ERR(drm);
-
-	return 0;
+	return PTR_ERR_OR_ZERO(drm);
 }
 
 static void nouveau_platform_remove(struct platform_device *pdev)
@@ -86,5 +83,5 @@ struct platform_driver nouveau_platform_driver = {
 		.of_match_table = of_match_ptr(nouveau_platform_match),
 	},
 	.probe = nouveau_platform_probe,
-	.remove_new = nouveau_platform_remove,
+	.remove = nouveau_platform_remove,
 };

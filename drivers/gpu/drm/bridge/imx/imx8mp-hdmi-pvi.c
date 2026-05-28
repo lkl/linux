@@ -40,25 +40,27 @@ to_imx8mp_hdmi_pvi(struct drm_bridge *bridge)
 }
 
 static int imx8mp_hdmi_pvi_bridge_attach(struct drm_bridge *bridge,
+					 struct drm_encoder *encoder,
 					 enum drm_bridge_attach_flags flags)
 {
 	struct imx8mp_hdmi_pvi *pvi = to_imx8mp_hdmi_pvi(bridge);
 
-	return drm_bridge_attach(bridge->encoder, pvi->next_bridge,
+	return drm_bridge_attach(encoder, pvi->next_bridge,
 				 bridge, flags);
 }
 
 static void imx8mp_hdmi_pvi_bridge_enable(struct drm_bridge *bridge,
-					  struct drm_bridge_state *bridge_state)
+					  struct drm_atomic_state *state)
 {
-	struct drm_atomic_state *state = bridge_state->base.state;
 	struct imx8mp_hdmi_pvi *pvi = to_imx8mp_hdmi_pvi(bridge);
 	struct drm_connector_state *conn_state;
+	struct drm_bridge_state *bridge_state;
 	const struct drm_display_mode *mode;
 	struct drm_crtc_state *crtc_state;
 	struct drm_connector *connector;
 	u32 bus_flags = 0, val;
 
+	bridge_state = drm_atomic_get_new_bridge_state(state, bridge);
 	connector = drm_atomic_get_new_connector_for_encoder(state, bridge->encoder);
 	conn_state = drm_atomic_get_new_connector_state(state, connector);
 	crtc_state = drm_atomic_get_new_crtc_state(state, conn_state->crtc);
@@ -88,7 +90,7 @@ static void imx8mp_hdmi_pvi_bridge_enable(struct drm_bridge *bridge,
 }
 
 static void imx8mp_hdmi_pvi_bridge_disable(struct drm_bridge *bridge,
-					   struct drm_bridge_state *bridge_state)
+					   struct drm_atomic_state *state)
 {
 	struct imx8mp_hdmi_pvi *pvi = to_imx8mp_hdmi_pvi(bridge);
 
@@ -138,9 +140,10 @@ static int imx8mp_hdmi_pvi_probe(struct platform_device *pdev)
 	struct device_node *remote;
 	struct imx8mp_hdmi_pvi *pvi;
 
-	pvi = devm_kzalloc(&pdev->dev, sizeof(*pvi), GFP_KERNEL);
-	if (!pvi)
-		return -ENOMEM;
+	pvi = devm_drm_bridge_alloc(&pdev->dev, struct imx8mp_hdmi_pvi,
+				    bridge, &imx_hdmi_pvi_bridge_funcs);
+	if (IS_ERR(pvi))
+		return PTR_ERR(pvi);
 
 	platform_set_drvdata(pdev, pvi);
 	pvi->dev = &pdev->dev;
@@ -164,7 +167,6 @@ static int imx8mp_hdmi_pvi_probe(struct platform_device *pdev)
 	pm_runtime_enable(&pdev->dev);
 
 	/* Register the bridge. */
-	pvi->bridge.funcs = &imx_hdmi_pvi_bridge_funcs;
 	pvi->bridge.of_node = pdev->dev.of_node;
 	pvi->bridge.timings = pvi->next_bridge->timings;
 
@@ -193,7 +195,7 @@ MODULE_DEVICE_TABLE(of, imx8mp_hdmi_pvi_match);
 
 static struct platform_driver imx8mp_hdmi_pvi_driver = {
 	.probe	= imx8mp_hdmi_pvi_probe,
-	.remove_new = imx8mp_hdmi_pvi_remove,
+	.remove = imx8mp_hdmi_pvi_remove,
 	.driver		= {
 		.name = "imx-hdmi-pvi",
 		.of_match_table	= imx8mp_hdmi_pvi_match,

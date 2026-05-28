@@ -5,7 +5,9 @@
 #ifndef _ASM_POWERPC_VDSO_GETRANDOM_H
 #define _ASM_POWERPC_VDSO_GETRANDOM_H
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
+
+#include <asm/vdso_datapage.h>
 
 static __always_inline int do_syscall_3(const unsigned long _r0, const unsigned long _r3,
 					const unsigned long _r4, const unsigned long _r5)
@@ -41,14 +43,25 @@ static __always_inline ssize_t getrandom_syscall(void *buffer, size_t len, unsig
 			    (unsigned long)len, (unsigned long)flags);
 }
 
-static __always_inline struct vdso_rng_data *__arch_get_vdso_rng_data(void)
+static __always_inline const struct vdso_rng_data *__arch_get_vdso_u_rng_data(void)
 {
-	return NULL;
+	struct vdso_rng_data *data;
+
+	asm (
+		"	bcl	20, 31, .+4 ;"
+		"0:	mflr	%0 ;"
+		"	addis	%0, %0, (vdso_u_rng_data - 0b)@ha ;"
+		"	addi	%0, %0, (vdso_u_rng_data - 0b)@l  ;"
+		: "=r" (data) : : "lr"
+	);
+
+	return data;
 }
+#define __arch_get_vdso_u_rng_data __arch_get_vdso_u_rng_data
 
 ssize_t __c_kernel_getrandom(void *buffer, size_t len, unsigned int flags, void *opaque_state,
-			     size_t opaque_len, const struct vdso_rng_data *vd);
+			     size_t opaque_len);
 
-#endif /* !__ASSEMBLY__ */
+#endif /* !__ASSEMBLER__ */
 
 #endif /* _ASM_POWERPC_VDSO_GETRANDOM_H */

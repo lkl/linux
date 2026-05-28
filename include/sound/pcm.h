@@ -97,11 +97,11 @@ struct snd_pcm_ops {
 
 #define SNDRV_PCM_TRIGGER_STOP		0
 #define SNDRV_PCM_TRIGGER_START		1
-#define SNDRV_PCM_TRIGGER_PAUSE_PUSH	3
-#define SNDRV_PCM_TRIGGER_PAUSE_RELEASE	4
-#define SNDRV_PCM_TRIGGER_SUSPEND	5
-#define SNDRV_PCM_TRIGGER_RESUME	6
-#define SNDRV_PCM_TRIGGER_DRAIN		7
+#define SNDRV_PCM_TRIGGER_PAUSE_PUSH	2
+#define SNDRV_PCM_TRIGGER_PAUSE_RELEASE	3
+#define SNDRV_PCM_TRIGGER_SUSPEND	4
+#define SNDRV_PCM_TRIGGER_RESUME	5
+#define SNDRV_PCM_TRIGGER_DRAIN		6
 
 #define SNDRV_PCM_POS_XRUN		((snd_pcm_uframes_t)-1)
 
@@ -1251,8 +1251,6 @@ unsigned int snd_pcm_rate_to_rate_bit(unsigned int rate);
 unsigned int snd_pcm_rate_bit_to_rate(unsigned int rate_bit);
 unsigned int snd_pcm_rate_mask_intersect(unsigned int rates_a,
 					 unsigned int rates_b);
-unsigned int snd_pcm_rate_range_to_bits(unsigned int rate_min,
-					unsigned int rate_max);
 
 /**
  * snd_pcm_set_runtime_buffer - Set the PCM runtime buffer
@@ -1393,30 +1391,6 @@ snd_pcm_sgbuf_get_chunk_size(struct snd_pcm_substream *substream,
 	return snd_sgbuf_get_chunk_size(snd_pcm_get_dma_buf(substream), ofs, size);
 }
 
-/**
- * snd_pcm_mmap_data_open - increase the mmap counter
- * @area: VMA
- *
- * PCM mmap callback should handle this counter properly
- */
-static inline void snd_pcm_mmap_data_open(struct vm_area_struct *area)
-{
-	struct snd_pcm_substream *substream = (struct snd_pcm_substream *)area->vm_private_data;
-	atomic_inc(&substream->mmap_count);
-}
-
-/**
- * snd_pcm_mmap_data_close - decrease the mmap counter
- * @area: VMA
- *
- * PCM mmap callback should handle this counter properly
- */
-static inline void snd_pcm_mmap_data_close(struct vm_area_struct *area)
-{
-	struct snd_pcm_substream *substream = (struct snd_pcm_substream *)area->vm_private_data;
-	atomic_dec(&substream->mmap_count);
-}
-
 int snd_pcm_lib_default_mmap(struct snd_pcm_substream *substream,
 			     struct vm_area_struct *area);
 /* mmap for io-memory area */
@@ -1427,6 +1401,8 @@ int snd_pcm_lib_mmap_iomem(struct snd_pcm_substream *substream, struct vm_area_s
 #define SNDRV_PCM_INFO_MMAP_IOMEM	0
 #define snd_pcm_lib_mmap_iomem	NULL
 #endif
+
+void snd_pcm_runtime_buffer_set_silence(struct snd_pcm_runtime *runtime);
 
 /**
  * snd_pcm_limit_isa_dma_size - Get the max size fitting with ISA DMA transfer
@@ -1556,9 +1532,10 @@ static inline u64 pcm_format_to_bits(snd_pcm_format_t pcm_format)
 	dev_dbg((pcm)->card->dev, fmt, ##args)
 
 /* helpers for copying between iov_iter and iomem */
-int copy_to_iter_fromio(struct iov_iter *itert, const void __iomem *src,
-			size_t count);
-int copy_from_iter_toio(void __iomem *dst, struct iov_iter *iter, size_t count);
+size_t copy_to_iter_fromio(const void __iomem *src, size_t bytes,
+			   struct iov_iter *iter) __must_check;
+size_t copy_from_iter_toio(void __iomem *dst, size_t bytes,
+			   struct iov_iter *iter) __must_check;
 
 struct snd_pcm_status64 {
 	snd_pcm_state_t state;		/* stream state */

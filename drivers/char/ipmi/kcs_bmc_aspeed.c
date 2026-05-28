@@ -428,7 +428,7 @@ static void aspeed_kcs_irq_mask_update(struct kcs_bmc_device *kcs_bmc, u8 mask, 
 			if (rc == -ETIMEDOUT)
 				mod_timer(&priv->obe.timer, jiffies + OBE_POLL_PERIOD);
 		} else {
-			del_timer(&priv->obe.timer);
+			timer_delete(&priv->obe.timer);
 		}
 	}
 
@@ -655,7 +655,7 @@ static void aspeed_kcs_remove(struct platform_device *pdev)
 	spin_lock_irq(&priv->obe.lock);
 	priv->obe.remove = true;
 	spin_unlock_irq(&priv->obe.lock);
-	del_timer_sync(&priv->obe.timer);
+	timer_delete_sync(&priv->obe.timer);
 }
 
 static const struct of_device_id ast_kcs_bmc_match[] = {
@@ -672,7 +672,7 @@ static struct platform_driver ast_kcs_bmc_driver = {
 		.of_match_table = ast_kcs_bmc_match,
 	},
 	.probe  = aspeed_kcs_probe,
-	.remove_new = aspeed_kcs_remove,
+	.remove = aspeed_kcs_remove,
 };
 module_platform_driver(ast_kcs_bmc_driver);
 

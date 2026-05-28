@@ -31,9 +31,7 @@
 
 #include <linux/completion.h>
 #include <linux/device-mapper.h>
-#include <linux/kernel.h>
 #include <linux/lz4.h>
-#include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
 #include <linux/types.h>
@@ -141,12 +139,6 @@ static void finish_vdo_request_queue(void *ptr)
 {
 	vdo_unregister_allocating_thread();
 }
-
-#ifdef MODULE
-#define MODULE_NAME THIS_MODULE->name
-#else
-#define MODULE_NAME "dm-vdo"
-#endif  /* MODULE */
 
 static const struct vdo_work_queue_type default_queue_type = {
 	.start = start_vdo_request_queue,
@@ -559,8 +551,7 @@ int vdo_make(unsigned int instance, struct device_config *config, char **reason,
 	*vdo_ptr = vdo;
 
 	snprintf(vdo->thread_name_prefix, sizeof(vdo->thread_name_prefix),
-		 "%s%u", MODULE_NAME, instance);
-	BUG_ON(vdo->thread_name_prefix[0] == '\0');
+		 "vdo%u", instance);
 	result = vdo_allocate(vdo->thread_config.thread_count,
 			      struct vdo_thread, __func__, &vdo->threads);
 	if (result != VDO_SUCCESS) {
@@ -643,7 +634,7 @@ static void finish_vdo(struct vdo *vdo)
 
 /**
  * free_listeners() - Free the list of read-only listeners associated with a thread.
- * @thread_data: The thread holding the list to free.
+ * @thread: The thread holding the list to free.
  */
 static void free_listeners(struct vdo_thread *thread)
 {
@@ -852,7 +843,7 @@ int vdo_synchronous_flush(struct vdo *vdo)
 /**
  * vdo_get_state() - Get the current state of the vdo.
  * @vdo: The vdo.
-
+ *
  * Context: This method may be called from any thread.
  *
  * Return: The current state of the vdo.

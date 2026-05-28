@@ -9,6 +9,7 @@
 #include <linux/jiffies.h>
 #include <asm/apicdef.h>
 #include <asm/apic.h>
+#include <asm/msr.h>
 #include <asm/nmi.h>
 
 #include "../perf_event.h"
@@ -563,13 +564,13 @@ static void amd_pmu_cpu_reset(int cpu)
 		return;
 
 	/* Clear enable bits i.e. PerfCntrGlobalCtl.PerfCntrEn */
-	wrmsrl(MSR_AMD64_PERF_CNTR_GLOBAL_CTL, 0);
+	wrmsrq(MSR_AMD64_PERF_CNTR_GLOBAL_CTL, 0);
 
 	/*
 	 * Clear freeze and overflow bits i.e. PerfCntrGLobalStatus.LbrFreeze
 	 * and PerfCntrGLobalStatus.PerfCntrOvfl
 	 */
-	wrmsrl(MSR_AMD64_PERF_CNTR_GLOBAL_STATUS_CLR,
+	wrmsrq(MSR_AMD64_PERF_CNTR_GLOBAL_STATUS_CLR,
 	       GLOBAL_STATUS_LBRS_FROZEN | amd_pmu_global_cntr_mask);
 }
 
@@ -651,7 +652,7 @@ static void amd_pmu_cpu_dead(int cpu)
 
 static __always_inline void amd_pmu_set_global_ctl(u64 ctl)
 {
-	wrmsrl(MSR_AMD64_PERF_CNTR_GLOBAL_CTL, ctl);
+	wrmsrq(MSR_AMD64_PERF_CNTR_GLOBAL_CTL, ctl);
 }
 
 static inline u64 amd_pmu_get_global_status(void)
@@ -659,7 +660,7 @@ static inline u64 amd_pmu_get_global_status(void)
 	u64 status;
 
 	/* PerfCntrGlobalStatus is read-only */
-	rdmsrl(MSR_AMD64_PERF_CNTR_GLOBAL_STATUS, status);
+	rdmsrq(MSR_AMD64_PERF_CNTR_GLOBAL_STATUS, status);
 
 	return status;
 }
@@ -672,14 +673,14 @@ static inline void amd_pmu_ack_global_status(u64 status)
 	 * clears the same bit in PerfCntrGlobalStatus
 	 */
 
-	wrmsrl(MSR_AMD64_PERF_CNTR_GLOBAL_STATUS_CLR, status);
+	wrmsrq(MSR_AMD64_PERF_CNTR_GLOBAL_STATUS_CLR, status);
 }
 
 static bool amd_pmu_test_overflow_topbit(int idx)
 {
 	u64 counter;
 
-	rdmsrl(x86_pmu_event_addr(idx), counter);
+	rdmsrq(x86_pmu_event_addr(idx), counter);
 
 	return !(counter & BIT_ULL(x86_pmu.cntval_bits - 1));
 }
@@ -943,11 +944,12 @@ static int amd_pmu_v2_snapshot_branch_stack(struct perf_branch_entry *entries, u
 static int amd_pmu_v2_handle_irq(struct pt_regs *regs)
 {
 	struct cpu_hw_events *cpuc = this_cpu_ptr(&cpu_hw_events);
+	static atomic64_t status_warned = ATOMIC64_INIT(0);
+	u64 reserved, status, mask, new_bits, prev_bits;
 	struct perf_sample_data data;
 	struct hw_perf_event *hwc;
 	struct perf_event *event;
 	int handled = 0, idx;
-	u64 reserved, status, mask;
 	bool pmu_enabled;
 
 	/*
@@ -1000,11 +1002,9 @@ static int amd_pmu_v2_handle_irq(struct pt_regs *regs)
 		if (!x86_perf_event_set_period(event))
 			continue;
 
-		if (has_branch_stack(event))
-			perf_sample_save_brstack(&data, event, &cpuc->lbr_stack, NULL);
+		perf_sample_save_brstack(&data, event, &cpuc->lbr_stack, NULL);
 
-		if (perf_event_overflow(event, &data, regs))
-			x86_pmu_stop(event, 0);
+		perf_event_overflow(event, &data, regs);
 	}
 
 	/*
@@ -1012,7 +1012,12 @@ static int amd_pmu_v2_handle_irq(struct pt_regs *regs)
 	 * the corresponding PMCs are expected to be inactive according to the
 	 * active_mask
 	 */
-	WARN_ON(status > 0);
+	if (status > 0) {
+		prev_bits = atomic64_fetch_or(status, &status_warned);
+		// A new bit was set for the very first time.
+		new_bits = status & ~prev_bits;
+		WARN(new_bits, "New overflows for inactive PMCs: %llx\n", new_bits);
+	}
 
 	/* Clear overflow and freeze bits */
 	amd_pmu_ack_global_status(~status);

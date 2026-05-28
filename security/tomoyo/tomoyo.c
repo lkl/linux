@@ -514,7 +514,7 @@ struct lsm_blob_sizes tomoyo_blob_sizes __ro_after_init = {
  * Returns 0.
  */
 static int tomoyo_task_alloc(struct task_struct *task,
-			     unsigned long clone_flags)
+			     u64 clone_flags)
 {
 	struct tomoyo_task *old = tomoyo_task(current);
 	struct tomoyo_task *new = tomoyo_task(task);
@@ -549,10 +549,7 @@ static const struct lsm_id tomoyo_lsmid = {
 	.id = LSM_ID_TOMOYO,
 };
 
-/*
- * tomoyo_security_ops is a "struct security_operations" which is used for
- * registering TOMOYO.
- */
+/* tomoyo_hooks is used for registering TOMOYO. */
 static struct security_hook_list tomoyo_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(cred_prepare, tomoyo_cred_prepare),
 	LSM_HOOK_INIT(bprm_committed_creds, tomoyo_bprm_committed_creds),

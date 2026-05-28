@@ -124,7 +124,7 @@ static int ahci_dm816_softreset(struct ata_link *link,
 
 static struct ata_port_operations ahci_dm816_port_ops = {
 	.inherits = &ahci_platform_ops,
-	.softreset = ahci_dm816_softreset,
+	.reset.softreset = ahci_dm816_softreset,
 };
 
 static const struct ata_port_info ahci_dm816_port_info = {
@@ -182,7 +182,7 @@ MODULE_DEVICE_TABLE(of, ahci_dm816_of_match);
 
 static struct platform_driver ahci_dm816_driver = {
 	.probe = ahci_dm816_probe,
-	.remove_new = ata_platform_remove_one,
+	.remove = ata_platform_remove_one,
 	.driver = {
 		.name = AHCI_DM816_DRV_NAME,
 		.of_match_table = ahci_dm816_of_match,

@@ -57,7 +57,6 @@
 	PCIE_APP_IRN_INTA | PCIE_APP_IRN_INTB | \
 	PCIE_APP_IRN_INTC | PCIE_APP_IRN_INTD)
 
-#define BUS_IATU_OFFSET			SZ_256M
 #define RESET_INTERVAL_MS		100
 
 struct intel_pcie {
@@ -381,13 +380,7 @@ static int intel_pcie_rc_init(struct dw_pcie_rp *pp)
 	return intel_pcie_host_setup(pcie);
 }
 
-static u64 intel_pcie_cpu_addr(struct dw_pcie *pcie, u64 cpu_addr)
-{
-	return cpu_addr + BUS_IATU_OFFSET;
-}
-
 static const struct dw_pcie_ops intel_pcie_ops = {
-	.cpu_addr_fixup = intel_pcie_cpu_addr,
 };
 
 static const struct dw_pcie_host_ops intel_pcie_dw_ops = {
@@ -409,6 +402,7 @@ static int intel_pcie_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, pcie);
 	pci = &pcie->pci;
 	pci->dev = dev;
+	pci->use_parent_dt_ranges = true;
 	pp = &pci->pp;
 
 	ret = intel_pcie_get_resources(pdev);
@@ -443,7 +437,7 @@ static const struct of_device_id of_intel_pcie_match[] = {
 
 static struct platform_driver intel_pcie_driver = {
 	.probe = intel_pcie_probe,
-	.remove_new = intel_pcie_remove,
+	.remove = intel_pcie_remove,
 	.driver = {
 		.name = "intel-gw-pcie",
 		.of_match_table = of_intel_pcie_match,

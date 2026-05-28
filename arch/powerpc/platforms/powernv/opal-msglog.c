@@ -94,13 +94,13 @@ ssize_t opal_msglog_copy(char *to, loff_t pos, size_t count)
 }
 
 static ssize_t opal_msglog_read(struct file *file, struct kobject *kobj,
-				struct bin_attribute *bin_attr, char *to,
+				const struct bin_attribute *bin_attr, char *to,
 				loff_t pos, size_t count)
 {
 	return opal_msglog_copy(to, pos, count);
 }
 
-static struct bin_attribute opal_msglog_attr = {
+static struct bin_attribute opal_msglog_attr __ro_after_init = {
 	.attr = {.name = "msglog", .mode = 0400},
 	.read = opal_msglog_read
 };

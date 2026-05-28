@@ -42,13 +42,13 @@ static int st_uvis25_spi_probe(struct spi_device *spi)
 
 static const struct of_device_id st_uvis25_spi_of_match[] = {
 	{ .compatible = "st,uvis25", },
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(of, st_uvis25_spi_of_match);
 
 static const struct spi_device_id st_uvis25_spi_id_table[] = {
 	{ ST_UVIS25_DEV_NAME },
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(spi, st_uvis25_spi_id_table);
 
@@ -66,4 +66,4 @@ module_spi_driver(st_uvis25_driver);
 MODULE_AUTHOR("Lorenzo Bianconi <lorenzo.bianconi83@gmail.com>");
 MODULE_DESCRIPTION("STMicroelectronics uvis25 spi driver");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(IIO_UVIS25);
+MODULE_IMPORT_NS("IIO_UVIS25");

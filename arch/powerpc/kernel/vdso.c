@@ -16,12 +16,12 @@
 #include <linux/user.h>
 #include <linux/elf.h>
 #include <linux/security.h>
-#include <linux/memblock.h>
 #include <linux/syscalls.h>
-#include <linux/time_namespace.h>
+#include <linux/vdso_datastore.h>
 #include <vdso/datapage.h>
 
 #include <asm/syscall.h>
+#include <asm/syscalls.h>
 #include <asm/processor.h>
 #include <asm/mmu.h>
 #include <asm/mmu_context.h>
@@ -33,30 +33,13 @@
 #include <asm/vdso_datapage.h>
 #include <asm/setup.h>
 
+static_assert(__VDSO_PAGES == VDSO_NR_PAGES);
+
 /* The alignment of the vDSO */
 #define VDSO_ALIGNMENT	(1 << 16)
 
 extern char vdso32_start, vdso32_end;
 extern char vdso64_start, vdso64_end;
-
-long sys_ni_syscall(void);
-
-/*
- * The vdso data page (aka. systemcfg for old ppc64 fans) is here.
- * Once the early boot kernel code no longer needs to muck around
- * with it, it will become dynamically allocated
- */
-static union {
-	struct vdso_arch_data	data;
-	u8			page[PAGE_SIZE];
-} vdso_data_store __page_aligned_data;
-struct vdso_arch_data *vdso_data = &vdso_data_store.data;
-
-enum vvar_pages {
-	VVAR_DATA_PAGE_OFFSET,
-	VVAR_TIMENS_PAGE_OFFSET,
-	VVAR_NR_PAGES,
-};
 
 static int vdso_mremap(const struct vm_special_mapping *sm, struct vm_area_struct *new_vma,
 		       unsigned long text_size)
@@ -96,14 +79,6 @@ static void vdso_close(const struct vm_special_mapping *sm, struct vm_area_struc
 	mm->context.vdso = NULL;
 }
 
-static vm_fault_t vvar_fault(const struct vm_special_mapping *sm,
-			     struct vm_area_struct *vma, struct vm_fault *vmf);
-
-static struct vm_special_mapping vvar_spec __ro_after_init = {
-	.name = "[vvar]",
-	.fault = vvar_fault,
-};
-
 static struct vm_special_mapping vdso32_spec __ro_after_init = {
 	.name = "[vdso]",
 	.mremap = vdso32_mremap,
@@ -116,70 +91,6 @@ static struct vm_special_mapping vdso64_spec __ro_after_init = {
 	.close = vdso_close,
 };
 
-#ifdef CONFIG_TIME_NS
-struct vdso_data *arch_get_vdso_data(void *vvar_page)
-{
-	return ((struct vdso_arch_data *)vvar_page)->data;
-}
-
-/*
- * The vvar mapping contains data for a specific time namespace, so when a task
- * changes namespace we must unmap its vvar data for the old namespace.
- * Subsequent faults will map in data for the new namespace.
- *
- * For more details see timens_setup_vdso_data().
- */
-int vdso_join_timens(struct task_struct *task, struct time_namespace *ns)
-{
-	struct mm_struct *mm = task->mm;
-	VMA_ITERATOR(vmi, mm, 0);
-	struct vm_area_struct *vma;
-
-	mmap_read_lock(mm);
-	for_each_vma(vmi, vma) {
-		if (vma_is_special_mapping(vma, &vvar_spec))
-			zap_vma_pages(vma);
-	}
-	mmap_read_unlock(mm);
-
-	return 0;
-}
-#endif
-
-static vm_fault_t vvar_fault(const struct vm_special_mapping *sm,
-			     struct vm_area_struct *vma, struct vm_fault *vmf)
-{
-	struct page *timens_page = find_timens_vvar_page(vma);
-	unsigned long pfn;
-
-	switch (vmf->pgoff) {
-	case VVAR_DATA_PAGE_OFFSET:
-		if (timens_page)
-			pfn = page_to_pfn(timens_page);
-		else
-			pfn = virt_to_pfn(vdso_data);
-		break;
-#ifdef CONFIG_TIME_NS
-	case VVAR_TIMENS_PAGE_OFFSET:
-		/*
-		 * If a task belongs to a time namespace then a namespace
-		 * specific VVAR is mapped with the VVAR_DATA_PAGE_OFFSET and
-		 * the real VVAR page is mapped with the VVAR_TIMENS_PAGE_OFFSET
-		 * offset.
-		 * See also the comment near timens_setup_vdso_data().
-		 */
-		if (!timens_page)
-			return VM_FAULT_SIGBUS;
-		pfn = virt_to_pfn(vdso_data);
-		break;
-#endif /* CONFIG_TIME_NS */
-	default:
-		return VM_FAULT_SIGBUS;
-	}
-
-	return vmf_insert_pfn(vma, vmf->address, pfn);
-}
-
 /*
  * This is called from binfmt_elf, we create the special vma for the
  * vDSO and insert it into the mm struct tree
@@ -188,7 +99,7 @@ static int __arch_setup_additional_pages(struct linux_binprm *bprm, int uses_int
 {
 	unsigned long vdso_size, vdso_base, mappings_size;
 	struct vm_special_mapping *vdso_spec;
-	unsigned long vvar_size = VVAR_NR_PAGES * PAGE_SIZE;
+	unsigned long vvar_size = VDSO_NR_PAGES * PAGE_SIZE;
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
 
@@ -214,9 +125,7 @@ static int __arch_setup_additional_pages(struct linux_binprm *bprm, int uses_int
 	/* Add required alignment. */
 	vdso_base = ALIGN(vdso_base, VDSO_ALIGNMENT);
 
-	vma = _install_special_mapping(mm, vdso_base, vvar_size,
-				       VM_READ | VM_MAYREAD | VM_IO |
-				       VM_DONTDUMP | VM_PFNMAP, &vvar_spec);
+	vma = vdso_install_vvar_mapping(mm, vdso_base);
 	if (IS_ERR(vma))
 		return PTR_ERR(vma);
 
@@ -296,10 +205,10 @@ static void __init vdso_setup_syscall_map(void)
 
 	for (i = 0; i < NR_syscalls; i++) {
 		if (sys_call_table[i] != (void *)&sys_ni_syscall)
-			vdso_data->syscall_map[i >> 5] |= 0x80000000UL >> (i & 0x1f);
+			vdso_k_arch_data->syscall_map[i >> 5] |= 0x80000000UL >> (i & 0x1f);
 		if (IS_ENABLED(CONFIG_COMPAT) &&
 		    compat_sys_call_table[i] != (void *)&sys_ni_syscall)
-			vdso_data->compat_syscall_map[i >> 5] |= 0x80000000UL >> (i & 0x1f);
+			vdso_k_arch_data->compat_syscall_map[i >> 5] |= 0x80000000UL >> (i & 0x1f);
 	}
 }
 
@@ -349,29 +258,10 @@ static struct page ** __init vdso_setup_pages(void *start, void *end)
 static int __init vdso_init(void)
 {
 #ifdef CONFIG_PPC64
-	/*
-	 * Fill up the "systemcfg" stuff for backward compatibility
-	 */
-	strcpy((char *)vdso_data->eye_catcher, "SYSTEMCFG:PPC64");
-	vdso_data->version.major = SYSTEMCFG_MAJOR;
-	vdso_data->version.minor = SYSTEMCFG_MINOR;
-	vdso_data->processor = mfspr(SPRN_PVR);
-	/*
-	 * Fake the old platform number for pSeries and add
-	 * in LPAR bit if necessary
-	 */
-	vdso_data->platform = 0x100;
-	if (firmware_has_feature(FW_FEATURE_LPAR))
-		vdso_data->platform |= 1;
-	vdso_data->physicalMemorySize = memblock_phys_mem_size();
-	vdso_data->dcache_size = ppc64_caches.l1d.size;
-	vdso_data->dcache_line_size = ppc64_caches.l1d.line_size;
-	vdso_data->icache_size = ppc64_caches.l1i.size;
-	vdso_data->icache_line_size = ppc64_caches.l1i.line_size;
-	vdso_data->dcache_block_size = ppc64_caches.l1d.block_size;
-	vdso_data->icache_block_size = ppc64_caches.l1i.block_size;
-	vdso_data->dcache_log_block_size = ppc64_caches.l1d.log_block_size;
-	vdso_data->icache_log_block_size = ppc64_caches.l1i.log_block_size;
+	vdso_k_arch_data->dcache_block_size = ppc64_caches.l1d.block_size;
+	vdso_k_arch_data->icache_block_size = ppc64_caches.l1i.block_size;
+	vdso_k_arch_data->dcache_log_block_size = ppc64_caches.l1d.log_block_size;
+	vdso_k_arch_data->icache_log_block_size = ppc64_caches.l1i.log_block_size;
 #endif /* CONFIG_PPC64 */
 
 	vdso_setup_syscall_map();

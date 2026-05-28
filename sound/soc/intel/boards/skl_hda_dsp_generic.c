@@ -85,6 +85,18 @@ skl_hda_get_board_quirk(struct snd_soc_acpi_mach_params *mach_params)
 	return board_quirk;
 }
 
+static int skl_hda_add_dai_link(struct snd_soc_card *card,
+				struct snd_soc_dai_link *link)
+{
+	struct sof_card_private *ctx = snd_soc_card_get_drvdata(card);
+
+	/* Ignore the HDMI PCM link if iDisp is not present */
+	if (strstr(link->stream_name, "HDMI") && !ctx->hdmi.idisp_codec)
+		link->ignore = true;
+
+	return 0;
+}
+
 static int skl_hda_audio_probe(struct platform_device *pdev)
 {
 	struct snd_soc_acpi_mach *mach = pdev->dev.platform_data;
@@ -101,6 +113,7 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 	card->owner = THIS_MODULE;
 	card->fully_routed = true;
 	card->late_probe = skl_hda_card_late_probe;
+	card->add_dai_link = skl_hda_add_dai_link;
 
 	dev_dbg(&pdev->dev, "board_quirk = %lx\n", board_quirk);
 
@@ -124,8 +137,6 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 		return ret;
 
 	card->dev = &pdev->dev;
-	if (!snd_soc_acpi_sof_parent(&pdev->dev))
-		card->disable_route_checks = true;
 
 	if (mach->mach_params.dmic_num > 0) {
 		card->components = devm_kasprintf(card->dev, GFP_KERNEL,
@@ -164,4 +175,4 @@ MODULE_DESCRIPTION("SKL/KBL/BXT/APL HDA Generic Machine driver");
 MODULE_AUTHOR("Rakesh Ughreja <rakesh.a.ughreja@intel.com>");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:skl_hda_dsp_generic");
-MODULE_IMPORT_NS(SND_SOC_INTEL_SOF_BOARD_HELPERS);
+MODULE_IMPORT_NS("SND_SOC_INTEL_SOF_BOARD_HELPERS");

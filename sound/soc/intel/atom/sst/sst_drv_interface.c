@@ -55,19 +55,6 @@ int free_stream_context(struct intel_sst_drv *ctx, unsigned int str_id)
 	return ret;
 }
 
-int sst_get_stream_allocated(struct intel_sst_drv *ctx,
-	struct snd_sst_params *str_param,
-	struct snd_sst_lib_download **lib_dnld)
-{
-	int retval;
-
-	retval = ctx->ops->alloc_stream(ctx, str_param);
-	if (retval > 0)
-		dev_dbg(ctx->dev, "Stream allocated %d\n", retval);
-	return retval;
-
-}
-
 /*
  * sst_get_sfreq - this function returns the frequency of the stream
  *
@@ -339,7 +326,7 @@ static int sst_cdev_stream_partial_drain(struct device *dev,
 }
 
 static int sst_cdev_tstamp(struct device *dev, unsigned int str_id,
-		struct snd_compr_tstamp *tstamp)
+			   struct snd_compr_tstamp64 *tstamp)
 {
 	struct snd_sst_tstamp fw_tstamp = {0,};
 	struct stream_info *stream;
@@ -362,10 +349,11 @@ static int sst_cdev_tstamp(struct device *dev, unsigned int str_id,
 			(u64)stream->num_ch * SST_GET_BYTES_PER_SAMPLE(24));
 	tstamp->sampling_rate = fw_tstamp.sampling_frequency;
 
-	dev_dbg(dev, "PCM  = %u\n", tstamp->pcm_io_frames);
-	dev_dbg(dev, "Ptr Query on strid = %d  copied_total %d, decodec %d\n",
+	dev_dbg(dev, "PCM  = %llu\n", tstamp->pcm_io_frames);
+	dev_dbg(dev,
+		"Ptr Query on strid = %d  copied_total %llu, decodec %llu\n",
 		str_id, tstamp->copied_total, tstamp->pcm_frames);
-	dev_dbg(dev, "rendered %d\n", tstamp->pcm_io_frames);
+	dev_dbg(dev, "rendered %llu\n", tstamp->pcm_io_frames);
 
 	return 0;
 }
@@ -428,17 +416,6 @@ static int sst_cdev_codec_caps(struct snd_compr_codec_caps *codec)
 		return -EINVAL;
 
 	return 0;
-}
-
-void sst_cdev_fragment_elapsed(struct intel_sst_drv *ctx, int str_id)
-{
-	struct stream_info *stream;
-
-	dev_dbg(ctx->dev, "fragment elapsed from firmware for str_id %d\n",
-			str_id);
-	stream = &ctx->streams[str_id];
-	if (stream->compr_cb)
-		stream->compr_cb(stream->compr_cb_param);
 }
 
 /*

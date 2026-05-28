@@ -45,10 +45,7 @@ struct mdio_device {
 	unsigned int reset_deassert_delay;
 };
 
-static inline struct mdio_device *to_mdio_device(const struct device *dev)
-{
-	return container_of(dev, struct mdio_device, dev);
-}
+#define to_mdio_device(__dev)	container_of_const(__dev, struct mdio_device, dev)
 
 /* struct mdio_driver_common: Common to all MDIO drivers */
 struct mdio_driver_common {
@@ -98,7 +95,6 @@ void mdio_device_remove(struct mdio_device *mdiodev);
 void mdio_device_reset(struct mdio_device *mdiodev, int value);
 int mdio_driver_register(struct mdio_driver *drv);
 void mdio_driver_unregister(struct mdio_driver *drv);
-int mdio_device_bus_match(struct device *dev, const struct device_driver *drv);
 
 static inline void mdio_device_get(struct mdio_device *mdiodev)
 {
@@ -165,29 +161,10 @@ extern int mdio_set_flag(const struct mdio_if_info *mdio,
 			 bool sense);
 extern int mdio45_links_ok(const struct mdio_if_info *mdio, u32 mmds);
 extern int mdio45_nway_restart(const struct mdio_if_info *mdio);
-extern void mdio45_ethtool_gset_npage(const struct mdio_if_info *mdio,
-				      struct ethtool_cmd *ecmd,
-				      u32 npage_adv, u32 npage_lpa);
 extern void
 mdio45_ethtool_ksettings_get_npage(const struct mdio_if_info *mdio,
 				   struct ethtool_link_ksettings *cmd,
 				   u32 npage_adv, u32 npage_lpa);
-
-/**
- * mdio45_ethtool_gset - get settings for ETHTOOL_GSET
- * @mdio: MDIO interface
- * @ecmd: Ethtool request structure
- *
- * Since the CSRs for auto-negotiation using next pages are not fully
- * standardised, this function does not attempt to decode them.  Use
- * mdio45_ethtool_gset_npage() to specify advertisement bits from next
- * pages.
- */
-static inline void mdio45_ethtool_gset(const struct mdio_if_info *mdio,
-				       struct ethtool_cmd *ecmd)
-{
-	mdio45_ethtool_gset_npage(mdio, ecmd, 0, 0);
-}
 
 /**
  * mdio45_ethtool_ksettings_get - get settings for ETHTOOL_GLINKSETTINGS

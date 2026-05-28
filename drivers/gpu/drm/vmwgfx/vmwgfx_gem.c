@@ -84,7 +84,7 @@ static int vmw_gem_vmap(struct drm_gem_object *obj, struct iosys_map *map)
 	struct ttm_buffer_object *bo = drm_gem_ttm_of_gem(obj);
 	int ret;
 
-	if (obj->import_attach) {
+	if (drm_gem_is_imported(obj)) {
 		ret = dma_buf_vmap(obj->import_attach->dmabuf, map);
 		if (!ret) {
 			if (drm_WARN_ON(obj->dev, map->is_iomem)) {
@@ -101,7 +101,7 @@ static int vmw_gem_vmap(struct drm_gem_object *obj, struct iosys_map *map)
 
 static void vmw_gem_vunmap(struct drm_gem_object *obj, struct iosys_map *map)
 {
-	if (obj->import_attach)
+	if (drm_gem_is_imported(obj))
 		dma_buf_vunmap(obj->import_attach->dmabuf, map);
 	else
 		drm_gem_ttm_vunmap(obj, map);
@@ -111,7 +111,7 @@ static int vmw_gem_mmap(struct drm_gem_object *obj, struct vm_area_struct *vma)
 {
 	int ret;
 
-	if (obj->import_attach) {
+	if (drm_gem_is_imported(obj)) {
 		/*
 		 * Reset both vm_ops and vm_private_data, so we don't end up with
 		 * vm_ops pointing to our implementation if the dma-buf backend
@@ -140,7 +140,7 @@ static const struct vm_operations_struct vmw_vm_ops = {
 	.close = ttm_bo_vm_close,
 };
 
-static const struct drm_gem_object_funcs vmw_gem_object_funcs = {
+const struct drm_gem_object_funcs vmw_gem_object_funcs = {
 	.free = vmw_gem_object_free,
 	.open = vmw_gem_object_open,
 	.close = vmw_gem_object_close,
@@ -153,20 +153,6 @@ static const struct drm_gem_object_funcs vmw_gem_object_funcs = {
 	.mmap = vmw_gem_mmap,
 	.vm_ops = &vmw_vm_ops,
 };
-
-int vmw_gem_object_create(struct vmw_private *vmw,
-			  struct vmw_bo_params *params,
-			  struct vmw_bo **p_vbo)
-{
-	int ret = vmw_bo_create(vmw, params, p_vbo);
-
-	if (ret != 0)
-		goto out_no_bo;
-
-	(*p_vbo)->tbo.base.funcs = &vmw_gem_object_funcs;
-out_no_bo:
-	return ret;
-}
 
 int vmw_gem_object_create_with_handle(struct vmw_private *dev_priv,
 				      struct drm_file *filp,
@@ -183,7 +169,7 @@ int vmw_gem_object_create_with_handle(struct vmw_private *dev_priv,
 		.pin = false
 	};
 
-	ret = vmw_gem_object_create(dev_priv, &params, p_vbo);
+	ret = vmw_bo_create(dev_priv, &params, p_vbo);
 	if (ret != 0)
 		goto out_no_bo;
 
@@ -206,6 +192,7 @@ struct drm_gem_object *vmw_prime_import_sg_table(struct drm_device *dev,
 		.bo_type = ttm_bo_type_sg,
 		.size = attach->dmabuf->size,
 		.pin = false,
+		.keep_resv = true,
 		.resv = attach->dmabuf->resv,
 		.sg = table,
 
@@ -297,11 +284,10 @@ static void vmw_bo_print_info(int id, struct vmw_bo *bo, struct seq_file *m)
 
 	seq_printf(m, "\t\t0x%08x: %12zu bytes %s, type = %s",
 		   id, bo->tbo.base.size, placement, type);
-	seq_printf(m, ", priority = %u, pin_count = %u, GEM refs = %d, TTM refs = %d",
+	seq_printf(m, ", priority = %u, pin_count = %u, GEM refs = %d",
 		   bo->tbo.priority,
 		   bo->tbo.pin_count,
-		   kref_read(&bo->tbo.base.refcount),
-		   kref_read(&bo->tbo.kref));
+		   kref_read(&bo->tbo.base.refcount));
 	seq_puts(m, "\n");
 }
 

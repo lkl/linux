@@ -34,6 +34,7 @@
 
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/minmax.h>
 #include <linux/sched/signal.h>
 #include <linux/signal.h>
 #include <linux/poll.h>
@@ -87,7 +88,7 @@
 /* Get two-int array: [0]=vendor ID, [1]=product ID: */
 #define LPIOC_GET_VID_PID(len) _IOC(_IOC_READ, 'P', IOCNR_GET_VID_PID, len)
 /* Perform class specific soft reset */
-#define LPIOC_SOFT_RESET _IOC(_IOC_NONE, 'P', IOCNR_SOFT_RESET, 0);
+#define LPIOC_SOFT_RESET _IOC(_IOC_NONE, 'P', IOCNR_SOFT_RESET, 0)
 
 /*
  * A DEVICE_ID string may include the printer's serial number.
@@ -366,7 +367,8 @@ static int usblp_check_status(struct usblp *usblp, int err)
 	int error;
 
 	mutex_lock(&usblp->mut);
-	if ((error = usblp_read_status(usblp, usblp->statusbuf)) < 0) {
+	error = usblp_read_status(usblp, usblp->statusbuf);
+	if (error < 0) {
 		mutex_unlock(&usblp->mut);
 		printk_ratelimited(KERN_ERR
 				"usblp%d: error %d reading printer status\n",
@@ -751,14 +753,16 @@ static ssize_t usblp_write(struct file *file, const char __user *buffer, size_t 
 		rv = -EINTR;
 		goto raise_biglock;
 	}
-	if ((rv = usblp_wwait(usblp, !!(file->f_flags & O_NONBLOCK))) < 0)
+	rv = usblp_wwait(usblp, !!(file->f_flags & O_NONBLOCK));
+	if (rv < 0)
 		goto raise_wait;
 
 	while (writecount < count) {
 		/*
 		 * Step 1: Submit next block.
 		 */
-		if ((transfer_length = count - writecount) > USBLP_BUF_SIZE)
+		transfer_length = count - writecount;
+		if (transfer_length > USBLP_BUF_SIZE)
 			transfer_length = USBLP_BUF_SIZE;
 
 		rv = -ENOMEM;
@@ -776,7 +780,9 @@ static ssize_t usblp_write(struct file *file, const char __user *buffer, size_t 
 		spin_lock_irq(&usblp->lock);
 		usblp->wcomplete = 0;
 		spin_unlock_irq(&usblp->lock);
-		if ((rv = usb_submit_urb(writeurb, GFP_KERNEL)) < 0) {
+
+		rv = usb_submit_urb(writeurb, GFP_KERNEL);
+		if (rv < 0) {
 			usblp->wstatus = 0;
 			spin_lock_irq(&usblp->lock);
 			usblp->no_paper = 0;
@@ -857,22 +863,24 @@ static ssize_t usblp_read(struct file *file, char __user *buffer, size_t len, lo
 		goto done;
 	}
 
-	if ((avail = usblp->rstatus) < 0) {
+	avail = usblp->rstatus;
+	if (avail < 0) {
 		printk(KERN_ERR "usblp%d: error %d reading from printer\n",
-		    usblp->minor, (int)avail);
+			usblp->minor, (int)avail);
 		usblp_submit_read(usblp);
 		count = -EIO;
 		goto done;
 	}
 
-	count = len < avail - usblp->readcount ? len : avail - usblp->readcount;
+	count = min_t(ssize_t, len, avail - usblp->readcount);
 	if (count != 0 &&
 	    copy_to_user(buffer, usblp->readbuf + usblp->readcount, count)) {
 		count = -EFAULT;
 		goto done;
 	}
 
-	if ((usblp->readcount += count) == avail) {
+	usblp->readcount += count;
+	if (usblp->readcount == avail) {
 		if (usblp_submit_read(usblp) < 0) {
 			/* We don't want to leak USB return codes into errno. */
 			if (count == 0)
@@ -973,7 +981,8 @@ static int usblp_rwait_and_lock(struct usblp *usblp, int nonblock)
 			break;
 		}
 		set_current_state(TASK_INTERRUPTIBLE);
-		if ((rc = usblp_rtest(usblp, nonblock)) < 0) {
+		rc = usblp_rtest(usblp, nonblock);
+		if (rc < 0) {
 			mutex_unlock(&usblp->mut);
 			break;
 		}
@@ -1031,7 +1040,8 @@ static int usblp_submit_read(struct usblp *usblp)
 	usblp->readcount = 0; /* XXX Why here? */
 	usblp->rcomplete = 0;
 	spin_unlock_irqrestore(&usblp->lock, flags);
-	if ((rc = usb_submit_urb(urb, GFP_KERNEL)) < 0) {
+	rc = usb_submit_urb(urb, GFP_KERNEL);
+	if (rc < 0) {
 		dev_dbg(&usblp->intf->dev, "error submitting urb (%d)\n", rc);
 		spin_lock_irqsave(&usblp->lock, flags);
 		usblp->rstatus = rc;
@@ -1150,7 +1160,8 @@ static int usblp_probe(struct usb_interface *intf,
 	/* Malloc device ID string buffer to the largest expected length,
 	 * since we can re-query it on an ioctl and a dynamic string
 	 * could change in length. */
-	if (!(usblp->device_id_string = kmalloc(USBLP_DEVICE_ID_SIZE, GFP_KERNEL))) {
+	usblp->device_id_string = kmalloc(USBLP_DEVICE_ID_SIZE, GFP_KERNEL);
+	if (!usblp->device_id_string) {
 		retval = -ENOMEM;
 		goto abort;
 	}
@@ -1160,7 +1171,8 @@ static int usblp_probe(struct usb_interface *intf,
 	 * malloc both regardless of bidirectionality, because the
 	 * alternate setting can be changed later via an ioctl.
 	 */
-	if (!(usblp->readbuf = kmalloc(USBLP_BUF_SIZE_IN, GFP_KERNEL))) {
+	usblp->readbuf = kmalloc(USBLP_BUF_SIZE_IN, GFP_KERNEL);
+	if (!usblp->readbuf) {
 		retval = -ENOMEM;
 		goto abort;
 	}
@@ -1337,11 +1349,12 @@ static int usblp_set_protocol(struct usblp *usblp, int protocol)
 	if (protocol < USBLP_FIRST_PROTOCOL || protocol > USBLP_LAST_PROTOCOL)
 		return -EINVAL;
 
+	alts = usblp->protocol[protocol].alt_setting;
+	if (alts < 0)
+		return -EINVAL;
+
 	/* Don't unnecessarily set the interface if there's a single alt. */
 	if (usblp->intf->num_altsetting > 1) {
-		alts = usblp->protocol[protocol].alt_setting;
-		if (alts < 0)
-			return -EINVAL;
 		r = usb_set_interface(usblp->dev, usblp->ifnum, alts);
 		if (r < 0) {
 			printk(KERN_ERR "usblp: can't set desired altsetting %d on interface %d\n",

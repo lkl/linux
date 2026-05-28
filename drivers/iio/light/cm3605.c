@@ -307,7 +307,7 @@ static DEFINE_SIMPLE_DEV_PM_OPS(cm3605_dev_pm_ops, cm3605_pm_suspend,
 
 static const struct of_device_id cm3605_of_match[] = {
 	{.compatible = "capella,cm3605"},
-	{ },
+	{ }
 };
 MODULE_DEVICE_TABLE(of, cm3605_of_match);
 
@@ -318,7 +318,7 @@ static struct platform_driver cm3605_driver = {
 		.pm = pm_sleep_ptr(&cm3605_dev_pm_ops),
 	},
 	.probe = cm3605_probe,
-	.remove_new = cm3605_remove,
+	.remove = cm3605_remove,
 };
 module_platform_driver(cm3605_driver);
 

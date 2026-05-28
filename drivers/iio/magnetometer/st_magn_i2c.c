@@ -54,7 +54,7 @@ static const struct of_device_id st_magn_of_match[] = {
 		.compatible = "st,lsm303c-magn",
 		.data = LSM303C_MAGN_DEV_NAME,
 	},
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(of, st_magn_of_match);
 
@@ -102,7 +102,7 @@ static const struct i2c_device_id st_magn_id_table[] = {
 	{ LSM9DS1_MAGN_DEV_NAME },
 	{ IIS2MDC_MAGN_DEV_NAME },
 	{ LSM303C_MAGN_DEV_NAME },
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, st_magn_id_table);
 
@@ -119,4 +119,4 @@ module_i2c_driver(st_magn_driver);
 MODULE_AUTHOR("Denis Ciocca <denis.ciocca@st.com>");
 MODULE_DESCRIPTION("STMicroelectronics magnetometers i2c driver");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(IIO_ST_SENSORS);
+MODULE_IMPORT_NS("IIO_ST_SENSORS");

@@ -57,6 +57,11 @@ static inline bool xe_exec_queue_is_parallel(struct xe_exec_queue *q)
 	return q->width > 1;
 }
 
+static inline bool xe_exec_queue_uses_pxp(struct xe_exec_queue *q)
+{
+	return q->pxp.type;
+}
+
 bool xe_exec_queue_is_lr(struct xe_exec_queue *q);
 
 bool xe_exec_queue_ring_full(struct xe_exec_queue *q);
@@ -85,4 +90,9 @@ int xe_exec_queue_last_fence_test_dep(struct xe_exec_queue *q,
 				      struct xe_vm *vm);
 void xe_exec_queue_update_run_ticks(struct xe_exec_queue *q);
 
+int xe_exec_queue_contexts_hwsp_rebase(struct xe_exec_queue *q, void *scratch);
+
+void xe_exec_queue_jobs_ring_restore(struct xe_exec_queue *q);
+
+struct xe_lrc *xe_exec_queue_lrc(struct xe_exec_queue *q);
 #endif

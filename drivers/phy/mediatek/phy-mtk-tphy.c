@@ -210,8 +210,6 @@
 #define P2F_USB_FM_VALID	BIT(0)
 #define P2F_RG_FRCK_EN		BIT(8)
 
-#define U3P_REF_CLK		26	/* MHZ */
-#define U3P_SLEW_RATE_COEF	28
 #define U3P_SR_COEF_DIVISOR	1000
 #define U3P_FM_DET_CYCLE_CNT	1024
 
@@ -277,20 +275,24 @@ enum mtk_phy_version {
 	MTK_PHY_V3,
 };
 
+/**
+ * mtk_phy_pdata - SoC specific platform data
+ * @avoid_rx_sen_degradation: Avoid TX Sensitivity level degradation (MT6795/8173 only)
+ * @sw_pll_48m_to_26m:        Workaround for V3 IP (MT8195) - switch the 48MHz PLL from
+ *                            fractional mode to integer to output 26MHz for U2PHY
+ * @sw_efuse_supported:       Switches off eFuse auto-load from PHY and applies values
+ *                            read from different nvmem (usually different eFuse array)
+ *                            that is pointed at in the device tree node for this PHY
+ * @slew_ref_clk_mhz:         Default reference clock (in MHz) for slew rate calibration
+ * @slew_rate_coefficient:    Coefficient for slew rate calibration
+ * @version:                  PHY IP Version
+ */
 struct mtk_phy_pdata {
-	/* avoid RX sensitivity level degradation only for mt8173 */
 	bool avoid_rx_sen_degradation;
-	/*
-	 * workaround only for mt8195, HW fix it for others of V3,
-	 * u2phy should use integer mode instead of fractional mode of
-	 * 48M PLL, fix it by switching PLL to 26M from default 48M
-	 */
 	bool sw_pll_48m_to_26m;
-	/*
-	 * Some SoCs (e.g. mt8195) drop a bit when use auto load efuse,
-	 * support sw way, also support it for v2/v3 optionally.
-	 */
 	bool sw_efuse_supported;
+	u8 slew_ref_clock_mhz;
+	u8 slew_rate_coefficient;
 	enum mtk_phy_version version;
 };
 
@@ -381,17 +383,12 @@ static const char *const u3_phy_files[] = {
 static int u2_phy_params_show(struct seq_file *sf, void *unused)
 {
 	struct mtk_phy_instance *inst = sf->private;
-	const char *fname = file_dentry(sf->file)->d_iname;
 	struct u2phy_banks *u2_banks = &inst->u2_banks;
 	void __iomem *com = u2_banks->com;
 	u32 max = 0;
 	u32 tmp = 0;
 	u32 val = 0;
-	int ret;
-
-	ret = match_string(u2_phy_files, ARRAY_SIZE(u2_phy_files), fname);
-	if (ret < 0)
-		return ret;
+	int ret = debugfs_get_aux_num(sf->file);
 
 	switch (ret) {
 	case U2P_EYE_VRT:
@@ -438,7 +435,7 @@ static int u2_phy_params_show(struct seq_file *sf, void *unused)
 		break;
 	}
 
-	seq_printf(sf, "%s : %d [0, %d]\n", fname, val, max);
+	seq_printf(sf, "%s : %d [0, %d]\n", u2_phy_files[ret], val, max);
 
 	return 0;
 }
@@ -451,22 +448,17 @@ static int u2_phy_params_open(struct inode *inode, struct file *file)
 static ssize_t u2_phy_params_write(struct file *file, const char __user *ubuf,
 				   size_t count, loff_t *ppos)
 {
-	const char *fname = file_dentry(file)->d_iname;
 	struct seq_file *sf = file->private_data;
 	struct mtk_phy_instance *inst = sf->private;
 	struct u2phy_banks *u2_banks = &inst->u2_banks;
 	void __iomem *com = u2_banks->com;
 	ssize_t rc;
 	u32 val;
-	int ret;
+	int ret = debugfs_get_aux_num(file);
 
 	rc = kstrtouint_from_user(ubuf, USER_BUF_LEN(count), 0, &val);
 	if (rc)
 		return rc;
-
-	ret = match_string(u2_phy_files, ARRAY_SIZE(u2_phy_files), fname);
-	if (ret < 0)
-		return (ssize_t)ret;
 
 	switch (ret) {
 	case U2P_EYE_VRT:
@@ -516,23 +508,18 @@ static void u2_phy_dbgfs_files_create(struct mtk_phy_instance *inst)
 	int i;
 
 	for (i = 0; i < count; i++)
-		debugfs_create_file(u2_phy_files[i], 0644, inst->phy->debugfs,
-				    inst, &u2_phy_fops);
+		debugfs_create_file_aux_num(u2_phy_files[i], 0644, inst->phy->debugfs,
+				    inst, i,  &u2_phy_fops);
 }
 
 static int u3_phy_params_show(struct seq_file *sf, void *unused)
 {
 	struct mtk_phy_instance *inst = sf->private;
-	const char *fname = file_dentry(sf->file)->d_iname;
 	struct u3phy_banks *u3_banks = &inst->u3_banks;
 	u32 val = 0;
 	u32 max = 0;
 	u32 tmp;
-	int ret;
-
-	ret = match_string(u3_phy_files, ARRAY_SIZE(u3_phy_files), fname);
-	if (ret < 0)
-		return ret;
+	int ret = debugfs_get_aux_num(sf->file);
 
 	switch (ret) {
 	case U3P_EFUSE_EN:
@@ -564,7 +551,7 @@ static int u3_phy_params_show(struct seq_file *sf, void *unused)
 		break;
 	}
 
-	seq_printf(sf, "%s : %d [0, %d]\n", fname, val, max);
+	seq_printf(sf, "%s : %d [0, %d]\n", u3_phy_files[ret], val, max);
 
 	return 0;
 }
@@ -577,22 +564,17 @@ static int u3_phy_params_open(struct inode *inode, struct file *file)
 static ssize_t u3_phy_params_write(struct file *file, const char __user *ubuf,
 				   size_t count, loff_t *ppos)
 {
-	const char *fname = file_dentry(file)->d_iname;
 	struct seq_file *sf = file->private_data;
 	struct mtk_phy_instance *inst = sf->private;
 	struct u3phy_banks *u3_banks = &inst->u3_banks;
 	void __iomem *phyd = u3_banks->phyd;
 	ssize_t rc;
 	u32 val;
-	int ret;
+	int ret = debugfs_get_aux_num(sf->file);
 
 	rc = kstrtouint_from_user(ubuf, USER_BUF_LEN(count), 0, &val);
 	if (rc)
 		return rc;
-
-	ret = match_string(u3_phy_files, ARRAY_SIZE(u3_phy_files), fname);
-	if (ret < 0)
-		return (ssize_t)ret;
 
 	switch (ret) {
 	case U3P_EFUSE_EN:
@@ -636,8 +618,8 @@ static void u3_phy_dbgfs_files_create(struct mtk_phy_instance *inst)
 	int i;
 
 	for (i = 0; i < count; i++)
-		debugfs_create_file(u3_phy_files[i], 0644, inst->phy->debugfs,
-				    inst, &u3_phy_fops);
+		debugfs_create_file_aux_num(u3_phy_files[i], 0644, inst->phy->debugfs,
+				    inst, i, &u3_phy_fops);
 }
 
 static int phy_type_show(struct seq_file *sf, void *unused)
@@ -706,12 +688,14 @@ static void hs_slew_rate_calibrate(struct mtk_tphy *tphy,
 	int fm_out;
 	u32 tmp;
 
-	/* HW V3 doesn't support slew rate cal anymore */
-	if (tphy->pdata->version == MTK_PHY_V3)
-		return;
-
-	/* use force value */
-	if (instance->eye_src)
+	/*
+	 * If a fixed HS slew rate (EYE) value was supplied, don't run the
+	 * calibration sequence and prefer using that value instead; also,
+	 * if there is no reference clock for slew calibration or there is
+	 * no slew coefficient, this means that the slew rate calibration
+	 * sequence is not supported.
+	 */
+	if (instance->eye_src || !tphy->src_ref_clk || !tphy->src_coef)
 		return;
 
 	/* enable USB ring oscillator */
@@ -1215,7 +1199,7 @@ static int phy_type_syscon_get(struct mtk_phy_instance *instance,
 	int ret;
 
 	/* type switch function is optional */
-	if (!of_property_read_bool(dn, "mediatek,syscon-type"))
+	if (!of_property_present(dn, "mediatek,syscon-type"))
 		return 0;
 
 	ret = of_parse_phandle_with_fixed_args(dn, "mediatek,syscon-type",
@@ -1278,7 +1262,7 @@ static int phy_efuse_get(struct mtk_tphy *tphy, struct mtk_phy_instance *instanc
 	}
 
 	/* software efuse is optional */
-	instance->efuse_sw_en = device_property_read_bool(dev, "nvmem-cells");
+	instance->efuse_sw_en = device_property_present(dev, "nvmem-cells");
 	if (!instance->efuse_sw_en)
 		return 0;
 
@@ -1536,12 +1520,16 @@ static const struct phy_ops mtk_tphy_ops = {
 
 static const struct mtk_phy_pdata tphy_v1_pdata = {
 	.avoid_rx_sen_degradation = false,
+	.slew_ref_clock_mhz = 26,
+	.slew_rate_coefficient = 28,
 	.version = MTK_PHY_V1,
 };
 
 static const struct mtk_phy_pdata tphy_v2_pdata = {
 	.avoid_rx_sen_degradation = false,
 	.sw_efuse_supported = true,
+	.slew_ref_clock_mhz = 26,
+	.slew_rate_coefficient = 28,
 	.version = MTK_PHY_V2,
 };
 
@@ -1552,6 +1540,8 @@ static const struct mtk_phy_pdata tphy_v3_pdata = {
 
 static const struct mtk_phy_pdata mt8173_pdata = {
 	.avoid_rx_sen_degradation = true,
+	.slew_ref_clock_mhz = 26,
+	.slew_rate_coefficient = 28,
 	.version = MTK_PHY_V1,
 };
 
@@ -1581,7 +1571,7 @@ static int mtk_tphy_probe(struct platform_device *pdev)
 	struct resource *sif_res;
 	struct mtk_tphy *tphy;
 	struct resource res;
-	int port;
+	int port, ret;
 
 	tphy = devm_kzalloc(dev, sizeof(*tphy), GFP_KERNEL);
 	if (!tphy)
@@ -1611,15 +1601,14 @@ static int mtk_tphy_probe(struct platform_device *pdev)
 		}
 	}
 
-	if (tphy->pdata->version < MTK_PHY_V3) {
-		tphy->src_ref_clk = U3P_REF_CLK;
-		tphy->src_coef = U3P_SLEW_RATE_COEF;
-		/* update parameters of slew rate calibrate if exist */
-		device_property_read_u32(dev, "mediatek,src-ref-clk-mhz",
-					 &tphy->src_ref_clk);
-		device_property_read_u32(dev, "mediatek,src-coef",
-					 &tphy->src_coef);
-	}
+	/* Optional properties for slew calibration variation */
+	ret = device_property_read_u32(dev, "mediatek,src-ref-clk-mhz", &tphy->src_ref_clk);
+	if (ret)
+		tphy->src_ref_clk = tphy->pdata->slew_ref_clock_mhz;
+
+	ret = device_property_read_u32(dev, "mediatek,src-coef", &tphy->src_coef);
+	if (ret)
+		tphy->src_coef = tphy->pdata->slew_rate_coefficient;
 
 	port = 0;
 	for_each_child_of_node_scoped(np, child_np) {

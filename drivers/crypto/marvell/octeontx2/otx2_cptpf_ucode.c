@@ -3,6 +3,7 @@
 
 #include <linux/ctype.h>
 #include <linux/firmware.h>
+#include <linux/string_choices.h>
 #include "otx2_cptpf_ucode.h"
 #include "otx2_cpt_common.h"
 #include "otx2_cptpf.h"
@@ -175,7 +176,9 @@ static int cptx_set_ucode_base(struct otx2_cpt_eng_grp_info *eng_grp,
 	/* Set PF number for microcode fetches */
 	ret = otx2_cpt_write_af_reg(&cptpf->afpf_mbox, cptpf->pdev,
 				    CPT_AF_PF_FUNC,
-				    cptpf->pf_id << RVU_PFVF_PF_SHIFT, blkaddr);
+				    rvu_make_pcifunc(cptpf->pdev,
+						     cptpf->pf_id, 0),
+				    blkaddr);
 	if (ret)
 		return ret;
 
@@ -1490,11 +1493,13 @@ int otx2_cpt_discover_eng_capabilities(struct otx2_cptpf_dev *cptpf)
 	union otx2_cpt_opcode opcode;
 	union otx2_cpt_res_s *result;
 	union otx2_cpt_inst_s inst;
+	dma_addr_t result_baddr;
 	dma_addr_t rptr_baddr;
 	struct pci_dev *pdev;
-	u32 len, compl_rlen;
+	int timeout = 10000;
+	void *base, *rptr;
 	int ret, etype;
-	void *rptr;
+	u32 len;
 
 	/*
 	 * We don't get capabilities if it was already done
@@ -1512,29 +1517,33 @@ int otx2_cpt_discover_eng_capabilities(struct otx2_cptpf_dev *cptpf)
 	if (ret)
 		goto delete_grps;
 
-	otx2_cptlf_set_dev_info(lfs, cptpf->pdev, cptpf->reg_base,
-				&cptpf->afpf_mbox, BLKADDR_CPT0);
 	ret = otx2_cptlf_init(lfs, OTX2_CPT_ALL_ENG_GRPS_MASK,
 			      OTX2_CPT_QUEUE_HI_PRIO, 1);
 	if (ret)
 		goto delete_grps;
 
-	compl_rlen = ALIGN(sizeof(union otx2_cpt_res_s), OTX2_CPT_DMA_MINALIGN);
-	len = compl_rlen + LOADFVC_RLEN;
+	/* Allocate extra memory for "rptr" and "result" pointer alignment */
+	len = LOADFVC_RLEN + ARCH_DMA_MINALIGN +
+	       sizeof(union otx2_cpt_res_s) + OTX2_CPT_RES_ADDR_ALIGN;
 
-	result = kzalloc(len, GFP_KERNEL);
-	if (!result) {
+	base = kzalloc(len, GFP_KERNEL);
+	if (!base) {
 		ret = -ENOMEM;
 		goto lf_cleanup;
 	}
-	rptr_baddr = dma_map_single(&pdev->dev, (void *)result, len,
-				    DMA_BIDIRECTIONAL);
+
+	rptr = PTR_ALIGN(base, ARCH_DMA_MINALIGN);
+	rptr_baddr = dma_map_single(&pdev->dev, rptr, len, DMA_BIDIRECTIONAL);
 	if (dma_mapping_error(&pdev->dev, rptr_baddr)) {
 		dev_err(&pdev->dev, "DMA mapping failed\n");
 		ret = -EFAULT;
-		goto free_result;
+		goto free_rptr;
 	}
-	rptr = (u8 *)result + compl_rlen;
+
+	result = (union otx2_cpt_res_s *)PTR_ALIGN(rptr + LOADFVC_RLEN,
+						   OTX2_CPT_RES_ADDR_ALIGN);
+	result_baddr = ALIGN(rptr_baddr + LOADFVC_RLEN,
+			     OTX2_CPT_RES_ADDR_ALIGN);
 
 	/* Fill in the command */
 	opcode.s.major = LOADFVC_MAJOR_OP;
@@ -1546,27 +1555,38 @@ int otx2_cpt_discover_eng_capabilities(struct otx2_cptpf_dev *cptpf)
 	/* 64-bit swap for microcode data reads, not needed for addresses */
 	cpu_to_be64s(&iq_cmd.cmd.u);
 	iq_cmd.dptr = 0;
-	iq_cmd.rptr = rptr_baddr + compl_rlen;
+	iq_cmd.rptr = rptr_baddr;
 	iq_cmd.cptr.u = 0;
 
 	for (etype = 1; etype < OTX2_CPT_MAX_ENG_TYPES; etype++) {
 		result->s.compcode = OTX2_CPT_COMPLETION_CODE_INIT;
 		iq_cmd.cptr.s.grp = otx2_cpt_get_eng_grp(&cptpf->eng_grps,
 							 etype);
-		otx2_cpt_fill_inst(&inst, &iq_cmd, rptr_baddr);
+		otx2_cpt_fill_inst(&inst, &iq_cmd, result_baddr);
 		lfs->ops->send_cmd(&inst, 1, &cptpf->lfs.lf[0]);
+		timeout = 10000;
 
 		while (lfs->ops->cpt_get_compcode(result) ==
-						OTX2_CPT_COMPLETION_CODE_INIT)
+						OTX2_CPT_COMPLETION_CODE_INIT) {
 			cpu_relax();
+			udelay(1);
+			timeout--;
+			if (!timeout) {
+				ret = -ENODEV;
+				cptpf->is_eng_caps_discovered = false;
+				dev_warn(&pdev->dev, "Timeout on CPT load_fvc completion poll\n");
+				goto error_no_response;
+			}
+		}
 
 		cptpf->eng_caps[etype].u = be64_to_cpup(rptr);
 	}
-	dma_unmap_single(&pdev->dev, rptr_baddr, len, DMA_BIDIRECTIONAL);
 	cptpf->is_eng_caps_discovered = true;
 
-free_result:
-	kfree(result);
+error_no_response:
+	dma_unmap_single(&pdev->dev, rptr_baddr, len, DMA_BIDIRECTIONAL);
+free_rptr:
+	kfree(base);
 lf_cleanup:
 	otx2_cptlf_shutdown(lfs);
 delete_grps:
@@ -1595,7 +1615,7 @@ int otx2_cpt_dl_custom_egrp_create(struct otx2_cptpf_dev *cptpf,
 		return -EINVAL;
 	}
 	err_msg = "Invalid engine group format";
-	strscpy(tmp_buf, ctx->val.vstr, strlen(ctx->val.vstr) + 1);
+	strscpy(tmp_buf, ctx->val.vstr);
 	start = tmp_buf;
 
 	has_se = has_ie = has_ae = false;
@@ -1773,103 +1793,4 @@ int otx2_cpt_dl_custom_egrp_delete(struct otx2_cptpf_dev *cptpf,
 err_print:
 	dev_err(dev, "%s\n", err_msg);
 	return -EINVAL;
-}
-
-static void get_engs_info(struct otx2_cpt_eng_grp_info *eng_grp, char *buf,
-			  int size, int idx)
-{
-	struct otx2_cpt_engs_rsvd *mirrored_engs = NULL;
-	struct otx2_cpt_engs_rsvd *engs;
-	int len, i;
-
-	buf[0] = '\0';
-	for (i = 0; i < OTX2_CPT_MAX_ETYPES_PER_GRP; i++) {
-		engs = &eng_grp->engs[i];
-		if (!engs->type)
-			continue;
-		if (idx != -1 && idx != i)
-			continue;
-
-		if (eng_grp->mirror.is_ena)
-			mirrored_engs = find_engines_by_type(
-				&eng_grp->g->grp[eng_grp->mirror.idx],
-				engs->type);
-		if (i > 0 && idx == -1) {
-			len = strlen(buf);
-			scnprintf(buf + len, size - len, ", ");
-		}
-
-		len = strlen(buf);
-		scnprintf(buf + len, size - len, "%d %s ",
-			  mirrored_engs ? engs->count + mirrored_engs->count :
-					  engs->count,
-			  get_eng_type_str(engs->type));
-		if (mirrored_engs) {
-			len = strlen(buf);
-			scnprintf(buf + len, size - len,
-				  "(%d shared with engine_group%d) ",
-				  engs->count <= 0 ?
-					  engs->count + mirrored_engs->count :
-					  mirrored_engs->count,
-				  eng_grp->mirror.idx);
-		}
-	}
-}
-
-void otx2_cpt_print_uc_dbg_info(struct otx2_cptpf_dev *cptpf)
-{
-	struct otx2_cpt_eng_grps *eng_grps = &cptpf->eng_grps;
-	struct otx2_cpt_eng_grp_info *mirrored_grp;
-	char engs_info[2 * OTX2_CPT_NAME_LENGTH];
-	struct otx2_cpt_eng_grp_info *grp;
-	struct otx2_cpt_engs_rsvd *engs;
-	int i, j;
-
-	pr_debug("Engine groups global info");
-	pr_debug("max SE %d, max IE %d, max AE %d", eng_grps->avail.max_se_cnt,
-		 eng_grps->avail.max_ie_cnt, eng_grps->avail.max_ae_cnt);
-	pr_debug("free SE %d", eng_grps->avail.se_cnt);
-	pr_debug("free IE %d", eng_grps->avail.ie_cnt);
-	pr_debug("free AE %d", eng_grps->avail.ae_cnt);
-
-	for (i = 0; i < OTX2_CPT_MAX_ENGINE_GROUPS; i++) {
-		grp = &eng_grps->grp[i];
-		pr_debug("engine_group%d, state %s", i,
-			 grp->is_enabled ? "enabled" : "disabled");
-		if (grp->is_enabled) {
-			mirrored_grp = &eng_grps->grp[grp->mirror.idx];
-			pr_debug("Ucode0 filename %s, version %s",
-				 grp->mirror.is_ena ?
-					 mirrored_grp->ucode[0].filename :
-					 grp->ucode[0].filename,
-				 grp->mirror.is_ena ?
-					 mirrored_grp->ucode[0].ver_str :
-					 grp->ucode[0].ver_str);
-			if (is_2nd_ucode_used(grp))
-				pr_debug("Ucode1 filename %s, version %s",
-					 grp->ucode[1].filename,
-					 grp->ucode[1].ver_str);
-		}
-
-		for (j = 0; j < OTX2_CPT_MAX_ETYPES_PER_GRP; j++) {
-			engs = &grp->engs[j];
-			if (engs->type) {
-				u32 mask[5] = { };
-
-				get_engs_info(grp, engs_info,
-					      2 * OTX2_CPT_NAME_LENGTH, j);
-				pr_debug("Slot%d: %s", j, engs_info);
-				bitmap_to_arr32(mask, engs->bmap,
-						eng_grps->engs_num);
-				if (is_dev_otx2(cptpf->pdev))
-					pr_debug("Mask: %8.8x %8.8x %8.8x %8.8x",
-						 mask[3], mask[2], mask[1],
-						 mask[0]);
-				else
-					pr_debug("Mask: %8.8x %8.8x %8.8x %8.8x %8.8x",
-						 mask[4], mask[3], mask[2], mask[1],
-						 mask[0]);
-			}
-		}
-	}
 }

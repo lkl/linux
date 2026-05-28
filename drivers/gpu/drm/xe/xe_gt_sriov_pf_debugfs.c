@@ -17,10 +17,12 @@
 #include "xe_gt_sriov_pf_control.h"
 #include "xe_gt_sriov_pf_debugfs.h"
 #include "xe_gt_sriov_pf_helpers.h"
+#include "xe_gt_sriov_pf_migration.h"
 #include "xe_gt_sriov_pf_monitor.h"
 #include "xe_gt_sriov_pf_policy.h"
 #include "xe_gt_sriov_pf_service.h"
 #include "xe_pm.h"
+#include "xe_sriov_pf.h"
 
 /*
  *      /sys/kernel/debug/dri/0/
@@ -50,26 +52,17 @@ static unsigned int extract_vfid(struct dentry *d)
  *      /sys/kernel/debug/dri/0/
  *      ├── gt0
  *      │   ├── pf
- *      │   │   ├── ggtt_available
- *      │   │   ├── ggtt_provisioned
  *      │   │   ├── contexts_provisioned
  *      │   │   ├── doorbells_provisioned
  *      │   │   ├── runtime_registers
  *      │   │   ├── negotiated_versions
  *      │   │   ├── adverse_events
+ *      ├── gt1
+ *      │   ├── pf
+ *      │   │   ├── ...
  */
 
 static const struct drm_info_list pf_info[] = {
-	{
-		"ggtt_available",
-		.show = xe_gt_debugfs_simple_show,
-		.data = xe_gt_sriov_pf_config_print_available_ggtt,
-	},
-	{
-		"ggtt_provisioned",
-		.show = xe_gt_debugfs_simple_show,
-		.data = xe_gt_sriov_pf_config_print_ggtt,
-	},
 	{
 		"contexts_provisioned",
 		.show = xe_gt_debugfs_simple_show,
@@ -86,14 +79,45 @@ static const struct drm_info_list pf_info[] = {
 		.data = xe_gt_sriov_pf_service_print_runtime,
 	},
 	{
-		"negotiated_versions",
-		.show = xe_gt_debugfs_simple_show,
-		.data = xe_gt_sriov_pf_service_print_version,
-	},
-	{
 		"adverse_events",
 		.show = xe_gt_debugfs_simple_show,
 		.data = xe_gt_sriov_pf_monitor_print_events,
+	},
+};
+
+/*
+ *      /sys/kernel/debug/dri/0/
+ *      ├── gt0
+ *      │   ├── pf
+ *      │   │   ├── ggtt_available
+ *      │   │   ├── ggtt_provisioned
+ */
+
+static const struct drm_info_list pf_ggtt_info[] = {
+	{
+		"ggtt_available",
+		.show = xe_gt_debugfs_simple_show,
+		.data = xe_gt_sriov_pf_config_print_available_ggtt,
+	},
+	{
+		"ggtt_provisioned",
+		.show = xe_gt_debugfs_simple_show,
+		.data = xe_gt_sriov_pf_config_print_ggtt,
+	},
+};
+
+/*
+ *      /sys/kernel/debug/dri/0/
+ *      ├── gt0
+ *      │   ├── pf
+ *      │   │   ├── lmem_provisioned
+ */
+
+static const struct drm_info_list pf_lmem_info[] = {
+	{
+		"lmem_provisioned",
+		.show = xe_gt_debugfs_simple_show,
+		.data = xe_gt_sriov_pf_config_print_lmem,
 	},
 };
 
@@ -158,6 +182,7 @@ static void pf_add_policy_attrs(struct xe_gt *gt, struct dentry *parent)
  *      │   │   ├── contexts_spare
  *      │   │   ├── exec_quantum_ms
  *      │   │   ├── preempt_timeout_us
+ *      │   │   ├── sched_priority
  *      │   ├── vf1
  *      │   │   ├── ggtt_quota
  *      │   │   ├── lmem_quota
@@ -165,6 +190,7 @@ static void pf_add_policy_attrs(struct xe_gt *gt, struct dentry *parent)
  *      │   │   ├── contexts_quota
  *      │   │   ├── exec_quantum_ms
  *      │   │   ├── preempt_timeout_us
+ *      │   │   ├── sched_priority
  */
 
 #define DEFINE_SRIOV_GT_CONFIG_DEBUGFS_ATTRIBUTE(CONFIG, TYPE, FORMAT)		\
@@ -180,7 +206,8 @@ static int CONFIG##_set(void *data, u64 val)					\
 		return -EOVERFLOW;						\
 										\
 	xe_pm_runtime_get(xe);							\
-	err = xe_gt_sriov_pf_config_set_##CONFIG(gt, vfid, val);		\
+	err = xe_sriov_pf_wait_ready(xe) ?:					\
+	      xe_gt_sriov_pf_config_set_##CONFIG(gt, vfid, val);		\
 	xe_pm_runtime_put(xe);							\
 										\
 	return err;								\
@@ -203,6 +230,7 @@ DEFINE_SRIOV_GT_CONFIG_DEBUGFS_ATTRIBUTE(ctxs, u32, "%llu\n");
 DEFINE_SRIOV_GT_CONFIG_DEBUGFS_ATTRIBUTE(dbs, u32, "%llu\n");
 DEFINE_SRIOV_GT_CONFIG_DEBUGFS_ATTRIBUTE(exec_quantum, u32, "%llu\n");
 DEFINE_SRIOV_GT_CONFIG_DEBUGFS_ATTRIBUTE(preempt_timeout, u32, "%llu\n");
+DEFINE_SRIOV_GT_CONFIG_DEBUGFS_ATTRIBUTE(sched_priority, u32, "%llu\n");
 
 /*
  *      /sys/kernel/debug/dri/0/
@@ -274,10 +302,10 @@ static void pf_add_config_attrs(struct xe_gt *gt, struct dentry *parent, unsigne
 	xe_gt_assert(gt, gt == extract_gt(parent));
 	xe_gt_assert(gt, vfid == extract_vfid(parent));
 
-	if (!xe_gt_is_media_type(gt)) {
+	if (xe_gt_is_main_type(gt)) {
 		debugfs_create_file_unsafe(vfid ? "ggtt_quota" : "ggtt_spare",
 					   0644, parent, parent, &ggtt_fops);
-		if (IS_DGFX(gt_to_xe(gt)))
+		if (xe_device_has_lmtt(gt_to_xe(gt)))
 			debugfs_create_file_unsafe(vfid ? "lmem_quota" : "lmem_spare",
 						   0644, parent, parent, &lmem_fops);
 	}
@@ -289,6 +317,8 @@ static void pf_add_config_attrs(struct xe_gt *gt, struct dentry *parent, unsigne
 				   &exec_quantum_fops);
 	debugfs_create_file_unsafe("preempt_timeout_us", 0644, parent, parent,
 				   &preempt_timeout_fops);
+	debugfs_create_file_unsafe("sched_priority", 0644, parent, parent,
+				   &sched_priority_fops);
 
 	/* register all threshold attributes */
 #define register_threshold_attribute(TAG, NAME, ...) \
@@ -312,6 +342,9 @@ static const struct {
 	{ "stop", xe_gt_sriov_pf_control_stop_vf },
 	{ "pause", xe_gt_sriov_pf_control_pause_vf },
 	{ "resume", xe_gt_sriov_pf_control_resume_vf },
+#ifdef CONFIG_DRM_XE_DEBUG_SRIOV
+	{ "restore!", xe_gt_sriov_pf_migration_restore_guc_state },
+#endif
 };
 
 static ssize_t control_write(struct file *file, const char __user *buf, size_t count, loff_t *pos)
@@ -375,6 +408,119 @@ static const struct file_operations control_ops = {
 	.llseek		= default_llseek,
 };
 
+/*
+ *      /sys/kernel/debug/dri/0/
+ *      ├── gt0
+ *      │   ├── vf1
+ *      │   │   ├── guc_state
+ */
+static ssize_t guc_state_read(struct file *file, char __user *buf,
+			      size_t count, loff_t *pos)
+{
+	struct dentry *dent = file_dentry(file);
+	struct dentry *parent = dent->d_parent;
+	struct xe_gt *gt = extract_gt(parent);
+	unsigned int vfid = extract_vfid(parent);
+
+	return xe_gt_sriov_pf_migration_read_guc_state(gt, vfid, buf, count, pos);
+}
+
+static ssize_t guc_state_write(struct file *file, const char __user *buf,
+			       size_t count, loff_t *pos)
+{
+	struct dentry *dent = file_dentry(file);
+	struct dentry *parent = dent->d_parent;
+	struct xe_gt *gt = extract_gt(parent);
+	unsigned int vfid = extract_vfid(parent);
+
+	if (*pos)
+		return -EINVAL;
+
+	return xe_gt_sriov_pf_migration_write_guc_state(gt, vfid, buf, count);
+}
+
+static const struct file_operations guc_state_ops = {
+	.owner		= THIS_MODULE,
+	.read		= guc_state_read,
+	.write		= guc_state_write,
+	.llseek		= default_llseek,
+};
+
+/*
+ *      /sys/kernel/debug/dri/0/
+ *      ├── gt0
+ *      │   ├── vf1
+ *      │   │   ├── config_blob
+ */
+static ssize_t config_blob_read(struct file *file, char __user *buf,
+				size_t count, loff_t *pos)
+{
+	struct dentry *dent = file_dentry(file);
+	struct dentry *parent = dent->d_parent;
+	struct xe_gt *gt = extract_gt(parent);
+	unsigned int vfid = extract_vfid(parent);
+	ssize_t ret;
+	void *tmp;
+
+	ret = xe_gt_sriov_pf_config_save(gt, vfid, NULL, 0);
+	if (!ret)
+		return -ENODATA;
+	if (ret < 0)
+		return ret;
+
+	tmp = kzalloc(ret, GFP_KERNEL);
+	if (!tmp)
+		return -ENOMEM;
+
+	ret = xe_gt_sriov_pf_config_save(gt, vfid, tmp, ret);
+	if (ret > 0)
+		ret = simple_read_from_buffer(buf, count, pos, tmp, ret);
+
+	kfree(tmp);
+	return ret;
+}
+
+static ssize_t config_blob_write(struct file *file, const char __user *buf,
+				 size_t count, loff_t *pos)
+{
+	struct dentry *dent = file_dentry(file);
+	struct dentry *parent = dent->d_parent;
+	struct xe_gt *gt = extract_gt(parent);
+	unsigned int vfid = extract_vfid(parent);
+	ssize_t ret;
+	void *tmp;
+
+	if (*pos)
+		return -EINVAL;
+
+	if (!count)
+		return -ENODATA;
+
+	if (count > SZ_4K)
+		return -EINVAL;
+
+	tmp = kzalloc(count, GFP_KERNEL);
+	if (!tmp)
+		return -ENOMEM;
+
+	if (copy_from_user(tmp, buf, count)) {
+		ret = -EFAULT;
+	} else {
+		ret = xe_gt_sriov_pf_config_restore(gt, vfid, tmp, count);
+		if (!ret)
+			ret = count;
+	}
+	kfree(tmp);
+	return ret;
+}
+
+static const struct file_operations config_blob_ops = {
+	.owner		= THIS_MODULE,
+	.read		= config_blob_read,
+	.write		= config_blob_write,
+	.llseek		= default_llseek,
+};
+
 /**
  * xe_gt_sriov_pf_debugfs_register - Register SR-IOV PF specific entries in GT debugfs.
  * @gt: the &xe_gt to register
@@ -405,6 +551,16 @@ void xe_gt_sriov_pf_debugfs_register(struct xe_gt *gt, struct dentry *root)
 	pfdentry->d_inode->i_private = gt;
 
 	drm_debugfs_create_files(pf_info, ARRAY_SIZE(pf_info), pfdentry, minor);
+	if (xe_gt_is_main_type(gt)) {
+		drm_debugfs_create_files(pf_ggtt_info,
+					 ARRAY_SIZE(pf_ggtt_info),
+					 pfdentry, minor);
+		if (xe_device_has_lmtt(gt_to_xe(gt)))
+			drm_debugfs_create_files(pf_lmem_info,
+						 ARRAY_SIZE(pf_lmem_info),
+						 pfdentry, minor);
+	}
+
 	pf_add_policy_attrs(gt, pfdentry);
 	pf_add_config_attrs(gt, pfdentry, PFID);
 
@@ -423,5 +579,15 @@ void xe_gt_sriov_pf_debugfs_register(struct xe_gt *gt, struct dentry *root)
 
 		pf_add_config_attrs(gt, vfdentry, VFID(n));
 		debugfs_create_file("control", 0600, vfdentry, NULL, &control_ops);
+
+		/* for testing/debugging purposes only! */
+		if (IS_ENABLED(CONFIG_DRM_XE_DEBUG)) {
+			debugfs_create_file("guc_state",
+					    IS_ENABLED(CONFIG_DRM_XE_DEBUG_SRIOV) ? 0600 : 0400,
+					    vfdentry, NULL, &guc_state_ops);
+			debugfs_create_file("config_blob",
+					    IS_ENABLED(CONFIG_DRM_XE_DEBUG_SRIOV) ? 0600 : 0400,
+					    vfdentry, NULL, &config_blob_ops);
+		}
 	}
 }

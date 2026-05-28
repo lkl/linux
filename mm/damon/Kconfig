@@ -28,6 +28,7 @@ config DAMON_VADDR
 	bool "Data access monitoring operations for virtual address spaces"
 	depends on DAMON && MMU
 	select PAGE_IDLE_FLAG
+	default DAMON
 	help
 	  This builds the default data access monitoring operations for DAMON
 	  that work for virtual address spaces.
@@ -36,6 +37,7 @@ config DAMON_PADDR
 	bool "Data access monitoring operations for the physical address space"
 	depends on DAMON && MMU
 	select PAGE_IDLE_FLAG
+	default DAMON
 	help
 	  This builds the default data access monitoring operations for DAMON
 	  that works for the physical address space.
@@ -55,46 +57,17 @@ config DAMON_VADDR_KUNIT_TEST
 config DAMON_SYSFS
 	bool "DAMON sysfs interface"
 	depends on DAMON && SYSFS
+	default DAMON
 	help
 	  This builds the sysfs interface for DAMON.  The user space can use
 	  the interface for arbitrary data access monitoring.
 
 config DAMON_SYSFS_KUNIT_TEST
-	bool "Test for damon debugfs interface" if !KUNIT_ALL_TESTS
+	bool "Test for damon sysfs interface" if !KUNIT_ALL_TESTS
 	depends on DAMON_SYSFS && KUNIT=y
 	default KUNIT_ALL_TESTS
 	help
 	  This builds the DAMON sysfs interface Kunit test suite.
-
-	  For more information on KUnit and unit tests in general, please refer
-	  to the KUnit documentation.
-
-	  If unsure, say N.
-
-config DAMON_DBGFS_DEPRECATED
-	bool "DAMON debugfs interface (DEPRECATED!)"
-	depends on DAMON_VADDR && DAMON_PADDR && DEBUG_FS
-	help
-	  This builds the debugfs interface for DAMON.  The user space admins
-	  can use the interface for arbitrary data access monitoring.
-
-	  If unsure, say N.
-
-	  This is deprecated, so users should move to the sysfs interface
-	  (DAMON_SYSFS).  If you depend on this and cannot move, please report
-	  your usecase to damon@lists.linux.dev and linux-mm@kvack.org.
-
-config DAMON_DBGFS
-	bool
-	default y
-	depends on DAMON_DBGFS_DEPRECATED
-
-config DAMON_DBGFS_KUNIT_TEST
-	bool "Test for damon debugfs interface" if !KUNIT_ALL_TESTS
-	depends on DAMON_DBGFS && KUNIT=y
-	default KUNIT_ALL_TESTS
-	help
-	  This builds the DAMON debugfs interface Kunit test suite.
 
 	  For more information on KUnit and unit tests in general, please refer
 	  to the KUnit documentation.
@@ -120,5 +93,21 @@ config DAMON_LRU_SORT
 	  This builds the DAMON-based LRU-lists sorting subsystem.  It tries to
 	  protect frequently accessed (hot) pages while rarely accessed (cold)
 	  pages reclaimed first under memory pressure.
+
+config DAMON_STAT
+	bool "Build data access monitoring stat (DAMON_STAT)"
+	depends on DAMON_PADDR
+	help
+	  This builds the DAMON-based access monitoring statistics subsystem.
+	  It runs DAMON and expose access monitoring results in simple stat
+	  metrics.
+
+config DAMON_STAT_ENABLED_DEFAULT
+	bool "Enable DAMON_STAT by default"
+	depends on DAMON_STAT
+	default DAMON_STAT
+	help
+	  Whether to enable DAMON_STAT by default.  Users can disable it in
+	  boot or runtime using its 'enabled' parameter.
 
 endmenu

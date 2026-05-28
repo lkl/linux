@@ -24,8 +24,6 @@
 
 #include <linux/iio/dac/mcp4725.h>
 
-#define MCP4725_DRV_NAME "mcp4725"
-
 #define MCP472X_REF_VDD			0x00
 #define MCP472X_REF_VREF_UNBUFFERED	0x02
 #define MCP472X_REF_VREF_BUFFERED	0x03
@@ -241,7 +239,7 @@ static const struct iio_chan_spec_ext_info mcp4725_ext_info[] = {
 			&mcp472x_powerdown_mode_enum[MCP4725]),
 	IIO_ENUM_AVAILABLE("powerdown_mode", IIO_SHARED_BY_TYPE,
 			   &mcp472x_powerdown_mode_enum[MCP4725]),
-	{ },
+	{ }
 };
 
 static const struct iio_chan_spec_ext_info mcp4726_ext_info[] = {
@@ -255,7 +253,7 @@ static const struct iio_chan_spec_ext_info mcp4726_ext_info[] = {
 			&mcp472x_powerdown_mode_enum[MCP4726]),
 	IIO_ENUM_AVAILABLE("powerdown_mode", IIO_SHARED_BY_TYPE,
 			   &mcp472x_powerdown_mode_enum[MCP4726]),
-	{ },
+	{ }
 };
 
 static const struct iio_chan_spec mcp472x_channel[] = {
@@ -379,7 +377,7 @@ static int mcp4725_probe_dt(struct device *dev,
 			    struct mcp4725_platform_data *pdata)
 {
 	/* check if is the vref-supply defined */
-	pdata->use_vref = device_property_read_bool(dev, "vref-supply");
+	pdata->use_vref = device_property_present(dev, "vref-supply");
 	pdata->vref_buffered =
 		device_property_read_bool(dev, "microchip,vref-buffered");
 
@@ -546,7 +544,7 @@ MODULE_DEVICE_TABLE(of, mcp4725_of_match);
 
 static struct i2c_driver mcp4725_driver = {
 	.driver = {
-		.name	= MCP4725_DRV_NAME,
+		.name	= "mcp4725",
 		.of_match_table = mcp4725_of_match,
 		.pm	= pm_sleep_ptr(&mcp4725_pm_ops),
 	},

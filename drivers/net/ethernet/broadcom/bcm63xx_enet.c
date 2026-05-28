@@ -286,7 +286,7 @@ static int bcm_enet_refill_rx(struct net_device *dev, bool napi_mode)
  */
 static void bcm_enet_refill_rx_timer(struct timer_list *t)
 {
-	struct bcm_enet_priv *priv = from_timer(priv, t, rx_timeout);
+	struct bcm_enet_priv *priv = timer_container_of(priv, t, rx_timeout);
 	struct net_device *dev = priv->net_dev;
 
 	spin_lock(&priv->rx_lock);
@@ -1195,7 +1195,7 @@ static int bcm_enet_stop(struct net_device *dev)
 	napi_disable(&priv->napi);
 	if (priv->has_phy)
 		phy_stop(dev->phydev);
-	del_timer_sync(&priv->rx_timeout);
+	timer_delete_sync(&priv->rx_timeout);
 
 	/* mask all interrupts */
 	enet_writel(priv, 0, ENET_IRMASK_REG);
@@ -1339,14 +1339,14 @@ static int bcm_enet_get_sset_count(struct net_device *netdev,
 static void bcm_enet_get_strings(struct net_device *netdev,
 				 u32 stringset, u8 *data)
 {
+	const char *str;
 	int i;
 
 	switch (stringset) {
 	case ETH_SS_STATS:
 		for (i = 0; i < BCM_ENET_STATS_LEN; i++) {
-			memcpy(data + i * ETH_GSTRING_LEN,
-			       bcm_enet_gstrings_stats[i].stat_string,
-			       ETH_GSTRING_LEN);
+			str = bcm_enet_gstrings_stats[i].stat_string;
+			ethtool_puts(&data, str);
 		}
 		break;
 	}
@@ -1936,7 +1936,7 @@ static void bcm_enet_remove(struct platform_device *pdev)
 
 static struct platform_driver bcm63xx_enet_driver = {
 	.probe	= bcm_enet_probe,
-	.remove_new = bcm_enet_remove,
+	.remove = bcm_enet_remove,
 	.driver	= {
 		.name	= "bcm63xx_enet",
 	},
@@ -2001,7 +2001,7 @@ static inline int bcm_enet_port_is_rgmii(int portid)
  */
 static void swphy_poll_timer(struct timer_list *t)
 {
-	struct bcm_enet_priv *priv = from_timer(priv, t, swphy_poll);
+	struct bcm_enet_priv *priv = timer_container_of(priv, t, swphy_poll);
 	unsigned int i;
 
 	for (i = 0; i < priv->num_ports; i++) {
@@ -2346,10 +2346,10 @@ static int bcm_enetsw_stop(struct net_device *dev)
 	priv = netdev_priv(dev);
 	kdev = &priv->pdev->dev;
 
-	del_timer_sync(&priv->swphy_poll);
+	timer_delete_sync(&priv->swphy_poll);
 	netif_stop_queue(dev);
 	napi_disable(&priv->napi);
-	del_timer_sync(&priv->rx_timeout);
+	timer_delete_sync(&priv->rx_timeout);
 
 	/* mask all interrupts */
 	enet_dmac_writel(priv, 0, ENETDMAC_IRMASK, priv->rx_chan);
@@ -2503,14 +2503,14 @@ static const struct bcm_enet_stats bcm_enetsw_gstrings_stats[] = {
 static void bcm_enetsw_get_strings(struct net_device *netdev,
 				   u32 stringset, u8 *data)
 {
+	const char *str;
 	int i;
 
 	switch (stringset) {
 	case ETH_SS_STATS:
 		for (i = 0; i < BCM_ENETSW_STATS_LEN; i++) {
-			memcpy(data + i * ETH_GSTRING_LEN,
-			       bcm_enetsw_gstrings_stats[i].stat_string,
-			       ETH_GSTRING_LEN);
+			str = bcm_enetsw_gstrings_stats[i].stat_string;
+			ethtool_puts(&data, str);
 		}
 		break;
 	}
@@ -2755,7 +2755,7 @@ static void bcm_enetsw_remove(struct platform_device *pdev)
 
 static struct platform_driver bcm63xx_enetsw_driver = {
 	.probe	= bcm_enetsw_probe,
-	.remove_new = bcm_enetsw_remove,
+	.remove = bcm_enetsw_remove,
 	.driver	= {
 		.name	= "bcm63xx_enetsw",
 	},

@@ -60,26 +60,34 @@ static ssize_t cachefiles_ondemand_fd_write_iter(struct kiocb *kiocb,
 {
 	struct cachefiles_object *object = kiocb->ki_filp->private_data;
 	struct cachefiles_cache *cache = object->volume->cache;
-	struct file *file = object->file;
-	size_t len = iter->count;
+	struct file *file;
+	size_t len = iter->count, aligned_len = len;
 	loff_t pos = kiocb->ki_pos;
 	const struct cred *saved_cred;
 	int ret;
 
-	if (!file)
+	spin_lock(&object->lock);
+	file = object->file;
+	if (!file) {
+		spin_unlock(&object->lock);
 		return -ENOBUFS;
+	}
+	get_file(file);
+	spin_unlock(&object->lock);
 
 	cachefiles_begin_secure(cache, &saved_cred);
-	ret = __cachefiles_prepare_write(object, file, &pos, &len, len, true);
+	ret = __cachefiles_prepare_write(object, file, &pos, &aligned_len, len, true);
 	cachefiles_end_secure(cache, saved_cred);
 	if (ret < 0)
-		return ret;
+		goto out;
 
 	trace_cachefiles_ondemand_fd_write(object, file_inode(file), pos, len);
 	ret = __cachefiles_write(object, file, pos, iter, NULL, NULL);
-	if (!ret)
-		ret = len;
+	if (ret > 0)
+		kiocb->ki_pos += ret;
 
+out:
+	fput(file);
 	return ret;
 }
 
@@ -87,12 +95,22 @@ static loff_t cachefiles_ondemand_fd_llseek(struct file *filp, loff_t pos,
 					    int whence)
 {
 	struct cachefiles_object *object = filp->private_data;
-	struct file *file = object->file;
+	struct file *file;
+	loff_t ret;
 
-	if (!file)
+	spin_lock(&object->lock);
+	file = object->file;
+	if (!file) {
+		spin_unlock(&object->lock);
 		return -ENOBUFS;
+	}
+	get_file(file);
+	spin_unlock(&object->lock);
 
-	return vfs_llseek(file, pos, whence);
+	ret = vfs_llseek(file, pos, whence);
+	fput(file);
+
+	return ret;
 }
 
 static long cachefiles_ondemand_fd_ioctl(struct file *filp, unsigned int ioctl,
@@ -297,8 +315,9 @@ static int cachefiles_ondemand_get_fd(struct cachefiles_req *req,
 		goto err_free_id;
 	}
 
-	anon_file->file = anon_inode_getfile("[cachefiles]",
-				&cachefiles_ondemand_fd_fops, object, O_WRONLY);
+	anon_file->file = anon_inode_getfile_fmode("[cachefiles]",
+				&cachefiles_ondemand_fd_fops, object,
+				O_WRONLY, FMODE_PWRITE | FMODE_LSEEK);
 	if (IS_ERR(anon_file->file)) {
 		ret = PTR_ERR(anon_file->file);
 		goto err_put_fd;
@@ -312,8 +331,6 @@ static int cachefiles_ondemand_get_fd(struct cachefiles_req *req,
 		ret = -EEXIST;
 		goto err_put_file;
 	}
-
-	anon_file->file->f_mode |= FMODE_PWRITE | FMODE_LSEEK;
 
 	load = (void *)req->msg.data;
 	load->fd = anon_file->fd;

@@ -9,6 +9,7 @@ title: Microchip Sparx5 Ethernet switch controller
 maintainers:
   - Steen Hegelund <steen.hegelund@microchip.com>
   - Lars Povlsen <lars.povlsen@microchip.com>
+  - Daniel Machon <daniel.machon@microchip.com>
 
 description: |
   The SparX-5 Enterprise Ethernet switch family provides a rich set of
@@ -34,15 +35,34 @@ properties:
     pattern: "^switch@[0-9a-f]+$"
 
   compatible:
-    const: microchip,sparx5-switch
+    oneOf:
+      - enum:
+          - microchip,lan9691-switch
+          - microchip,sparx5-switch
+      - items:
+          - enum:
+              - microchip,lan969c-switch
+              - microchip,lan969b-switch
+              - microchip,lan969a-switch
+              - microchip,lan9699-switch
+              - microchip,lan9698-switch
+              - microchip,lan9697-switch
+              - microchip,lan9696-switch
+              - microchip,lan9695-switch
+              - microchip,lan9694-switch
+              - microchip,lan9693-switch
+              - microchip,lan9692-switch
+          - const: microchip,lan9691-switch
 
   reg:
+    minItems: 2
     items:
       - description: cpu target
       - description: devices target
       - description: general control block target
 
   reg-names:
+    minItems: 2
     items:
       - const: cpu
       - const: devices
@@ -111,6 +131,24 @@ properties:
             minimum: 0
             maximum: 383
 
+          rx-internal-delay-ps:
+            description:
+              RGMII Receive Clock Delay defined in pico seconds, used to select
+              the DLL phase shift between 1000 ps (45 degree shift at 1Gbps) and
+              3300 ps (147 degree shift at 1Gbps). A value of 0 ps will disable
+              any delay. The Default is no delay.
+            enum: [0, 1000, 1700, 2000, 2500, 3000, 3300]
+            default: 0
+
+          tx-internal-delay-ps:
+            description:
+              RGMII Transmit Clock Delay defined in pico seconds, used to select
+              the DLL phase shift between 1000 ps (45 degree shift at 1Gbps) and
+              3300 ps (147 degree shift at 1Gbps). A value of 0 ps will disable
+              any delay. The Default is no delay.
+            enum: [0, 1000, 1700, 2000, 2500, 3000, 3300]
+            default: 0
+
         required:
           - reg
           - phys
@@ -131,6 +169,26 @@ required:
   - interrupts
   - interrupt-names
   - ethernet-ports
+
+allOf:
+  - if:
+      properties:
+        compatible:
+          contains:
+            enum:
+              - microchip,lan9691-switch
+    then:
+      properties:
+        reg:
+          maxItems: 2
+        reg-names:
+          maxItems: 2
+    else:
+      properties:
+        reg:
+          minItems: 3
+        reg-names:
+          minItems: 3
 
 additionalProperties: false
 
@@ -209,4 +267,3 @@ examples:
     };
 
 ...
-#  vim: set ts=2 sw=2 sts=2 tw=80 et cc=80 ft=yaml :

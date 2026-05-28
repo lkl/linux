@@ -51,19 +51,9 @@ static inline struct net_device *xt_in(const struct xt_action_param *par)
 	return par->state->in;
 }
 
-static inline const char *xt_inname(const struct xt_action_param *par)
-{
-	return par->state->in->name;
-}
-
 static inline struct net_device *xt_out(const struct xt_action_param *par)
 {
 	return par->state->out;
-}
-
-static inline const char *xt_outname(const struct xt_action_param *par)
-{
-	return par->state->out->name;
 }
 
 static inline unsigned int xt_hooknum(const struct xt_action_param *par)
@@ -357,7 +347,7 @@ extern struct static_key xt_tee_enabled;
  * Begin packet processing : all readers must wait the end
  * 1) Must be called with preemption disabled
  * 2) softirqs must be disabled too (or we should use this_cpu_add())
- * Returns :
+ * Returns:
  *  1 if no recursion on this cpu
  *  0 if recursion detected
  */

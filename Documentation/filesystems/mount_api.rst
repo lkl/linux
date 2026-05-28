@@ -506,8 +506,16 @@ returned.
 
    * ::
 
+       int vfs_parse_fs_qstr(struct fs_context *fc, const char *key,
+			       const struct qstr *value);
+
+     A wrapper around vfs_parse_fs_param() that copies the value string it is
+     passed.
+
+   * ::
+
        int vfs_parse_fs_string(struct fs_context *fc, const char *key,
-			       const char *value, size_t v_size);
+			       const char *value);
 
      A wrapper around vfs_parse_fs_param() that copies the value string it is
      passed.
@@ -671,7 +679,6 @@ The members are as follows:
 	fsparam_bool()		fs_param_is_bool
 	fsparam_u32()		fs_param_is_u32
 	fsparam_u32oct()	fs_param_is_u32_octal
-	fsparam_u32hex()	fs_param_is_u32_hex
 	fsparam_s32()		fs_param_is_s32
 	fsparam_u64()		fs_param_is_u64
 	fsparam_enum()		fs_param_is_enum
@@ -755,22 +762,8 @@ process the parameters it is given.
 
    * ::
 
-       bool validate_constant_table(const struct constant_table *tbl,
-				    size_t tbl_size,
-				    int low, int high, int special);
-
-     Validate a constant table.  Checks that all the elements are appropriately
-     ordered, that there are no duplicates and that the values are between low
-     and high inclusive, though provision is made for one allowable special
-     value outside of that range.  If no special value is required, special
-     should just be set to lie inside the low-to-high range.
-
-     If all is good, true is returned.  If the table is invalid, errors are
-     logged to the kernel log buffer and false is returned.
-
-   * ::
-
-       bool fs_validate_description(const struct fs_parameter_description *desc);
+       bool fs_validate_description(const char *name,
+                                    const struct fs_parameter_description *desc);
 
      This performs some validation checks on a parameter description.  It
      returns true if the description is good and false if it is not.  It will

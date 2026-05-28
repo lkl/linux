@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: ((GPL-2.0 WITH Linux-syscall-note) OR BSD-3-Clause)
-
+---
 name: netdev
 
-doc:
+doc: >-
   netdev configuration over generic netlink.
 
 definitions:
@@ -13,33 +13,33 @@ definitions:
     entries:
       -
         name: basic
-        doc:
+        doc: >-
           XDP features set supported by all drivers
           (XDP_ABORTED, XDP_DROP, XDP_PASS, XDP_TX)
       -
         name: redirect
-        doc:
+        doc: >-
           The netdev supports XDP_REDIRECT
       -
         name: ndo-xmit
-        doc:
+        doc: >-
           This feature informs if netdev implements ndo_xdp_xmit callback.
       -
         name: xsk-zerocopy
-        doc:
+        doc: >-
           This feature informs if netdev supports AF_XDP in zero copy mode.
       -
         name: hw-offload
-        doc:
-         This feature informs if netdev supports XDP hw offloading.
+        doc: >-
+          This feature informs if netdev supports XDP hw offloading.
       -
         name: rx-sg
-        doc:
+        doc: >-
           This feature informs if netdev implements non-linear XDP buffer
           support in the driver napi callback.
       -
         name: ndo-xmit-sg
-        doc:
+        doc: >-
           This feature informs if netdev implements non-linear XDP buffer
           support in ndo_xdp_xmit callback.
   -
@@ -48,36 +48,47 @@ definitions:
     entries:
       -
         name: timestamp
-        doc:
-          Device is capable of exposing receive HW timestamp via bpf_xdp_metadata_rx_timestamp().
+        doc: |
+          Device is capable of exposing receive HW timestamp via
+          bpf_xdp_metadata_rx_timestamp().
       -
         name: hash
-        doc:
-          Device is capable of exposing receive packet hash via bpf_xdp_metadata_rx_hash().
+        doc: |
+          Device is capable of exposing receive packet hash via
+          bpf_xdp_metadata_rx_hash().
       -
         name: vlan-tag
-        doc:
-          Device is capable of exposing receive packet VLAN tag via bpf_xdp_metadata_rx_vlan_tag().
+        doc: |
+          Device is capable of exposing receive packet VLAN tag via
+          bpf_xdp_metadata_rx_vlan_tag().
   -
     type: flags
     name: xsk-flags
     entries:
       -
         name: tx-timestamp
-        doc:
+        doc: >-
           HW timestamping egress packets is supported by the driver.
       -
         name: tx-checksum
-        doc:
+        doc: >-
           L3 checksum HW offload is supported by the driver.
+      -
+        name: tx-launch-time-fifo
+        doc: >-
+          Launch time HW offload is supported by the driver.
   -
     name: queue-type
     type: enum
-    entries: [ rx, tx ]
+    entries: [rx, tx]
   -
     name: qstats-scope
     type: flags
-    entries: [ queue ]
+    entries: [queue]
+  -
+    name: napi-threaded
+    type: enum
+    entries: [disabled, enabled]
 
 attribute-sets:
   -
@@ -114,6 +125,9 @@ attribute-sets:
         doc: Bitmask of enabled AF_XDP features.
         type: u64
         enum: xsk-flags
+  -
+    name: io-uring-provider-info
+    attributes: []
   -
     name: page-pool
     attributes:
@@ -171,6 +185,11 @@ attribute-sets:
         name: dmabuf
         doc: ID of the dmabuf this page-pool is attached to.
         type: u32
+      -
+        name: io-uring
+        doc: io-uring memory provider information.
+        type: nest
+        nested-attributes: io-uring-provider-info
   -
     name: page-pool-info
     subset-of: page-pool
@@ -193,7 +212,7 @@ attribute-sets:
       -
         name: alloc-fast
         type: uint
-        value: 8 # reserve some attr ids in case we need more metadata later
+        value: 8  # reserve some attr ids in case we need more metadata later
       -
         name: alloc-slow
         type: uint
@@ -248,6 +267,36 @@ attribute-sets:
              threaded mode. If NAPI is not in threaded mode (i.e. uses normal
              softirq context), the attribute will be absent.
         type: u32
+      -
+        name: defer-hard-irqs
+        doc: The number of consecutive empty polls before IRQ deferral ends
+             and hardware IRQs are re-enabled.
+        type: u32
+        checks:
+          max: s32-max
+      -
+        name: gro-flush-timeout
+        doc: The timeout, in nanoseconds, of when to trigger the NAPI watchdog
+             timer which schedules NAPI processing. Additionally, a non-zero
+             value will also prevent GRO from flushing recent super-frames at
+             the end of a NAPI cycle. This may add receive latency in exchange
+             for reducing the number of frames processed by the network stack.
+        type: uint
+      -
+        name: irq-suspend-timeout
+        doc: The timeout, in nanoseconds, of how long to suspend irq
+             processing, if event polling finds events
+        type: uint
+      -
+        name: threaded
+        doc: Whether the NAPI is configured to operate in threaded polling
+             mode. If this is set to enabled then the NAPI context operates
+             in threaded polling mode.
+        type: u32
+        enum: napi-threaded
+  -
+    name: xsk-info
+    attributes: []
   -
     name: queue
     attributes:
@@ -266,6 +315,9 @@ attribute-sets:
       -
         name: type
         doc: Queue type as rx, tx. Each queue type defines a separate ID space.
+             XDP TX queues allocated in the kernel are not linked to NAPIs and
+             thus not listed. AF_XDP queues will have more information set in
+             the xsk attribute.
         type: u32
         enum: queue-type
       -
@@ -276,7 +328,16 @@ attribute-sets:
         name: dmabuf
         doc: ID of the dmabuf attached to this queue, if any.
         type: u32
-
+      -
+        name: io-uring
+        doc: io_uring memory provider information.
+        type: nest
+        nested-attributes: io-uring-provider-info
+      -
+        name: xsk
+        doc: XSK information for this queue, if any.
+        type: nest
+        nested-attributes: xsk-info
   -
     name: qstats
     doc: |
@@ -320,7 +381,7 @@ attribute-sets:
           For drivers supporting XDP, XDP is considered the first layer
           of the stack, so packets consumed by XDP are still counted here.
         type: uint
-        value: 8 # reserve some attr ids in case we need more metadata later
+        value: 8  # reserve some attr ids in case we need more metadata later
       -
         name: rx-bytes
         doc: Successfully received bytes, see `rx-packets`.
@@ -378,9 +439,9 @@ attribute-sets:
       -
         name: rx-hw-gro-packets
         doc: |
-          Number of packets that were coalesced from smaller packets by the device.
-          Counts only packets coalesced with the HW-GRO netdevice feature,
-          LRO-coalesced packets are not counted.
+          Number of packets that were coalesced from smaller packets by the
+          device. Counts only packets coalesced with the HW-GRO netdevice
+          feature, LRO-coalesced packets are not counted.
         type: uint
       -
         name: rx-hw-gro-bytes
@@ -389,8 +450,8 @@ attribute-sets:
       -
         name: rx-hw-gro-wire-packets
         doc: |
-          Number of packets that were coalesced to bigger packetss with the HW-GRO
-          netdevice feature. LRO-coalesced packets are not counted.
+          Number of packets that were coalesced to bigger packetss with the
+          HW-GRO netdevice feature. LRO-coalesced packets are not counted.
         type: uint
       -
         name: rx-hw-gro-wire-bytes
@@ -424,6 +485,8 @@ attribute-sets:
         name: tx-needs-csum
         doc: |
           Number of packets that required the device to calculate the checksum.
+          This counter includes the number of GSO wire packets for which device
+          calculated the L4 checksum.
         type: uint
       -
         name: tx-hw-gso-packets
@@ -552,6 +615,7 @@ operations:
             - inflight-mem
             - detach-time
             - dmabuf
+            - io-uring
       dump:
         reply: *pp-reply
       config-cond: page-pool
@@ -617,6 +681,8 @@ operations:
             - napi-id
             - ifindex
             - dmabuf
+            - io-uring
+            - xsk
       dump:
         request:
           attributes:
@@ -636,6 +702,10 @@ operations:
             - ifindex
             - irq
             - pid
+            - defer-hard-irqs
+            - gro-flush-timeout
+            - irq-suspend-timeout
+            - threaded
       dump:
         request:
           attributes:
@@ -666,7 +736,7 @@ operations:
       name: bind-rx
       doc: Bind dmabuf to netdev
       attribute-set: dmabuf
-      flags: [ admin-perm ]
+      flags: [admin-perm]
       do:
         request:
           attributes:
@@ -676,10 +746,35 @@ operations:
         reply:
           attributes:
             - id
+    -
+      name: napi-set
+      doc: Set configurable NAPI instance settings.
+      attribute-set: napi
+      flags: [admin-perm]
+      do:
+        request:
+          attributes:
+            - id
+            - defer-hard-irqs
+            - gro-flush-timeout
+            - irq-suspend-timeout
+            - threaded
+    -
+      name: bind-tx
+      doc: Bind dmabuf to netdev for TX
+      attribute-set: dmabuf
+      do:
+        request:
+          attributes:
+            - ifindex
+            - fd
+        reply:
+          attributes:
+            - id
 
 kernel-family:
-  headers: [ "linux/list.h"]
-  sock-priv: struct list_head
+  headers: ["net/netdev_netlink.h"]
+  sock-priv: struct netdev_nl_sock
 
 mcast-groups:
   list:

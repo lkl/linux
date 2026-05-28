@@ -10,13 +10,16 @@
 #include <linux/acpi.h>
 #include <linux/bits.h>
 #include <linux/bitfield.h>
+#include <linux/cleanup.h>
 #include <linux/debugfs.h>
 #include <linux/device.h>
 #include <linux/device/driver.h>
+#include <linux/dmi.h>
 #include <linux/errno.h>
 #include <linux/hwmon.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/printk.h>
 #include <linux/rwsem.h>
 #include <linux/types.h>
@@ -26,7 +29,7 @@
 
 #define DRIVER_NAME	"msi-wmi-platform"
 
-#define MSI_PLATFORM_GUID	"ABBC0F6E-8EA1-11d1-00A0-C90629100000"
+#define MSI_PLATFORM_GUID	"ABBC0F6E-8EA1-11D1-00A0-C90629100000"
 
 #define MSI_WMI_PLATFORM_INTERFACE_VERSION	2
 
@@ -76,8 +79,13 @@ enum msi_wmi_platform_method {
 	MSI_PLATFORM_GET_WMI		= 0x1d,
 };
 
-struct msi_wmi_platform_debugfs_data {
+struct msi_wmi_platform_data {
 	struct wmi_device *wdev;
+	struct mutex wmi_lock;	/* Necessary when calling WMI methods */
+};
+
+struct msi_wmi_platform_debugfs_data {
+	struct msi_wmi_platform_data *data;
 	enum msi_wmi_platform_method method;
 	struct rw_semaphore buffer_lock;	/* Protects debugfs buffer */
 	size_t length;
@@ -132,8 +140,9 @@ static int msi_wmi_platform_parse_buffer(union acpi_object *obj, u8 *output, siz
 	return 0;
 }
 
-static int msi_wmi_platform_query(struct wmi_device *wdev, enum msi_wmi_platform_method method,
-				  u8 *input, size_t input_length, u8 *output, size_t output_length)
+static int msi_wmi_platform_query(struct msi_wmi_platform_data *data,
+				  enum msi_wmi_platform_method method, u8 *input,
+				  size_t input_length, u8 *output, size_t output_length)
 {
 	struct acpi_buffer out = { ACPI_ALLOCATE_BUFFER, NULL };
 	struct acpi_buffer in = {
@@ -147,9 +156,15 @@ static int msi_wmi_platform_query(struct wmi_device *wdev, enum msi_wmi_platform
 	if (!input_length || !output_length)
 		return -EINVAL;
 
-	status = wmidev_evaluate_method(wdev, 0x0, method, &in, &out);
-	if (ACPI_FAILURE(status))
-		return -EIO;
+	/*
+	 * The ACPI control method responsible for handling the WMI method calls
+	 * is not thread-safe. Because of this we have to do the locking ourself.
+	 */
+	scoped_guard(mutex, &data->wmi_lock) {
+		status = wmidev_evaluate_method(data->wdev, 0x0, method, &in, &out);
+		if (ACPI_FAILURE(status))
+			return -EIO;
+	}
 
 	obj = out.pointer;
 	if (!obj)
@@ -170,22 +185,22 @@ static umode_t msi_wmi_platform_is_visible(const void *drvdata, enum hwmon_senso
 static int msi_wmi_platform_read(struct device *dev, enum hwmon_sensor_types type, u32 attr,
 				 int channel, long *val)
 {
-	struct wmi_device *wdev = dev_get_drvdata(dev);
+	struct msi_wmi_platform_data *data = dev_get_drvdata(dev);
 	u8 input[32] = { 0 };
 	u8 output[32];
-	u16 data;
+	u16 value;
 	int ret;
 
-	ret = msi_wmi_platform_query(wdev, MSI_PLATFORM_GET_FAN, input, sizeof(input), output,
+	ret = msi_wmi_platform_query(data, MSI_PLATFORM_GET_FAN, input, sizeof(input), output,
 				     sizeof(output));
 	if (ret < 0)
 		return ret;
 
-	data = get_unaligned_be16(&output[channel * 2 + 1]);
-	if (!data)
+	value = get_unaligned_be16(&output[channel * 2 + 1]);
+	if (!value)
 		*val = 0;
 	else
-		*val = 480000 / data;
+		*val = 480000 / value;
 
 	return 0;
 }
@@ -231,7 +246,7 @@ static ssize_t msi_wmi_platform_write(struct file *fp, const char __user *input,
 		return ret;
 
 	down_write(&data->buffer_lock);
-	ret = msi_wmi_platform_query(data->wdev, data->method, payload, data->length, data->buffer,
+	ret = msi_wmi_platform_query(data->data, data->method, payload, data->length, data->buffer,
 				     data->length);
 	up_write(&data->buffer_lock);
 
@@ -277,17 +292,17 @@ static void msi_wmi_platform_debugfs_remove(void *data)
 	debugfs_remove_recursive(dir);
 }
 
-static void msi_wmi_platform_debugfs_add(struct wmi_device *wdev, struct dentry *dir,
+static void msi_wmi_platform_debugfs_add(struct msi_wmi_platform_data *drvdata, struct dentry *dir,
 					 const char *name, enum msi_wmi_platform_method method)
 {
 	struct msi_wmi_platform_debugfs_data *data;
 	struct dentry *entry;
 
-	data = devm_kzalloc(&wdev->dev, sizeof(*data), GFP_KERNEL);
+	data = devm_kzalloc(&drvdata->wdev->dev, sizeof(*data), GFP_KERNEL);
 	if (!data)
 		return;
 
-	data->wdev = wdev;
+	data->data = drvdata;
 	data->method = method;
 	init_rwsem(&data->buffer_lock);
 
@@ -298,82 +313,82 @@ static void msi_wmi_platform_debugfs_add(struct wmi_device *wdev, struct dentry 
 
 	entry = debugfs_create_file(name, 0600, dir, data, &msi_wmi_platform_debugfs_fops);
 	if (IS_ERR(entry))
-		devm_kfree(&wdev->dev, data);
+		devm_kfree(&drvdata->wdev->dev, data);
 }
 
-static void msi_wmi_platform_debugfs_init(struct wmi_device *wdev)
+static void msi_wmi_platform_debugfs_init(struct msi_wmi_platform_data *data)
 {
 	struct dentry *dir;
 	char dir_name[64];
 	int ret, method;
 
-	scnprintf(dir_name, ARRAY_SIZE(dir_name), "%s-%s", DRIVER_NAME, dev_name(&wdev->dev));
+	scnprintf(dir_name, ARRAY_SIZE(dir_name), "%s-%s", DRIVER_NAME, dev_name(&data->wdev->dev));
 
 	dir = debugfs_create_dir(dir_name, NULL);
 	if (IS_ERR(dir))
 		return;
 
-	ret = devm_add_action_or_reset(&wdev->dev, msi_wmi_platform_debugfs_remove, dir);
+	ret = devm_add_action_or_reset(&data->wdev->dev, msi_wmi_platform_debugfs_remove, dir);
 	if (ret < 0)
 		return;
 
 	for (method = MSI_PLATFORM_GET_PACKAGE; method <= MSI_PLATFORM_GET_WMI; method++)
-		msi_wmi_platform_debugfs_add(wdev, dir, msi_wmi_platform_debugfs_names[method - 1],
+		msi_wmi_platform_debugfs_add(data, dir, msi_wmi_platform_debugfs_names[method - 1],
 					     method);
 }
 
-static int msi_wmi_platform_hwmon_init(struct wmi_device *wdev)
+static int msi_wmi_platform_hwmon_init(struct msi_wmi_platform_data *data)
 {
 	struct device *hdev;
 
-	hdev = devm_hwmon_device_register_with_info(&wdev->dev, "msi_wmi_platform", wdev,
+	hdev = devm_hwmon_device_register_with_info(&data->wdev->dev, "msi_wmi_platform", data,
 						    &msi_wmi_platform_chip_info, NULL);
 
 	return PTR_ERR_OR_ZERO(hdev);
 }
 
-static int msi_wmi_platform_ec_init(struct wmi_device *wdev)
+static int msi_wmi_platform_ec_init(struct msi_wmi_platform_data *data)
 {
 	u8 input[32] = { 0 };
 	u8 output[32];
 	u8 flags;
 	int ret;
 
-	ret = msi_wmi_platform_query(wdev, MSI_PLATFORM_GET_EC, input, sizeof(input), output,
+	ret = msi_wmi_platform_query(data, MSI_PLATFORM_GET_EC, input, sizeof(input), output,
 				     sizeof(output));
 	if (ret < 0)
 		return ret;
 
 	flags = output[MSI_PLATFORM_EC_FLAGS_OFFSET];
 
-	dev_dbg(&wdev->dev, "EC RAM version %lu.%lu\n",
+	dev_dbg(&data->wdev->dev, "EC RAM version %lu.%lu\n",
 		FIELD_GET(MSI_PLATFORM_EC_MAJOR_MASK, flags),
 		FIELD_GET(MSI_PLATFORM_EC_MINOR_MASK, flags));
-	dev_dbg(&wdev->dev, "EC firmware version %.28s\n",
+	dev_dbg(&data->wdev->dev, "EC firmware version %.28s\n",
 		&output[MSI_PLATFORM_EC_VERSION_OFFSET]);
 
 	if (!(flags & MSI_PLATFORM_EC_IS_TIGERLAKE)) {
 		if (!force)
 			return -ENODEV;
 
-		dev_warn(&wdev->dev, "Loading on a non-Tigerlake platform\n");
+		dev_warn(&data->wdev->dev, "Loading on a non-Tigerlake platform\n");
 	}
 
 	return 0;
 }
 
-static int msi_wmi_platform_init(struct wmi_device *wdev)
+static int msi_wmi_platform_init(struct msi_wmi_platform_data *data)
 {
 	u8 input[32] = { 0 };
 	u8 output[32];
 	int ret;
 
-	ret = msi_wmi_platform_query(wdev, MSI_PLATFORM_GET_WMI, input, sizeof(input), output,
+	ret = msi_wmi_platform_query(data, MSI_PLATFORM_GET_WMI, input, sizeof(input), output,
 				     sizeof(output));
 	if (ret < 0)
 		return ret;
 
-	dev_dbg(&wdev->dev, "WMI interface version %u.%u\n",
+	dev_dbg(&data->wdev->dev, "WMI interface version %u.%u\n",
 		output[MSI_PLATFORM_WMI_MAJOR_OFFSET],
 		output[MSI_PLATFORM_WMI_MINOR_OFFSET]);
 
@@ -381,7 +396,8 @@ static int msi_wmi_platform_init(struct wmi_device *wdev)
 		if (!force)
 			return -ENODEV;
 
-		dev_warn(&wdev->dev, "Loading despite unsupported WMI interface version (%u.%u)\n",
+		dev_warn(&data->wdev->dev,
+			 "Loading despite unsupported WMI interface version (%u.%u)\n",
 			 output[MSI_PLATFORM_WMI_MAJOR_OFFSET],
 			 output[MSI_PLATFORM_WMI_MINOR_OFFSET]);
 	}
@@ -391,19 +407,31 @@ static int msi_wmi_platform_init(struct wmi_device *wdev)
 
 static int msi_wmi_platform_probe(struct wmi_device *wdev, const void *context)
 {
+	struct msi_wmi_platform_data *data;
 	int ret;
 
-	ret = msi_wmi_platform_init(wdev);
+	data = devm_kzalloc(&wdev->dev, sizeof(*data), GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
+
+	data->wdev = wdev;
+	dev_set_drvdata(&wdev->dev, data);
+
+	ret = devm_mutex_init(&wdev->dev, &data->wmi_lock);
 	if (ret < 0)
 		return ret;
 
-	ret = msi_wmi_platform_ec_init(wdev);
+	ret = msi_wmi_platform_init(data);
 	if (ret < 0)
 		return ret;
 
-	msi_wmi_platform_debugfs_init(wdev);
+	ret = msi_wmi_platform_ec_init(data);
+	if (ret < 0)
+		return ret;
 
-	return msi_wmi_platform_hwmon_init(wdev);
+	msi_wmi_platform_debugfs_init(data);
+
+	return msi_wmi_platform_hwmon_init(data);
 }
 
 static const struct wmi_device_id msi_wmi_platform_id_table[] = {
@@ -421,7 +449,45 @@ static struct wmi_driver msi_wmi_platform_driver = {
 	.probe = msi_wmi_platform_probe,
 	.no_singleton = true,
 };
-module_wmi_driver(msi_wmi_platform_driver);
+
+/*
+ * MSI reused the WMI GUID from the WMI-ACPI sample code provided by Microsoft,
+ * so other manufacturers might use it as well for their WMI-ACPI implementations.
+ */
+static const struct dmi_system_id msi_wmi_platform_whitelist[] __initconst = {
+	{
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "MICRO-STAR INT"),
+		},
+	},
+	{
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Micro-Star International"),
+		},
+	},
+	{ }
+};
+
+static int __init msi_wmi_platform_module_init(void)
+{
+	if (!dmi_check_system(msi_wmi_platform_whitelist)) {
+		if (!force)
+			return -ENODEV;
+
+		pr_warn("Ignoring DMI whitelist\n");
+	}
+
+	return wmi_driver_register(&msi_wmi_platform_driver);
+}
+
+static void __exit msi_wmi_platform_module_exit(void)
+{
+	wmi_driver_unregister(&msi_wmi_platform_driver);
+}
+
+module_init(msi_wmi_platform_module_init);
+module_exit(msi_wmi_platform_module_exit);
+
 
 MODULE_AUTHOR("Armin Wolf <W_Armin@gmx.de>");
 MODULE_DESCRIPTION("MSI WMI platform features");

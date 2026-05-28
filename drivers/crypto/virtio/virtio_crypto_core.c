@@ -139,7 +139,7 @@ static int virtcrypto_find_vqs(struct virtio_crypto *vi)
 		spin_lock_init(&vi->data_vq[i].lock);
 		vi->data_vq[i].vq = vqs[i];
 		/* Initialize crypto engine */
-		vi->data_vq[i].engine = crypto_engine_alloc_init_and_set(dev, true, NULL, true,
+		vi->data_vq[i].engine = crypto_engine_alloc_init_and_set(dev, true, true,
 						virtqueue_get_vring_size(vqs[i]));
 		if (!vi->data_vq[i].engine) {
 			ret = -ENOMEM;
@@ -480,10 +480,8 @@ static void virtcrypto_free_unused_reqs(struct virtio_crypto *vcrypto)
 
 	for (i = 0; i < vcrypto->max_data_queues; i++) {
 		vq = vcrypto->data_vq[i].vq;
-		while ((vc_req = virtqueue_detach_unused_buf(vq)) != NULL) {
-			kfree(vc_req->req_data);
-			kfree(vc_req->sgs);
-		}
+		while ((vc_req = virtqueue_detach_unused_buf(vq)) != NULL)
+			virtcrypto_clear_request(vc_req);
 		cond_resched();
 	}
 }

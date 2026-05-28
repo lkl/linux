@@ -16,12 +16,11 @@
 #include <linux/security.h>
 #include <linux/spinlock.h>
 #include <linux/slab.h>
-#include <linux/fdtable.h>
 #include <linux/fsnotify_backend.h>
 
 static int dir_notify_enable __read_mostly = 1;
 #ifdef CONFIG_SYSCTL
-static struct ctl_table dnotify_sysctls[] = {
+static const struct ctl_table dnotify_sysctls[] = {
 	{
 		.procname	= "dir-notify-enable",
 		.data		= &dir_notify_enable,
@@ -309,16 +308,16 @@ int fcntl_dirnotify(int fd, struct file *filp, unsigned int arg)
 		goto out_err;
 	}
 
+	error = file_f_owner_allocate(filp);
+	if (error)
+		goto out_err;
+
 	/* new fsnotify mark, we expect most fcntl calls to add a new mark */
 	new_dn_mark = kmem_cache_alloc(dnotify_mark_cache, GFP_KERNEL);
 	if (!new_dn_mark) {
 		error = -ENOMEM;
 		goto out_err;
 	}
-
-	error = file_f_owner_allocate(filp);
-	if (error)
-		goto out_err;
 
 	/* set up the new_fsn_mark and new_dn_mark */
 	new_fsn_mark = &new_dn_mark->fsn_mark;
@@ -347,9 +346,7 @@ int fcntl_dirnotify(int fd, struct file *filp, unsigned int arg)
 		new_fsn_mark = NULL;
 	}
 
-	rcu_read_lock();
-	f = lookup_fdget_rcu(fd);
-	rcu_read_unlock();
+	f = fget_raw(fd);
 
 	/* if (f != filp) means that we lost a race and another task/thread
 	 * actually closed the fd we are still playing with before we grabbed

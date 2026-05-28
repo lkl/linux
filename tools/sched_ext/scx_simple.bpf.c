@@ -31,10 +31,10 @@ UEI_DEFINE(uei);
 
 /*
  * Built-in DSQs such as SCX_DSQ_GLOBAL cannot be used as priority queues
- * (meaning, cannot be dispatched to with scx_bpf_dispatch_vtime()). We
+ * (meaning, cannot be dispatched to with scx_bpf_dsq_insert_vtime()). We
  * therefore create a separate DSQ with ID 0 that we dispatch to and consume
- * from. If scx_simple only supported global FIFO scheduling, then we could
- * just use SCX_DSQ_GLOBAL.
+ * from. If scx_simple only supported global FIFO scheduling, then we could just
+ * use SCX_DSQ_GLOBAL.
  */
 #define SHARED_DSQ 0
 
@@ -52,11 +52,6 @@ static void stat_inc(u32 idx)
 		(*cnt_p)++;
 }
 
-static inline bool vtime_before(u64 a, u64 b)
-{
-	return (s64)(a - b) < 0;
-}
-
 s32 BPF_STRUCT_OPS(simple_select_cpu, struct task_struct *p, s32 prev_cpu, u64 wake_flags)
 {
 	bool is_idle = false;
@@ -65,7 +60,7 @@ s32 BPF_STRUCT_OPS(simple_select_cpu, struct task_struct *p, s32 prev_cpu, u64 w
 	cpu = scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &is_idle);
 	if (is_idle) {
 		stat_inc(0);	/* count local queueing */
-		scx_bpf_dispatch(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, 0);
+		scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, 0);
 	}
 
 	return cpu;
@@ -76,7 +71,7 @@ void BPF_STRUCT_OPS(simple_enqueue, struct task_struct *p, u64 enq_flags)
 	stat_inc(1);	/* count global queueing */
 
 	if (fifo_sched) {
-		scx_bpf_dispatch(p, SHARED_DSQ, SCX_SLICE_DFL, enq_flags);
+		scx_bpf_dsq_insert(p, SHARED_DSQ, SCX_SLICE_DFL, enq_flags);
 	} else {
 		u64 vtime = p->scx.dsq_vtime;
 
@@ -84,17 +79,17 @@ void BPF_STRUCT_OPS(simple_enqueue, struct task_struct *p, u64 enq_flags)
 		 * Limit the amount of budget that an idling task can accumulate
 		 * to one slice.
 		 */
-		if (vtime_before(vtime, vtime_now - SCX_SLICE_DFL))
+		if (time_before(vtime, vtime_now - SCX_SLICE_DFL))
 			vtime = vtime_now - SCX_SLICE_DFL;
 
-		scx_bpf_dispatch_vtime(p, SHARED_DSQ, SCX_SLICE_DFL, vtime,
-				       enq_flags);
+		scx_bpf_dsq_insert_vtime(p, SHARED_DSQ, SCX_SLICE_DFL, vtime,
+					 enq_flags);
 	}
 }
 
 void BPF_STRUCT_OPS(simple_dispatch, s32 cpu, struct task_struct *prev)
 {
-	scx_bpf_consume(SHARED_DSQ);
+	scx_bpf_dsq_move_to_local(SHARED_DSQ);
 }
 
 void BPF_STRUCT_OPS(simple_running, struct task_struct *p)
@@ -108,7 +103,7 @@ void BPF_STRUCT_OPS(simple_running, struct task_struct *p)
 	 * thus racy. Any error should be contained and temporary. Let's just
 	 * live with it.
 	 */
-	if (vtime_before(vtime_now, p->scx.dsq_vtime))
+	if (time_before(vtime_now, p->scx.dsq_vtime))
 		vtime_now = p->scx.dsq_vtime;
 }
 

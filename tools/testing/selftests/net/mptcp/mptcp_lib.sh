@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: GPL-2.0
 
 . "$(dirname "${0}")/../lib.sh"
-. "$(dirname "${0}")/../net_helper.sh"
 
 readonly KSFT_PASS=0
 readonly KSFT_FAIL=1
@@ -105,6 +104,27 @@ mptcp_lib_pr_fail() {
 
 mptcp_lib_pr_info() {
 	mptcp_lib_print_info "INFO: ${*}"
+}
+
+# $1-2: listener/connector ns ; $3 port ; $4-5 listener/connector stat file
+mptcp_lib_pr_err_stats() {
+	local lns="${1}"
+	local cns="${2}"
+	local port="${3}"
+	local lstat="${4}"
+	local cstat="${5}"
+
+	echo -en "${MPTCP_LIB_COLOR_RED}"
+	{
+		printf "\nnetns %s (listener) socket stat for %d:\n" "${lns}" "${port}"
+		ip netns exec "${lns}" ss -Menitam -o "sport = :${port}"
+		cat "${lstat}"
+
+		printf "\nnetns %s (connector) socket stat for %d:\n" "${cns}" "${port}"
+		ip netns exec "${cns}" ss -Menitam -o "dport = :${port}"
+		[ "${lstat}" != "${cstat}" ] && cat "${cstat}"
+	} 1>&2
+	echo -en "${MPTCP_LIB_COLOR_RESET}"
 }
 
 # SELFTESTS_MPTCP_LIB_EXPECT_ALL_FEATURES env var can be set when validating all
@@ -310,12 +330,15 @@ mptcp_lib_result_print_all_tap() {
 
 # get the value of keyword $1 in the line marked by keyword $2
 mptcp_lib_get_info_value() {
-	grep "${2}" | sed -n 's/.*\('"${1}"':\)\([0-9a-f:.]*\).*$/\2/p;q'
+	grep "${2}" 2>/dev/null |
+		sed -n 's/.*\('"${1}"':\)\([0-9a-f:.]*\).*$/\2/p;q'
+		# the ';q' at the end limits to the first matched entry.
 }
 
 # $1: info name ; $2: evts_ns ; [$3: event type; [$4: addr]]
 mptcp_lib_evts_get_info() {
-	grep "${4:-}" "${2}" | mptcp_lib_get_info_value "${1}" "^type:${3:-1},"
+	grep "${4:-}" "${2}" 2>/dev/null |
+		mptcp_lib_get_info_value "${1}" "^type:${3:-1},"
 }
 
 # $1: PID
@@ -324,6 +347,27 @@ mptcp_lib_kill_wait() {
 
 	kill -SIGUSR1 "${1}" > /dev/null 2>&1
 	kill "${1}" > /dev/null 2>&1
+	wait "${1}" 2>/dev/null
+}
+
+# $1: PID
+mptcp_lib_pid_list_children() {
+	local curr="${1}"
+	# evoke 'ps' only once
+	local pids="${2:-"$(ps o pid,ppid)"}"
+
+	echo "${curr}"
+
+	local pid
+	for pid in $(echo "${pids}" | awk "\$2 == ${curr} { print \$1 }"); do
+		mptcp_lib_pid_list_children "${pid}" "${pids}"
+	done
+}
+
+# $1: PID
+mptcp_lib_kill_group_wait() {
+	# Some users might not have procps-ng: cannot use "kill -- -PID"
+	mptcp_lib_pid_list_children "${1}" | xargs -r kill &>/dev/null
 	wait "${1}" 2>/dev/null
 }
 
@@ -361,7 +405,7 @@ mptcp_lib_make_file() {
 mptcp_lib_print_file_err() {
 	ls -l "${1}" 1>&2
 	echo "Trailing bytes are: "
-	tail -c 27 "${1}"
+	tail -c 32 "${1}" | od -x | head -n2
 }
 
 # $1: input file ; $2: output file ; $3: what kind of file
@@ -455,8 +499,6 @@ mptcp_lib_ns_init() {
 	local netns
 	for netns in "${@}"; do
 		ip netns exec "${!netns}" sysctl -q net.mptcp.enabled=1
-		ip netns exec "${!netns}" sysctl -q net.ipv4.conf.all.rp_filter=0
-		ip netns exec "${!netns}" sysctl -q net.ipv4.conf.default.rp_filter=0
 	done
 }
 

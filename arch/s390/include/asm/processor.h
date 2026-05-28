@@ -26,11 +26,12 @@
 
 #define RESTART_FLAG_CTLREGS	_AC(1 << 0, U)
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #include <linux/cpumask.h>
 #include <linux/linkage.h>
 #include <linux/irqflags.h>
+#include <linux/bitops.h>
 #include <asm/fpu-types.h>
 #include <asm/cpu.h>
 #include <asm/page.h>
@@ -39,6 +40,7 @@
 #include <asm/runtime_instr.h>
 #include <asm/irqflags.h>
 #include <asm/alternative.h>
+#include <asm/fault.h>
 
 struct pcpu {
 	unsigned long ec_mask;		/* bit mask for ec_xxx functions */
@@ -61,33 +63,27 @@ static __always_inline struct pcpu *this_pcpu(void)
 
 static __always_inline void set_cpu_flag(int flag)
 {
-	this_pcpu()->flags |= (1UL << flag);
+	set_bit(flag, &this_pcpu()->flags);
 }
 
 static __always_inline void clear_cpu_flag(int flag)
 {
-	this_pcpu()->flags &= ~(1UL << flag);
+	clear_bit(flag, &this_pcpu()->flags);
 }
 
 static __always_inline bool test_cpu_flag(int flag)
 {
-	return this_pcpu()->flags & (1UL << flag);
+	return test_bit(flag, &this_pcpu()->flags);
 }
 
 static __always_inline bool test_and_set_cpu_flag(int flag)
 {
-	if (test_cpu_flag(flag))
-		return true;
-	set_cpu_flag(flag);
-	return false;
+	return test_and_set_bit(flag, &this_pcpu()->flags);
 }
 
 static __always_inline bool test_and_clear_cpu_flag(int flag)
 {
-	if (!test_cpu_flag(flag))
-		return false;
-	clear_cpu_flag(flag);
-	return true;
+	return test_and_clear_bit(flag, &this_pcpu()->flags);
 }
 
 /*
@@ -96,7 +92,7 @@ static __always_inline bool test_and_clear_cpu_flag(int flag)
  */
 static __always_inline bool test_cpu_flag_of(int flag, int cpu)
 {
-	return per_cpu(pcpu_devices, cpu).flags & (1UL << flag);
+	return test_bit(flag, &per_cpu(pcpu_devices, cpu).flags);
 }
 
 #define arch_needs_cpu() test_cpu_flag(CIF_NOHZ_DELAY)
@@ -162,13 +158,12 @@ static __always_inline void __stackleak_poison(unsigned long erase_low,
 		"	la	%[addr],256(%[addr])\n"
 		"	brctg	%[tmp],0b\n"
 		"1:	stg	%[poison],0(%[addr])\n"
-		"	larl	%[tmp],3f\n"
-		"	ex	%[count],0(%[tmp])\n"
+		"	exrl	%[count],3f\n"
 		"	j	4f\n"
 		"2:	stg	%[poison],0(%[addr])\n"
 		"	j	4f\n"
 		"3:	mvc	8(1,%[addr]),0(%[addr])\n"
-		"4:\n"
+		"4:"
 		: [addr] "+&a" (erase_low), [count] "+&d" (count), [tmp] "=&a" (tmp)
 		: [poison] "d" (poison)
 		: "memory", "cc"
@@ -187,10 +182,8 @@ struct thread_struct {
 	unsigned long hardirq_timer;		/* task cputime in hardirq context */
 	unsigned long softirq_timer;		/* task cputime in softirq context */
 	const sys_call_ptr_t *sys_call_table;	/* system call table address */
-	unsigned long gmap_addr;		/* address of last gmap fault. */
-	unsigned int gmap_write_flag;		/* gmap fault write indication */
+	union teid gmap_teid;			/* address and flags of last gmap fault */
 	unsigned int gmap_int_code;		/* int code of last gmap fault */
-	unsigned int gmap_pfault;		/* signal of a pending guest pfault */
 	int ufpu_flags;				/* user fpu flags */
 	int kfpu_flags;				/* kernel fpu flags */
 
@@ -418,9 +411,13 @@ static __always_inline bool regs_irqs_disabled(struct pt_regs *regs)
 
 static __always_inline void bpon(void)
 {
-	asm volatile(ALTERNATIVE("nop", ".insn	rrf,0xb2e80000,0,0,13,0", ALT_SPEC(82)));
+	asm_inline volatile(
+		ALTERNATIVE("	nop\n",
+			    "	.insn	rrf,0xb2e80000,0,0,13,0\n",
+			    ALT_SPEC(82))
+		);
 }
 
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 
 #endif /* __ASM_S390_PROCESSOR_H */

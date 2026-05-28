@@ -12,8 +12,6 @@ powerpc
     bootwrapper
     cpu_families
     cpu_features
-    cxl
-    cxlflash
     dawr-power9
     dexcr
     dscr
@@ -21,6 +19,7 @@ powerpc
     elf_hwcaps
     elfnote
     firmware-assisted-dump
+    htm
     hvcs
     imc
     isa-versions
@@ -38,6 +37,7 @@ powerpc
     vas-api
     vcpudispatch_stats
     vmemmap_dedup
+    vpa-dtl
 
     features
 

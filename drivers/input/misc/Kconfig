@@ -126,6 +126,17 @@ config INPUT_ATMEL_CAPTOUCH
 	  To compile this driver as a module, choose M here: the
 	  module will be called atmel_captouch.
 
+config INPUT_AW86927
+	tristate "Awinic AW86927 Haptic Driver Support"
+	depends on I2C && INPUT
+	select INPUT_FF_MEMLESS
+	select REGMAP_I2C
+	help
+	  Say Y here if you have an Awinic AW86927 haptic chip.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called aw86927.
+
 config INPUT_BBNSM_PWRKEY
 	tristate "NXP BBNSM Power Key Driver"
 	depends on ARCH_MXC || COMPILE_TEST
@@ -230,6 +241,16 @@ config INPUT_M68K_BEEP
 	tristate "M68k Beeper support"
 	depends on M68K
 
+config INPUT_MAX7360_ROTARY
+	tristate "Maxim MAX7360 Rotary Encoder"
+	depends on MFD_MAX7360
+	help
+	  If you say yes here you get support for the rotary encoder on the
+	  Maxim MAX7360 I/O Expander.
+
+	  To compile this driver as a module, choose M here: the module will be
+	  called max7360_rotary.
+
 config INPUT_MAX77650_ONKEY
 	tristate "Maxim MAX77650 ONKEY support"
 	depends on MFD_MAX77650
@@ -240,12 +261,12 @@ config INPUT_MAX77650_ONKEY
 	  will be called max77650-onkey.
 
 config INPUT_MAX77693_HAPTIC
-	tristate "MAXIM MAX77693/MAX77843 haptic controller support"
-	depends on (MFD_MAX77693 || MFD_MAX77843) && PWM
+	tristate "MAXIM MAX77693/MAX77705/MAX77843 haptic controller support"
+	depends on (MFD_MAX77693 || MFD_MAX77705 || MFD_MAX77843) && PWM
 	select INPUT_FF_MEMLESS
 	help
 	  This option enables support for the haptic controller on
-	  MAXIM MAX77693 and MAX77843 chips.
+	  MAXIM MAX77693, MAX77705 and MAX77843 chips.
 
 	  To compile this driver as module, choose M here: the
 	  module will be called max77693-haptic.
@@ -506,6 +527,16 @@ config INPUT_TPS65219_PWRBUTTON
 	  To compile this driver as a module, choose M here. The module will
 	  be called tps65219-pwrbutton.
 
+config INPUT_TPS6594_PWRBUTTON
+	tristate "TPS6594 Power button driver"
+	depends on MFD_TPS6594
+	help
+	  Say Y here if you want to enable power button reporting for
+	  TPS6594 Power Management IC devices.
+
+	  To compile this driver as a module, choose M here. The module will
+	  be called tps6594-pwrbutton.
+
 config INPUT_AXP20X_PEK
 	tristate "X-Powers AXP20X power button driver"
 	depends on MFD_AXP20X
@@ -583,13 +614,6 @@ config INPUT_PALMAS_PWRBUTTON
 
 	  To compile this driver as a module, choose M here. The module will
 	  be called palmas_pwrbutton.
-
-config INPUT_PCF50633_PMU
-	tristate "PCF50633 PMU events"
-	depends on MFD_PCF50633
-	help
-	 Say Y to include support for delivering  PMU events via  input
-	 layer on NXP PCF50633.
 
 config INPUT_PCF8574
 	tristate "PCF8574 Keypad input device"
@@ -916,6 +940,18 @@ config INPUT_HISI_POWERKEY
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called hisi_powerkey.
+
+config INPUT_QNAP_MCU
+	tristate "Input Support for QNAP MCU controllers"
+	depends on MFD_QNAP_MCU
+	help
+	  This option enables support for input elements available on
+	  embedded controllers used in QNAP NAS devices.
+
+	  This includes a polled power-button as well as a beeper.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called qnap-mcu-input.
 
 config INPUT_RAVE_SP_PWRBUTTON
 	tristate "RAVE SP Power button Driver"

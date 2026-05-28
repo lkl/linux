@@ -68,6 +68,10 @@ enum {
  * also be granted in SHARED.  The preferred state is whichever is compatible
  * with other granted locks, or the specified state if no other locks exist.
  *
+ * In addition, when a lock is already held in EX mode locally, a SHARED or
+ * DEFERRED mode request with the LM_FLAG_ANY flag set will be granted.
+ * (The LM_FLAG_ANY flag is only use for SHARED mode requests currently.)
+ *
  * LM_FLAG_NODE_SCOPE
  * This holder agrees to share the lock within this node. In other words,
  * the glock is held in EX mode according to DLM, but local holders on the
@@ -92,12 +96,22 @@ enum {
  * LM_OUT_ST_MASK
  * Masks the lower two bits of lock state in the returned value.
  *
+ * LM_OUT_TRY_AGAIN
+ * The trylock request failed.
+ *
+ * LM_OUT_DEADLOCK
+ * The lock request failed because it would deadlock.
+ *
  * LM_OUT_CANCELED
  * The lock request was canceled.
  *
+ * LM_OUT_ERROR
+ * The lock request timed out or failed.
  */
 
 #define LM_OUT_ST_MASK		0x00000003
+#define LM_OUT_TRY_AGAIN	0x00000020
+#define LM_OUT_DEADLOCK		0x00000010
 #define LM_OUT_CANCELED		0x00000008
 #define LM_OUT_ERROR		0x00000004
 
@@ -245,6 +259,7 @@ static inline int gfs2_glock_nq_init(struct gfs2_glock *gl,
 void gfs2_glock_cb(struct gfs2_glock *gl, unsigned int state);
 void gfs2_glock_complete(struct gfs2_glock *gl, int ret);
 bool gfs2_queue_try_to_evict(struct gfs2_glock *gl);
+bool gfs2_queue_verify_delete(struct gfs2_glock *gl, bool later);
 void gfs2_cancel_delete_work(struct gfs2_glock *gl);
 void gfs2_flush_delete_work(struct gfs2_sbd *sdp);
 void gfs2_gl_hash_clear(struct gfs2_sbd *sdp);
@@ -283,5 +298,11 @@ static inline bool gfs2_holder_queued(struct gfs2_holder *gh)
 
 void gfs2_inode_remember_delete(struct gfs2_glock *gl, u64 generation);
 bool gfs2_inode_already_deleted(struct gfs2_glock *gl, u64 generation);
+
+static inline bool glock_needs_demote(struct gfs2_glock *gl)
+{
+	return (test_bit(GLF_DEMOTE, &gl->gl_flags) ||
+		test_bit(GLF_PENDING_DEMOTE, &gl->gl_flags));
+}
 
 #endif /* __GLOCK_DOT_H__ */

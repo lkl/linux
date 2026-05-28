@@ -25,13 +25,16 @@ struct rps_map {
 
 /*
  * The rps_dev_flow structure contains the mapping of a flow to a CPU, the
- * tail pointer for that CPU's input queue at the time of last enqueue, and
- * a hardware filter index.
+ * tail pointer for that CPU's input queue at the time of last enqueue, a
+ * hardware filter index, and the hash of the flow if aRFS is enabled.
  */
 struct rps_dev_flow {
 	u16		cpu;
 	u16		filter;
 	unsigned int	last_qtail;
+#ifdef CONFIG_RFS_ACCEL
+	u32		hash;
+#endif
 };
 #define RPS_NO_FILTER 0xffff
 
@@ -39,7 +42,7 @@ struct rps_dev_flow {
  * The rps_dev_flow_table structure contains a table of flow mappings.
  */
 struct rps_dev_flow_table {
-	unsigned int		mask;
+	u8			log;
 	struct rcu_head		rcu;
 	struct rps_dev_flow	flows[];
 };
@@ -57,9 +60,10 @@ struct rps_dev_flow_table {
  * meaning we use 32-6=26 bits for the hash.
  */
 struct rps_sock_flow_table {
-	u32	mask;
+	struct rcu_head	rcu;
+	u32		mask;
 
-	u32	ents[] ____cacheline_aligned_in_smp;
+	u32		ents[] ____cacheline_aligned_in_smp;
 };
 #define	RPS_SOCK_FLOW_TABLE_SIZE(_num) (offsetof(struct rps_sock_flow_table, ents[_num]))
 
@@ -81,11 +85,8 @@ static inline void rps_record_sock_flow(struct rps_sock_flow_table *table,
 		WRITE_ONCE(table->ents[index], val);
 }
 
-#endif /* CONFIG_RPS */
-
-static inline void sock_rps_record_flow_hash(__u32 hash)
+static inline void _sock_rps_record_flow_hash(__u32 hash)
 {
-#ifdef CONFIG_RPS
 	struct rps_sock_flow_table *sock_flow_table;
 
 	if (!hash)
@@ -95,30 +96,84 @@ static inline void sock_rps_record_flow_hash(__u32 hash)
 	if (sock_flow_table)
 		rps_record_sock_flow(sock_flow_table, hash);
 	rcu_read_unlock();
+}
+
+static inline void _sock_rps_record_flow(const struct sock *sk)
+{
+	/* Reading sk->sk_rxhash might incur an expensive cache line
+	 * miss.
+	 *
+	 * TCP_ESTABLISHED does cover almost all states where RFS
+	 * might be useful, and is cheaper [1] than testing :
+	 *	IPv4: inet_sk(sk)->inet_daddr
+	 *	IPv6: ipv6_addr_any(&sk->sk_v6_daddr)
+	 * OR	an additional socket flag
+	 * [1] : sk_state and sk_prot are in the same cache line.
+	 */
+	if (sk->sk_state == TCP_ESTABLISHED) {
+		/* This READ_ONCE() is paired with the WRITE_ONCE()
+		 * from sock_rps_save_rxhash() and sock_rps_reset_rxhash().
+		 */
+		_sock_rps_record_flow_hash(READ_ONCE(sk->sk_rxhash));
+	}
+}
+
+static inline void _sock_rps_delete_flow(const struct sock *sk)
+{
+	struct rps_sock_flow_table *table;
+	u32 hash, index;
+
+	hash = READ_ONCE(sk->sk_rxhash);
+	if (!hash)
+		return;
+
+	rcu_read_lock();
+	table = rcu_dereference(net_hotdata.rps_sock_flow_table);
+	if (table) {
+		index = hash & table->mask;
+		if (READ_ONCE(table->ents[index]) != RPS_NO_CPU)
+			WRITE_ONCE(table->ents[index], RPS_NO_CPU);
+	}
+	rcu_read_unlock();
+}
+#endif /* CONFIG_RPS */
+
+static inline bool rfs_is_needed(void)
+{
+#ifdef CONFIG_RPS
+	return static_branch_unlikely(&rfs_needed);
+#else
+	return false;
+#endif
+}
+
+static inline void sock_rps_record_flow_hash(__u32 hash)
+{
+#ifdef CONFIG_RPS
+	if (!rfs_is_needed())
+		return;
+
+	_sock_rps_record_flow_hash(hash);
 #endif
 }
 
 static inline void sock_rps_record_flow(const struct sock *sk)
 {
 #ifdef CONFIG_RPS
-	if (static_branch_unlikely(&rfs_needed)) {
-		/* Reading sk->sk_rxhash might incur an expensive cache line
-		 * miss.
-		 *
-		 * TCP_ESTABLISHED does cover almost all states where RFS
-		 * might be useful, and is cheaper [1] than testing :
-		 *	IPv4: inet_sk(sk)->inet_daddr
-		 * 	IPv6: ipv6_addr_any(&sk->sk_v6_daddr)
-		 * OR	an additional socket flag
-		 * [1] : sk_state and sk_prot are in the same cache line.
-		 */
-		if (sk->sk_state == TCP_ESTABLISHED) {
-			/* This READ_ONCE() is paired with the WRITE_ONCE()
-			 * from sock_rps_save_rxhash() and sock_rps_reset_rxhash().
-			 */
-			sock_rps_record_flow_hash(READ_ONCE(sk->sk_rxhash));
-		}
-	}
+	if (!rfs_is_needed())
+		return;
+
+	_sock_rps_record_flow(sk);
+#endif
+}
+
+static inline void sock_rps_delete_flow(const struct sock *sk)
+{
+#ifdef CONFIG_RPS
+	if (!rfs_is_needed())
+		return;
+
+	_sock_rps_delete_flow(sk);
 #endif
 }
 

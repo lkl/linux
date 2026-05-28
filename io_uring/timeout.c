@@ -35,6 +35,9 @@ struct io_timeout_rem {
 	bool				ltimeout;
 };
 
+static struct io_kiocb *__io_disarm_linked_timeout(struct io_kiocb *req,
+						   struct io_kiocb *link);
+
 static inline bool io_is_timeout_noseq(struct io_kiocb *req)
 {
 	struct io_timeout *timeout = io_kiocb_to_cmd(req, struct io_timeout);
@@ -65,7 +68,7 @@ static inline bool io_timeout_finish(struct io_timeout *timeout,
 
 static enum hrtimer_restart io_timeout_fn(struct hrtimer *timer);
 
-static void io_timeout_complete(struct io_kiocb *req, struct io_tw_state *ts)
+static void io_timeout_complete(struct io_kiocb *req, io_tw_token_t tw)
 {
 	struct io_timeout *timeout = io_kiocb_to_cmd(req, struct io_timeout);
 	struct io_timeout_data *data = req->async_data;
@@ -74,19 +77,38 @@ static void io_timeout_complete(struct io_kiocb *req, struct io_tw_state *ts)
 	if (!io_timeout_finish(timeout, data)) {
 		if (io_req_post_cqe(req, -ETIME, IORING_CQE_F_MORE)) {
 			/* re-arm timer */
-			spin_lock_irq(&ctx->timeout_lock);
+			raw_spin_lock_irq(&ctx->timeout_lock);
 			list_add(&timeout->list, ctx->timeout_list.prev);
-			data->timer.function = io_timeout_fn;
 			hrtimer_start(&data->timer, timespec64_to_ktime(data->ts), data->mode);
-			spin_unlock_irq(&ctx->timeout_lock);
+			raw_spin_unlock_irq(&ctx->timeout_lock);
 			return;
 		}
 	}
 
-	io_req_task_complete(req, ts);
+	io_req_task_complete(req, tw);
 }
 
-static bool io_kill_timeout(struct io_kiocb *req, int status)
+static __cold bool io_flush_killed_timeouts(struct list_head *list, int err)
+{
+	if (list_empty(list))
+		return false;
+
+	while (!list_empty(list)) {
+		struct io_timeout *timeout;
+		struct io_kiocb *req;
+
+		timeout = list_first_entry(list, struct io_timeout, list);
+		list_del_init(&timeout->list);
+		req = cmd_to_io_kiocb(timeout);
+		if (err)
+			req_set_fail(req);
+		io_req_queue_tw_complete(req, err);
+	}
+
+	return true;
+}
+
+static void io_kill_timeout(struct io_kiocb *req, struct list_head *list)
 	__must_hold(&req->ctx->timeout_lock)
 {
 	struct io_timeout_data *io = req->async_data;
@@ -94,23 +116,19 @@ static bool io_kill_timeout(struct io_kiocb *req, int status)
 	if (hrtimer_try_to_cancel(&io->timer) != -1) {
 		struct io_timeout *timeout = io_kiocb_to_cmd(req, struct io_timeout);
 
-		if (status)
-			req_set_fail(req);
 		atomic_set(&req->ctx->cq_timeouts,
 			atomic_read(&req->ctx->cq_timeouts) + 1);
-		list_del_init(&timeout->list);
-		io_req_queue_tw_complete(req, status);
-		return true;
+		list_move_tail(&timeout->list, list);
 	}
-	return false;
 }
 
 __cold void io_flush_timeouts(struct io_ring_ctx *ctx)
 {
-	u32 seq;
 	struct io_timeout *timeout, *tmp;
+	LIST_HEAD(list);
+	u32 seq;
 
-	spin_lock_irq(&ctx->timeout_lock);
+	raw_spin_lock_irq(&ctx->timeout_lock);
 	seq = ctx->cached_cq_tail - atomic_read(&ctx->cq_timeouts);
 
 	list_for_each_entry_safe(timeout, tmp, &ctx->timeout_list, list) {
@@ -132,15 +150,16 @@ __cold void io_flush_timeouts(struct io_ring_ctx *ctx)
 		if (events_got < events_needed)
 			break;
 
-		io_kill_timeout(req, 0);
+		io_kill_timeout(req, &list);
 	}
 	ctx->cq_last_tm_flush = seq;
-	spin_unlock_irq(&ctx->timeout_lock);
+	raw_spin_unlock_irq(&ctx->timeout_lock);
+	io_flush_killed_timeouts(&list, 0);
 }
 
-static void io_req_tw_fail_links(struct io_kiocb *link, struct io_tw_state *ts)
+static void io_req_tw_fail_links(struct io_kiocb *link, io_tw_token_t tw)
 {
-	io_tw_lock(link->ctx, ts);
+	io_tw_lock(link->ctx, tw);
 	while (link) {
 		struct io_kiocb *nxt = link->link;
 		long res = -ECANCELED;
@@ -149,7 +168,7 @@ static void io_req_tw_fail_links(struct io_kiocb *link, struct io_tw_state *ts)
 			res = link->cqe.res;
 		link->link = NULL;
 		io_req_set_res(link, res, 0);
-		io_req_task_complete(link, ts);
+		io_req_task_complete(link, tw);
 		link = nxt;
 	}
 }
@@ -201,9 +220,11 @@ void io_disarm_next(struct io_kiocb *req)
 	} else if (req->flags & REQ_F_LINK_TIMEOUT) {
 		struct io_ring_ctx *ctx = req->ctx;
 
-		spin_lock_irq(&ctx->timeout_lock);
-		link = io_disarm_linked_timeout(req);
-		spin_unlock_irq(&ctx->timeout_lock);
+		raw_spin_lock_irq(&ctx->timeout_lock);
+		if (req->link && req->link->opcode == IORING_OP_LINK_TIMEOUT)
+			link = __io_disarm_linked_timeout(req, req->link);
+
+		raw_spin_unlock_irq(&ctx->timeout_lock);
 		if (link)
 			io_req_queue_tw_complete(link, -ECANCELED);
 	}
@@ -212,8 +233,8 @@ void io_disarm_next(struct io_kiocb *req)
 		io_fail_links(req);
 }
 
-struct io_kiocb *__io_disarm_linked_timeout(struct io_kiocb *req,
-					    struct io_kiocb *link)
+static struct io_kiocb *__io_disarm_linked_timeout(struct io_kiocb *req,
+						   struct io_kiocb *link)
 	__must_hold(&req->ctx->completion_lock)
 	__must_hold(&req->ctx->timeout_lock)
 {
@@ -239,11 +260,11 @@ static enum hrtimer_restart io_timeout_fn(struct hrtimer *timer)
 	struct io_ring_ctx *ctx = req->ctx;
 	unsigned long flags;
 
-	spin_lock_irqsave(&ctx->timeout_lock, flags);
+	raw_spin_lock_irqsave(&ctx->timeout_lock, flags);
 	list_del_init(&timeout->list);
 	atomic_set(&req->ctx->cq_timeouts,
 		atomic_read(&req->ctx->cq_timeouts) + 1);
-	spin_unlock_irqrestore(&ctx->timeout_lock, flags);
+	raw_spin_unlock_irqrestore(&ctx->timeout_lock, flags);
 
 	if (!(data->flags & IORING_TIMEOUT_ETIME_SUCCESS))
 		req_set_fail(req);
@@ -286,9 +307,9 @@ int io_timeout_cancel(struct io_ring_ctx *ctx, struct io_cancel_data *cd)
 {
 	struct io_kiocb *req;
 
-	spin_lock_irq(&ctx->timeout_lock);
+	raw_spin_lock_irq(&ctx->timeout_lock);
 	req = io_timeout_extract(ctx, cd);
-	spin_unlock_irq(&ctx->timeout_lock);
+	raw_spin_unlock_irq(&ctx->timeout_lock);
 
 	if (IS_ERR(req))
 		return PTR_ERR(req);
@@ -296,27 +317,29 @@ int io_timeout_cancel(struct io_ring_ctx *ctx, struct io_cancel_data *cd)
 	return 0;
 }
 
-static void io_req_task_link_timeout(struct io_kiocb *req, struct io_tw_state *ts)
+static void io_req_task_link_timeout(struct io_kiocb *req, io_tw_token_t tw)
 {
 	struct io_timeout *timeout = io_kiocb_to_cmd(req, struct io_timeout);
 	struct io_kiocb *prev = timeout->prev;
-	int ret = -ENOENT;
+	int ret;
 
 	if (prev) {
-		if (!(req->task->flags & PF_EXITING)) {
+		if (!io_should_terminate_tw(req->ctx)) {
 			struct io_cancel_data cd = {
 				.ctx		= req->ctx,
 				.data		= prev->cqe.user_data,
 			};
 
-			ret = io_try_cancel(req->task->io_uring, &cd, 0);
+			ret = io_try_cancel(req->tctx, &cd, 0);
+		} else {
+			ret = -ECANCELED;
 		}
 		io_req_set_res(req, ret ?: -ETIME, 0);
-		io_req_task_complete(req, ts);
+		io_req_task_complete(req, tw);
 		io_put_req(prev);
 	} else {
 		io_req_set_res(req, -ETIME, 0);
-		io_req_task_complete(req, ts);
+		io_req_task_complete(req, tw);
 	}
 }
 
@@ -329,7 +352,7 @@ static enum hrtimer_restart io_link_timeout_fn(struct hrtimer *timer)
 	struct io_ring_ctx *ctx = req->ctx;
 	unsigned long flags;
 
-	spin_lock_irqsave(&ctx->timeout_lock, flags);
+	raw_spin_lock_irqsave(&ctx->timeout_lock, flags);
 	prev = timeout->head;
 	timeout->head = NULL;
 
@@ -344,7 +367,7 @@ static enum hrtimer_restart io_link_timeout_fn(struct hrtimer *timer)
 	}
 	list_del(&timeout->list);
 	timeout->prev = prev;
-	spin_unlock_irqrestore(&ctx->timeout_lock, flags);
+	raw_spin_unlock_irqrestore(&ctx->timeout_lock, flags);
 
 	req->io_task_work.func = io_req_task_link_timeout;
 	io_req_task_work_add(req);
@@ -389,8 +412,7 @@ static int io_linked_timeout_update(struct io_ring_ctx *ctx, __u64 user_data,
 	io = req->async_data;
 	if (hrtimer_try_to_cancel(&io->timer) == -1)
 		return -EALREADY;
-	hrtimer_init(&io->timer, io_timeout_get_clock(io), mode);
-	io->timer.function = io_link_timeout_fn;
+	hrtimer_setup(&io->timer, io_link_timeout_fn, io_timeout_get_clock(io), mode);
 	hrtimer_start(&io->timer, timespec64_to_ktime(*ts), mode);
 	return 0;
 }
@@ -409,10 +431,11 @@ static int io_timeout_update(struct io_ring_ctx *ctx, __u64 user_data,
 
 	timeout->off = 0; /* noseq */
 	data = req->async_data;
+	data->ts = *ts;
+
 	list_add_tail(&timeout->list, &ctx->timeout_list);
-	hrtimer_init(&data->timer, io_timeout_get_clock(data), mode);
-	data->timer.function = io_timeout_fn;
-	hrtimer_start(&data->timer, timespec64_to_ktime(*ts), mode);
+	hrtimer_setup(&data->timer, io_timeout_fn, io_timeout_get_clock(data), mode);
+	hrtimer_start(&data->timer, timespec64_to_ktime(data->ts), mode);
 	return 0;
 }
 
@@ -471,18 +494,18 @@ int io_timeout_remove(struct io_kiocb *req, unsigned int issue_flags)
 	} else {
 		enum hrtimer_mode mode = io_translate_timeout_mode(tr->flags);
 
-		spin_lock_irq(&ctx->timeout_lock);
+		raw_spin_lock_irq(&ctx->timeout_lock);
 		if (tr->ltimeout)
 			ret = io_linked_timeout_update(ctx, tr->addr, &tr->ts, mode);
 		else
 			ret = io_timeout_update(ctx, tr->addr, &tr->ts, mode);
-		spin_unlock_irq(&ctx->timeout_lock);
+		raw_spin_unlock_irq(&ctx->timeout_lock);
 	}
 
 	if (ret < 0)
 		req_set_fail(req);
 	io_req_set_res(req, ret, 0);
-	return IOU_OK;
+	return IOU_COMPLETE;
 }
 
 static int __io_timeout_prep(struct io_kiocb *req,
@@ -524,10 +547,9 @@ static int __io_timeout_prep(struct io_kiocb *req,
 
 	if (WARN_ON_ONCE(req_has_async_data(req)))
 		return -EFAULT;
-	if (io_alloc_async_data(req))
+	data = io_uring_alloc_async_data(NULL, req);
+	if (!data)
 		return -ENOMEM;
-
-	data = req->async_data;
 	data->req = req;
 	data->flags = flags;
 
@@ -538,7 +560,6 @@ static int __io_timeout_prep(struct io_kiocb *req,
 		return -EINVAL;
 
 	data->mode = io_translate_timeout_mode(flags);
-	hrtimer_init(&data->timer, io_timeout_get_clock(data), data->mode);
 
 	if (is_timeout_link) {
 		struct io_submit_link *link = &req->ctx->submit_state.link;
@@ -549,6 +570,10 @@ static int __io_timeout_prep(struct io_kiocb *req,
 			return -EINVAL;
 		timeout->head = link->last;
 		link->last->flags |= REQ_F_ARM_LTIMEOUT;
+		hrtimer_setup(&data->timer, io_link_timeout_fn, io_timeout_get_clock(data),
+			      data->mode);
+	} else {
+		hrtimer_setup(&data->timer, io_timeout_fn, io_timeout_get_clock(data), data->mode);
 	}
 	return 0;
 }
@@ -571,7 +596,7 @@ int io_timeout(struct io_kiocb *req, unsigned int issue_flags)
 	struct list_head *entry;
 	u32 tail, off = timeout->off;
 
-	spin_lock_irq(&ctx->timeout_lock);
+	raw_spin_lock_irq(&ctx->timeout_lock);
 
 	/*
 	 * sqe->off holds how many events that need to occur for this
@@ -608,9 +633,8 @@ int io_timeout(struct io_kiocb *req, unsigned int issue_flags)
 	}
 add:
 	list_add(&timeout->list, entry);
-	data->timer.function = io_timeout_fn;
 	hrtimer_start(&data->timer, timespec64_to_ktime(data->ts), data->mode);
-	spin_unlock_irq(&ctx->timeout_lock);
+	raw_spin_unlock_irq(&ctx->timeout_lock);
 	return IOU_ISSUE_SKIP_COMPLETE;
 }
 
@@ -619,7 +643,7 @@ void io_queue_linked_timeout(struct io_kiocb *req)
 	struct io_timeout *timeout = io_kiocb_to_cmd(req, struct io_timeout);
 	struct io_ring_ctx *ctx = req->ctx;
 
-	spin_lock_irq(&ctx->timeout_lock);
+	raw_spin_lock_irq(&ctx->timeout_lock);
 	/*
 	 * If the back reference is NULL, then our linked request finished
 	 * before we got a chance to setup the timer
@@ -627,23 +651,22 @@ void io_queue_linked_timeout(struct io_kiocb *req)
 	if (timeout->head) {
 		struct io_timeout_data *data = req->async_data;
 
-		data->timer.function = io_link_timeout_fn;
 		hrtimer_start(&data->timer, timespec64_to_ktime(data->ts),
 				data->mode);
 		list_add_tail(&timeout->list, &ctx->ltimeout_list);
 	}
-	spin_unlock_irq(&ctx->timeout_lock);
+	raw_spin_unlock_irq(&ctx->timeout_lock);
 	/* drop submission reference */
 	io_put_req(req);
 }
 
-static bool io_match_task(struct io_kiocb *head, struct task_struct *task,
+static bool io_match_task(struct io_kiocb *head, struct io_uring_task *tctx,
 			  bool cancel_all)
 	__must_hold(&head->ctx->timeout_lock)
 {
 	struct io_kiocb *req;
 
-	if (task && head->task != task)
+	if (tctx && head->tctx != tctx)
 		return false;
 	if (cancel_all)
 		return true;
@@ -656,26 +679,26 @@ static bool io_match_task(struct io_kiocb *head, struct task_struct *task,
 }
 
 /* Returns true if we found and killed one or more timeouts */
-__cold bool io_kill_timeouts(struct io_ring_ctx *ctx, struct task_struct *tsk,
+__cold bool io_kill_timeouts(struct io_ring_ctx *ctx, struct io_uring_task *tctx,
 			     bool cancel_all)
 {
 	struct io_timeout *timeout, *tmp;
-	int canceled = 0;
+	LIST_HEAD(list);
 
 	/*
 	 * completion_lock is needed for io_match_task(). Take it before
 	 * timeout_lockfirst to keep locking ordering.
 	 */
 	spin_lock(&ctx->completion_lock);
-	spin_lock_irq(&ctx->timeout_lock);
+	raw_spin_lock_irq(&ctx->timeout_lock);
 	list_for_each_entry_safe(timeout, tmp, &ctx->timeout_list, list) {
 		struct io_kiocb *req = cmd_to_io_kiocb(timeout);
 
-		if (io_match_task(req, tsk, cancel_all) &&
-		    io_kill_timeout(req, -ECANCELED))
-			canceled++;
+		if (io_match_task(req, tctx, cancel_all))
+			io_kill_timeout(req, &list);
 	}
-	spin_unlock_irq(&ctx->timeout_lock);
+	raw_spin_unlock_irq(&ctx->timeout_lock);
 	spin_unlock(&ctx->completion_lock);
-	return canceled != 0;
+
+	return io_flush_killed_timeouts(&list, -ECANCELED);
 }

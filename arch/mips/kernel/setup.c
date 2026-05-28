@@ -458,7 +458,7 @@ static void __init mips_parse_crashkernel(void)
 	total_mem = memblock_phys_mem_size();
 	ret = parse_crashkernel(boot_command_line, total_mem,
 				&crash_size, &crash_base,
-				NULL, NULL);
+				NULL, NULL, NULL);
 	if (ret != 0 || crash_size <= 0)
 		return;
 
@@ -704,10 +704,7 @@ static void __init resource_init(void)
 	for_each_mem_range(i, &start, &end) {
 		struct resource *res;
 
-		res = memblock_alloc(sizeof(struct resource), SMP_CACHE_BYTES);
-		if (!res)
-			panic("%s: Failed to allocate %zu bytes\n", __func__,
-			      sizeof(struct resource));
+		res = memblock_alloc_or_panic(sizeof(struct resource), SMP_CACHE_BYTES);
 
 		res->start = start;
 		/*

@@ -26,7 +26,7 @@
 //!  * The [`WorkItemPointer`] trait is implemented for the pointer type that points at a something
 //!    that implements [`WorkItem`].
 //!
-//! ## Example
+//! ## Examples
 //!
 //! This example defines a struct that holds an integer and can be scheduled on the workqueue. When
 //! the struct is executed, it will print the integer. Since there is only one `work_struct` field,
@@ -60,7 +60,7 @@
 //!     type Pointer = Arc<MyStruct>;
 //!
 //!     fn run(this: Arc<MyStruct>) {
-//!         pr_info!("The value is: {}", this.value);
+//!         pr_info!("The value is: {}\n", this.value);
 //!     }
 //! }
 //!
@@ -69,6 +69,7 @@
 //! fn print_later(val: Arc<MyStruct>) {
 //!     let _ = workqueue::system().enqueue(val);
 //! }
+//! # print_later(MyStruct::new(42).unwrap());
 //! ```
 //!
 //! The following example shows how multiple `work_struct` fields can be used:
@@ -107,7 +108,7 @@
 //!     type Pointer = Arc<MyStruct>;
 //!
 //!     fn run(this: Arc<MyStruct>) {
-//!         pr_info!("The value is: {}", this.value_1);
+//!         pr_info!("The value is: {}\n", this.value_1);
 //!     }
 //! }
 //!
@@ -115,7 +116,7 @@
 //!     type Pointer = Arc<MyStruct>;
 //!
 //!     fn run(this: Arc<MyStruct>) {
-//!         pr_info!("The second value is: {}", this.value_2);
+//!         pr_info!("The second value is: {}\n", this.value_2);
 //!     }
 //! }
 //!
@@ -126,12 +127,73 @@
 //! fn print_2_later(val: Arc<MyStruct>) {
 //!     let _ = workqueue::system().enqueue::<Arc<MyStruct>, 2>(val);
 //! }
+//! # print_1_later(MyStruct::new(24, 25).unwrap());
+//! # print_2_later(MyStruct::new(41, 42).unwrap());
+//! ```
+//!
+//! This example shows how you can schedule delayed work items:
+//!
+//! ```
+//! use kernel::sync::Arc;
+//! use kernel::workqueue::{self, impl_has_delayed_work, new_delayed_work, DelayedWork, WorkItem};
+//!
+//! #[pin_data]
+//! struct MyStruct {
+//!     value: i32,
+//!     #[pin]
+//!     work: DelayedWork<MyStruct>,
+//! }
+//!
+//! impl_has_delayed_work! {
+//!     impl HasDelayedWork<Self> for MyStruct { self.work }
+//! }
+//!
+//! impl MyStruct {
+//!     fn new(value: i32) -> Result<Arc<Self>> {
+//!         Arc::pin_init(
+//!             pin_init!(MyStruct {
+//!                 value,
+//!                 work <- new_delayed_work!("MyStruct::work"),
+//!             }),
+//!             GFP_KERNEL,
+//!         )
+//!     }
+//! }
+//!
+//! impl WorkItem for MyStruct {
+//!     type Pointer = Arc<MyStruct>;
+//!
+//!     fn run(this: Arc<MyStruct>) {
+//!         pr_info!("The value is: {}\n", this.value);
+//!     }
+//! }
+//!
+//! /// This method will enqueue the struct for execution on the system workqueue, where its value
+//! /// will be printed 12 jiffies later.
+//! fn print_later(val: Arc<MyStruct>) {
+//!     let _ = workqueue::system().enqueue_delayed(val, 12);
+//! }
+//!
+//! /// It is also possible to use the ordinary `enqueue` method together with `DelayedWork`. This
+//! /// is equivalent to calling `enqueue_delayed` with a delay of zero.
+//! fn print_now(val: Arc<MyStruct>) {
+//!     let _ = workqueue::system().enqueue(val);
+//! }
+//! # print_later(MyStruct::new(42).unwrap());
+//! # print_now(MyStruct::new(42).unwrap());
 //! ```
 //!
 //! C header: [`include/linux/workqueue.h`](srctree/include/linux/workqueue.h)
 
-use crate::alloc::{AllocError, Flags};
-use crate::{prelude::*, sync::Arc, sync::LockClassKey, types::Opaque};
+use crate::{
+    alloc::{AllocError, Flags},
+    container_of,
+    prelude::*,
+    sync::Arc,
+    sync::LockClassKey,
+    time::Jiffies,
+    types::Opaque,
+};
 use core::marker::PhantomData;
 
 /// Creates a [`Work`] initialiser with the given name and a newly-created lock class.
@@ -142,6 +204,33 @@ macro_rules! new_work {
     };
 }
 pub use new_work;
+
+/// Creates a [`DelayedWork`] initialiser with the given name and a newly-created lock class.
+#[macro_export]
+macro_rules! new_delayed_work {
+    () => {
+        $crate::workqueue::DelayedWork::new(
+            $crate::optional_name!(),
+            $crate::static_lock_class!(),
+            $crate::c_str!(::core::concat!(
+                ::core::file!(),
+                ":",
+                ::core::line!(),
+                "_timer"
+            )),
+            $crate::static_lock_class!(),
+        )
+    };
+    ($name:literal) => {
+        $crate::workqueue::DelayedWork::new(
+            $crate::c_str!($name),
+            $crate::static_lock_class!(),
+            $crate::c_str!(::core::concat!($name, "_timer")),
+            $crate::static_lock_class!(),
+        )
+    };
+}
+pub use new_delayed_work;
 
 /// A kernel work queue.
 ///
@@ -167,7 +256,7 @@ impl Queue {
     pub unsafe fn from_raw<'a>(ptr: *const bindings::workqueue_struct) -> &'a Queue {
         // SAFETY: The `Queue` type is `#[repr(transparent)]`, so the pointer cast is valid. The
         // caller promises that the pointer is not dangling.
-        unsafe { &*(ptr as *const Queue) }
+        unsafe { &*ptr.cast::<Queue>() }
     }
 
     /// Enqueues a work item.
@@ -195,9 +284,45 @@ impl Queue {
         unsafe {
             w.__enqueue(move |work_ptr| {
                 bindings::queue_work_on(
-                    bindings::wq_misc_consts_WORK_CPU_UNBOUND as _,
+                    bindings::wq_misc_consts_WORK_CPU_UNBOUND as ffi::c_int,
                     queue_ptr,
                     work_ptr,
+                )
+            })
+        }
+    }
+
+    /// Enqueues a delayed work item.
+    ///
+    /// This may fail if the work item is already enqueued in a workqueue.
+    ///
+    /// The work item will be submitted using `WORK_CPU_UNBOUND`.
+    pub fn enqueue_delayed<W, const ID: u64>(&self, w: W, delay: Jiffies) -> W::EnqueueOutput
+    where
+        W: RawDelayedWorkItem<ID> + Send + 'static,
+    {
+        let queue_ptr = self.0.get();
+
+        // SAFETY: We only return `false` if the `work_struct` is already in a workqueue. The other
+        // `__enqueue` requirements are not relevant since `W` is `Send` and static.
+        //
+        // The call to `bindings::queue_delayed_work_on` will dereference the provided raw pointer,
+        // which is ok because `__enqueue` guarantees that the pointer is valid for the duration of
+        // this closure, and the safety requirements of `RawDelayedWorkItem` expands this
+        // requirement to apply to the entire `delayed_work`.
+        //
+        // Furthermore, if the C workqueue code accesses the pointer after this call to
+        // `__enqueue`, then the work item was successfully enqueued, and
+        // `bindings::queue_delayed_work_on` will have returned true. In this case, `__enqueue`
+        // promises that the raw pointer will stay valid until we call the function pointer in the
+        // `work_struct`, so the access is ok.
+        unsafe {
+            w.__enqueue(move |work_ptr| {
+                bindings::queue_delayed_work_on(
+                    bindings::wq_misc_consts_WORK_CPU_UNBOUND as ffi::c_int,
+                    queue_ptr,
+                    container_of!(work_ptr, bindings::delayed_work, work),
+                    delay,
                 )
             })
         }
@@ -216,7 +341,7 @@ impl Queue {
             func: Some(func),
         });
 
-        self.enqueue(Box::pin_init(init, flags).map_err(|_| AllocError)?);
+        self.enqueue(KBox::pin_init(init, flags).map_err(|_| AllocError)?);
         Ok(())
     }
 }
@@ -231,18 +356,11 @@ struct ClosureWork<T> {
     func: Option<T>,
 }
 
-impl<T> ClosureWork<T> {
-    fn project(self: Pin<&mut Self>) -> &mut Option<T> {
-        // SAFETY: The `func` field is not structurally pinned.
-        unsafe { &mut self.get_unchecked_mut().func }
-    }
-}
-
 impl<T: FnOnce()> WorkItem for ClosureWork<T> {
-    type Pointer = Pin<Box<Self>>;
+    type Pointer = Pin<KBox<Self>>;
 
-    fn run(mut this: Pin<Box<Self>>) {
-        if let Some(func) = this.as_mut().project().take() {
+    fn run(mut this: Pin<KBox<Self>>) {
+        if let Some(func) = this.as_mut().project().func.take() {
             (func)()
         }
     }
@@ -295,9 +413,19 @@ pub unsafe trait RawWorkItem<const ID: u64> {
         F: FnOnce(*mut bindings::work_struct) -> bool;
 }
 
+/// A raw delayed work item.
+///
+/// # Safety
+///
+/// If the `__enqueue` method in the `RawWorkItem` implementation calls the closure, then the
+/// provided pointer must point at the `work` field of a valid `delayed_work`, and the guarantees
+/// that `__enqueue` provides about accessing the `work_struct` must also apply to the rest of the
+/// `delayed_work` struct.
+pub unsafe trait RawDelayedWorkItem<const ID: u64>: RawWorkItem<ID> {}
+
 /// Defines the method that should be called directly when a work item is executed.
 ///
-/// This trait is implemented by `Pin<Box<T>>` and [`Arc<T>`], and is mainly intended to be
+/// This trait is implemented by `Pin<KBox<T>>` and [`Arc<T>`], and is mainly intended to be
 /// implemented for smart pointer types. For your own structs, you would implement [`WorkItem`]
 /// instead. The [`run`] method on this trait will usually just perform the appropriate
 /// `container_of` translation and then call into the [`run`][WorkItem::run] method from the
@@ -329,7 +457,7 @@ pub unsafe trait WorkItemPointer<const ID: u64>: RawWorkItem<ID> {
 /// This trait is used when the `work_struct` field is defined using the [`Work`] helper.
 pub trait WorkItem<const ID: u64 = 0> {
     /// The pointer type that this struct is wrapped in. This will typically be `Arc<Self>` or
-    /// `Pin<Box<Self>>`.
+    /// `Pin<KBox<Self>>`.
     type Pointer: WorkItemPointer<ID>;
 
     /// The method that should be called when this work item is executed.
@@ -366,8 +494,7 @@ unsafe impl<T: ?Sized, const ID: u64> Sync for Work<T, ID> {}
 impl<T: ?Sized, const ID: u64> Work<T, ID> {
     /// Creates a new instance of [`Work`].
     #[inline]
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new(name: &'static CStr, key: &'static LockClassKey) -> impl PinInit<Self>
+    pub fn new(name: &'static CStr, key: Pin<&'static LockClassKey>) -> impl PinInit<Self>
     where
         T: WorkItem<ID>,
     {
@@ -401,11 +528,11 @@ impl<T: ?Sized, const ID: u64> Work<T, ID> {
         //
         // A pointer cast would also be ok due to `#[repr(transparent)]`. We use `addr_of!` so that
         // the compiler does not complain that the `work` field is unused.
-        unsafe { Opaque::raw_get(core::ptr::addr_of!((*ptr).work)) }
+        unsafe { Opaque::cast_into(core::ptr::addr_of!((*ptr).work)) }
     }
 }
 
-/// Declares that a type has a [`Work<T, ID>`] field.
+/// Declares that a type contains a [`Work<T, ID>`].
 ///
 /// The intended way of using this trait is via the [`impl_has_work!`] macro. You can use the macro
 /// like this:
@@ -427,51 +554,28 @@ impl<T: ?Sized, const ID: u64> Work<T, ID> {
 ///
 /// # Safety
 ///
-/// The [`OFFSET`] constant must be the offset of a field in `Self` of type [`Work<T, ID>`]. The
-/// methods on this trait must have exactly the behavior that the definitions given below have.
+/// The methods [`raw_get_work`] and [`work_container_of`] must return valid pointers and must be
+/// true inverses of each other; that is, they must satisfy the following invariants:
+/// - `work_container_of(raw_get_work(ptr)) == ptr` for any `ptr: *mut Self`.
+/// - `raw_get_work(work_container_of(ptr)) == ptr` for any `ptr: *mut Work<T, ID>`.
 ///
 /// [`impl_has_work!`]: crate::impl_has_work
-/// [`OFFSET`]: HasWork::OFFSET
+/// [`raw_get_work`]: HasWork::raw_get_work
+/// [`work_container_of`]: HasWork::work_container_of
 pub unsafe trait HasWork<T, const ID: u64 = 0> {
-    /// The offset of the [`Work<T, ID>`] field.
-    const OFFSET: usize;
-
-    /// Returns the offset of the [`Work<T, ID>`] field.
-    ///
-    /// This method exists because the [`OFFSET`] constant cannot be accessed if the type is not
-    /// [`Sized`].
-    ///
-    /// [`OFFSET`]: HasWork::OFFSET
-    #[inline]
-    fn get_work_offset(&self) -> usize {
-        Self::OFFSET
-    }
-
     /// Returns a pointer to the [`Work<T, ID>`] field.
     ///
     /// # Safety
     ///
     /// The provided pointer must point at a valid struct of type `Self`.
-    #[inline]
-    unsafe fn raw_get_work(ptr: *mut Self) -> *mut Work<T, ID> {
-        // SAFETY: The caller promises that the pointer is valid.
-        unsafe { (ptr as *mut u8).add(Self::OFFSET) as *mut Work<T, ID> }
-    }
+    unsafe fn raw_get_work(ptr: *mut Self) -> *mut Work<T, ID>;
 
     /// Returns a pointer to the struct containing the [`Work<T, ID>`] field.
     ///
     /// # Safety
     ///
     /// The pointer must point at a [`Work<T, ID>`] field in a struct of type `Self`.
-    #[inline]
-    unsafe fn work_container_of(ptr: *mut Work<T, ID>) -> *mut Self
-    where
-        Self: Sized,
-    {
-        // SAFETY: The caller promises that the pointer points at a field of the right type in the
-        // right kind of struct.
-        unsafe { (ptr as *mut u8).sub(Self::OFFSET) as *mut Self }
-    }
+    unsafe fn work_container_of(ptr: *mut Work<T, ID>) -> *mut Self;
 }
 
 /// Used to safely implement the [`HasWork<T, ID>`] trait.
@@ -502,14 +606,21 @@ macro_rules! impl_has_work {
         // SAFETY: The implementation of `raw_get_work` only compiles if the field has the right
         // type.
         unsafe impl$(<$($generics)+>)? $crate::workqueue::HasWork<$work_type $(, $id)?> for $self {
-            const OFFSET: usize = ::core::mem::offset_of!(Self, $field) as usize;
-
             #[inline]
             unsafe fn raw_get_work(ptr: *mut Self) -> *mut $crate::workqueue::Work<$work_type $(, $id)?> {
                 // SAFETY: The caller promises that the pointer is not dangling.
                 unsafe {
                     ::core::ptr::addr_of_mut!((*ptr).$field)
                 }
+            }
+
+            #[inline]
+            unsafe fn work_container_of(
+                ptr: *mut $crate::workqueue::Work<$work_type $(, $id)?>,
+            ) -> *mut Self {
+                // SAFETY: The caller promises that the pointer points at a field of the right type
+                // in the right kind of struct.
+                unsafe { $crate::container_of!(ptr, Self, $field) }
             }
         }
     )*};
@@ -520,14 +631,195 @@ impl_has_work! {
     impl{T} HasWork<Self> for ClosureWork<T> { self.work }
 }
 
+/// Links for a delayed work item.
+///
+/// This struct contains a function pointer to the [`run`] function from the [`WorkItemPointer`]
+/// trait, and defines the linked list pointers necessary to enqueue a work item in a workqueue in
+/// a delayed manner.
+///
+/// Wraps the kernel's C `struct delayed_work`.
+///
+/// This is a helper type used to associate a `delayed_work` with the [`WorkItem`] that uses it.
+///
+/// [`run`]: WorkItemPointer::run
+#[pin_data]
+#[repr(transparent)]
+pub struct DelayedWork<T: ?Sized, const ID: u64 = 0> {
+    #[pin]
+    dwork: Opaque<bindings::delayed_work>,
+    _inner: PhantomData<T>,
+}
+
+// SAFETY: Kernel work items are usable from any thread.
+//
+// We do not need to constrain `T` since the work item does not actually contain a `T`.
+unsafe impl<T: ?Sized, const ID: u64> Send for DelayedWork<T, ID> {}
+// SAFETY: Kernel work items are usable from any thread.
+//
+// We do not need to constrain `T` since the work item does not actually contain a `T`.
+unsafe impl<T: ?Sized, const ID: u64> Sync for DelayedWork<T, ID> {}
+
+impl<T: ?Sized, const ID: u64> DelayedWork<T, ID> {
+    /// Creates a new instance of [`DelayedWork`].
+    #[inline]
+    pub fn new(
+        work_name: &'static CStr,
+        work_key: Pin<&'static LockClassKey>,
+        timer_name: &'static CStr,
+        timer_key: Pin<&'static LockClassKey>,
+    ) -> impl PinInit<Self>
+    where
+        T: WorkItem<ID>,
+    {
+        pin_init!(Self {
+            dwork <- Opaque::ffi_init(|slot: *mut bindings::delayed_work| {
+                // SAFETY: The `WorkItemPointer` implementation promises that `run` can be used as
+                // the work item function.
+                unsafe {
+                    bindings::init_work_with_key(
+                        core::ptr::addr_of_mut!((*slot).work),
+                        Some(T::Pointer::run),
+                        false,
+                        work_name.as_char_ptr(),
+                        work_key.as_ptr(),
+                    )
+                }
+
+                // SAFETY: The `delayed_work_timer_fn` function pointer can be used here because
+                // the timer is embedded in a `struct delayed_work`, and only ever scheduled via
+                // the core workqueue code, and configured to run in irqsafe context.
+                unsafe {
+                    bindings::timer_init_key(
+                        core::ptr::addr_of_mut!((*slot).timer),
+                        Some(bindings::delayed_work_timer_fn),
+                        bindings::TIMER_IRQSAFE,
+                        timer_name.as_char_ptr(),
+                        timer_key.as_ptr(),
+                    )
+                }
+            }),
+            _inner: PhantomData,
+        })
+    }
+
+    /// Get a pointer to the inner `delayed_work`.
+    ///
+    /// # Safety
+    ///
+    /// The provided pointer must not be dangling and must be properly aligned. (But the memory
+    /// need not be initialized.)
+    #[inline]
+    pub unsafe fn raw_as_work(ptr: *const Self) -> *mut Work<T, ID> {
+        // SAFETY: The caller promises that the pointer is aligned and not dangling.
+        let dw: *mut bindings::delayed_work =
+            unsafe { Opaque::cast_into(core::ptr::addr_of!((*ptr).dwork)) };
+        // SAFETY: The caller promises that the pointer is aligned and not dangling.
+        let wrk: *mut bindings::work_struct = unsafe { core::ptr::addr_of_mut!((*dw).work) };
+        // CAST: Work and work_struct have compatible layouts.
+        wrk.cast()
+    }
+}
+
+/// Declares that a type contains a [`DelayedWork<T, ID>`].
+///
+/// # Safety
+///
+/// The `HasWork<T, ID>` implementation must return a `work_struct` that is stored in the `work`
+/// field of a `delayed_work` with the same access rules as the `work_struct`.
+pub unsafe trait HasDelayedWork<T, const ID: u64 = 0>: HasWork<T, ID> {}
+
+/// Used to safely implement the [`HasDelayedWork<T, ID>`] trait.
+///
+/// This macro also implements the [`HasWork`] trait, so you do not need to use [`impl_has_work!`]
+/// when using this macro.
+///
+/// # Examples
+///
+/// ```
+/// use kernel::sync::Arc;
+/// use kernel::workqueue::{self, impl_has_delayed_work, DelayedWork};
+///
+/// struct MyStruct<'a, T, const N: usize> {
+///     work_field: DelayedWork<MyStruct<'a, T, N>, 17>,
+///     f: fn(&'a [T; N]),
+/// }
+///
+/// impl_has_delayed_work! {
+///     impl{'a, T, const N: usize} HasDelayedWork<MyStruct<'a, T, N>, 17>
+///     for MyStruct<'a, T, N> { self.work_field }
+/// }
+/// ```
+#[macro_export]
+macro_rules! impl_has_delayed_work {
+    ($(impl$({$($generics:tt)*})?
+       HasDelayedWork<$work_type:ty $(, $id:tt)?>
+       for $self:ty
+       { self.$field:ident }
+    )*) => {$(
+        // SAFETY: The implementation of `raw_get_work` only compiles if the field has the right
+        // type.
+        unsafe impl$(<$($generics)+>)?
+            $crate::workqueue::HasDelayedWork<$work_type $(, $id)?> for $self {}
+
+        // SAFETY: The implementation of `raw_get_work` only compiles if the field has the right
+        // type.
+        unsafe impl$(<$($generics)+>)? $crate::workqueue::HasWork<$work_type $(, $id)?> for $self {
+            #[inline]
+            unsafe fn raw_get_work(
+                ptr: *mut Self
+            ) -> *mut $crate::workqueue::Work<$work_type $(, $id)?> {
+                // SAFETY: The caller promises that the pointer is not dangling.
+                let ptr: *mut $crate::workqueue::DelayedWork<$work_type $(, $id)?> = unsafe {
+                    ::core::ptr::addr_of_mut!((*ptr).$field)
+                };
+
+                // SAFETY: The caller promises that the pointer is not dangling.
+                unsafe { $crate::workqueue::DelayedWork::raw_as_work(ptr) }
+            }
+
+            #[inline]
+            unsafe fn work_container_of(
+                ptr: *mut $crate::workqueue::Work<$work_type $(, $id)?>,
+            ) -> *mut Self {
+                // SAFETY: The caller promises that the pointer points at a field of the right type
+                // in the right kind of struct.
+                let ptr = unsafe { $crate::workqueue::Work::raw_get(ptr) };
+
+                // SAFETY: The caller promises that the pointer points at a field of the right type
+                // in the right kind of struct.
+                let delayed_work = unsafe {
+                    $crate::container_of!(ptr, $crate::bindings::delayed_work, work)
+                };
+
+                let delayed_work: *mut $crate::workqueue::DelayedWork<$work_type $(, $id)?> =
+                    delayed_work.cast();
+
+                // SAFETY: The caller promises that the pointer points at a field of the right type
+                // in the right kind of struct.
+                unsafe { $crate::container_of!(delayed_work, Self, $field) }
+            }
+        }
+    )*};
+}
+pub use impl_has_delayed_work;
+
+// SAFETY: The `__enqueue` implementation in RawWorkItem uses a `work_struct` initialized with the
+// `run` method of this trait as the function pointer because:
+//   - `__enqueue` gets the `work_struct` from the `Work` field, using `T::raw_get_work`.
+//   - The only safe way to create a `Work` object is through `Work::new`.
+//   - `Work::new` makes sure that `T::Pointer::run` is passed to `init_work_with_key`.
+//   - Finally `Work` and `RawWorkItem` guarantee that the correct `Work` field
+//     will be used because of the ID const generic bound. This makes sure that `T::raw_get_work`
+//     uses the correct offset for the `Work` field, and `Work::new` picks the correct
+//     implementation of `WorkItemPointer` for `Arc<T>`.
 unsafe impl<T, const ID: u64> WorkItemPointer<ID> for Arc<T>
 where
     T: WorkItem<ID, Pointer = Self>,
     T: HasWork<T, ID>,
 {
     unsafe extern "C" fn run(ptr: *mut bindings::work_struct) {
-        // SAFETY: The `__enqueue` method always uses a `work_struct` stored in a `Work<T, ID>`.
-        let ptr = ptr as *mut Work<T, ID>;
+        // The `__enqueue` method always uses a `work_struct` stored in a `Work<T, ID>`.
+        let ptr = ptr.cast::<Work<T, ID>>();
         // SAFETY: This computes the pointer that `__enqueue` got from `Arc::into_raw`.
         let ptr = unsafe { T::work_container_of(ptr) };
         // SAFETY: This pointer comes from `Arc::into_raw` and we've been given back ownership.
@@ -537,6 +829,13 @@ where
     }
 }
 
+// SAFETY: The `work_struct` raw pointer is guaranteed to be valid for the duration of the call to
+// the closure because we get it from an `Arc`, which means that the ref count will be at least 1,
+// and we don't drop the `Arc` ourselves. If `queue_work_on` returns true, it is further guaranteed
+// to be valid until a call to the function pointer in `work_struct` because we leak the memory it
+// points to, and only reclaim it if the closure returns false, or in `WorkItemPointer::run`, which
+// is what the function pointer in the `work_struct` must be pointing to, according to the safety
+// requirements of `WorkItemPointer`.
 unsafe impl<T, const ID: u64> RawWorkItem<ID> for Arc<T>
 where
     T: WorkItem<ID, Pointer = Self>,
@@ -565,18 +864,29 @@ where
     }
 }
 
-unsafe impl<T, const ID: u64> WorkItemPointer<ID> for Pin<Box<T>>
+// SAFETY: By the safety requirements of `HasDelayedWork`, the `work_struct` returned by methods in
+// `HasWork` provides a `work_struct` that is the `work` field of a `delayed_work`, and the rest of
+// the `delayed_work` has the same access rules as its `work` field.
+unsafe impl<T, const ID: u64> RawDelayedWorkItem<ID> for Arc<T>
+where
+    T: WorkItem<ID, Pointer = Self>,
+    T: HasDelayedWork<T, ID>,
+{
+}
+
+// SAFETY: TODO.
+unsafe impl<T, const ID: u64> WorkItemPointer<ID> for Pin<KBox<T>>
 where
     T: WorkItem<ID, Pointer = Self>,
     T: HasWork<T, ID>,
 {
     unsafe extern "C" fn run(ptr: *mut bindings::work_struct) {
-        // SAFETY: The `__enqueue` method always uses a `work_struct` stored in a `Work<T, ID>`.
-        let ptr = ptr as *mut Work<T, ID>;
+        // The `__enqueue` method always uses a `work_struct` stored in a `Work<T, ID>`.
+        let ptr = ptr.cast::<Work<T, ID>>();
         // SAFETY: This computes the pointer that `__enqueue` got from `Arc::into_raw`.
         let ptr = unsafe { T::work_container_of(ptr) };
         // SAFETY: This pointer comes from `Arc::into_raw` and we've been given back ownership.
-        let boxed = unsafe { Box::from_raw(ptr) };
+        let boxed = unsafe { KBox::from_raw(ptr) };
         // SAFETY: The box was already pinned when it was enqueued.
         let pinned = unsafe { Pin::new_unchecked(boxed) };
 
@@ -584,7 +894,8 @@ where
     }
 }
 
-unsafe impl<T, const ID: u64> RawWorkItem<ID> for Pin<Box<T>>
+// SAFETY: TODO.
+unsafe impl<T, const ID: u64> RawWorkItem<ID> for Pin<KBox<T>>
 where
     T: WorkItem<ID, Pointer = Self>,
     T: HasWork<T, ID>,
@@ -598,9 +909,9 @@ where
         // SAFETY: We're not going to move `self` or any of its fields, so its okay to temporarily
         // remove the `Pin` wrapper.
         let boxed = unsafe { Pin::into_inner_unchecked(self) };
-        let ptr = Box::into_raw(boxed);
+        let ptr = KBox::into_raw(boxed);
 
-        // SAFETY: Pointers into a `Box` point at a valid value.
+        // SAFETY: Pointers into a `KBox` point at a valid value.
         let work_ptr = unsafe { T::raw_get_work(ptr) };
         // SAFETY: `raw_get_work` returns a pointer to a valid value.
         let work_ptr = unsafe { Work::raw_get(work_ptr) };
@@ -611,6 +922,16 @@ where
             unsafe { ::core::hint::unreachable_unchecked() }
         }
     }
+}
+
+// SAFETY: By the safety requirements of `HasDelayedWork`, the `work_struct` returned by methods in
+// `HasWork` provides a `work_struct` that is the `work` field of a `delayed_work`, and the rest of
+// the `delayed_work` has the same access rules as its `work` field.
+unsafe impl<T, const ID: u64> RawDelayedWorkItem<ID> for Pin<KBox<T>>
+where
+    T: WorkItem<ID, Pointer = Self>,
+    T: HasDelayedWork<T, ID>,
+{
 }
 
 /// Returns the system work queue (`system_wq`).
@@ -682,4 +1003,22 @@ pub fn system_power_efficient() -> &'static Queue {
 pub fn system_freezable_power_efficient() -> &'static Queue {
     // SAFETY: `system_freezable_power_efficient_wq` is a C global, always available.
     unsafe { Queue::from_raw(bindings::system_freezable_power_efficient_wq) }
+}
+
+/// Returns the system bottom halves work queue (`system_bh_wq`).
+///
+/// It is similar to the one returned by [`system`] but for work items which
+/// need to run from a softirq context.
+pub fn system_bh() -> &'static Queue {
+    // SAFETY: `system_bh_wq` is a C global, always available.
+    unsafe { Queue::from_raw(bindings::system_bh_wq) }
+}
+
+/// Returns the system bottom halves high-priority work queue (`system_bh_highpri_wq`).
+///
+/// It is similar to the one returned by [`system_bh`] but for work items which
+/// require higher scheduling priority.
+pub fn system_bh_highpri() -> &'static Queue {
+    // SAFETY: `system_bh_highpri_wq` is a C global, always available.
+    unsafe { Queue::from_raw(bindings::system_bh_highpri_wq) }
 }

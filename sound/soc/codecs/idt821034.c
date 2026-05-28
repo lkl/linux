@@ -548,14 +548,14 @@ end:
 	return ret;
 }
 
-static const DECLARE_TLV_DB_LINEAR(idt821034_gain_in, -6520, 1306);
-#define IDT821034_GAIN_IN_MIN_RAW	1 /* -65.20 dB -> 10^(-65.2/20.0) * 1820 = 1 */
-#define IDT821034_GAIN_IN_MAX_RAW	8191 /* 13.06 dB -> 10^(13.06/20.0) * 1820 = 8191 */
+static const DECLARE_TLV_DB_LINEAR(idt821034_gain_in, -300, 1300);
+#define IDT821034_GAIN_IN_MIN_RAW	1288 /* -3.0 dB -> 10^(-3.0/20.0) * 1820 = 1288 */
+#define IDT821034_GAIN_IN_MAX_RAW	8130 /* 13.0 dB -> 10^(13.0/20.0) * 1820 = 8130 */
 #define IDT821034_GAIN_IN_INIT_RAW	1820 /* 0dB -> 10^(0/20) * 1820 = 1820 */
 
-static const DECLARE_TLV_DB_LINEAR(idt821034_gain_out, -6798, 1029);
-#define IDT821034_GAIN_OUT_MIN_RAW	1 /* -67.98 dB -> 10^(-67.98/20.0) * 2506 = 1*/
-#define IDT821034_GAIN_OUT_MAX_RAW	8191 /* 10.29 dB -> 10^(10.29/20.0) * 2506 = 8191 */
+static const DECLARE_TLV_DB_LINEAR(idt821034_gain_out, -1300, 300);
+#define IDT821034_GAIN_OUT_MIN_RAW	561 /* -13.0 dB -> 10^(-13.0/20.0) * 2506 = 561 */
+#define IDT821034_GAIN_OUT_MAX_RAW	3540 /* 3.0 dB -> 10^(3.0/20.0) * 2506 = 3540 */
 #define IDT821034_GAIN_OUT_INIT_RAW	2506 /* 0dB -> 10^(0/20) * 2506 = 2506 */
 
 static const struct snd_kcontrol_new idt821034_controls[] = {
@@ -957,7 +957,8 @@ static const struct snd_soc_component_driver idt821034_component_driver = {
 #define IDT821034_GPIO_OFFSET_TO_SLIC_CHANNEL(_offset) (((_offset) / 5) % 4)
 #define IDT821034_GPIO_OFFSET_TO_SLIC_MASK(_offset)    BIT((_offset) % 5)
 
-static void idt821034_chip_gpio_set(struct gpio_chip *c, unsigned int offset, int val)
+static int idt821034_chip_gpio_set(struct gpio_chip *c, unsigned int offset,
+				   int val)
 {
 	u8 ch = IDT821034_GPIO_OFFSET_TO_SLIC_CHANNEL(offset);
 	u8 mask = IDT821034_GPIO_OFFSET_TO_SLIC_MASK(offset);
@@ -973,12 +974,14 @@ static void idt821034_chip_gpio_set(struct gpio_chip *c, unsigned int offset, in
 	else
 		slic_raw &= ~mask;
 	ret = idt821034_write_slic_raw(idt821034, ch, slic_raw);
-	if (ret) {
-		dev_err(&idt821034->spi->dev, "set gpio %d (%u, 0x%x) failed (%d)\n",
-			offset, ch, mask, ret);
-	}
 
 	mutex_unlock(&idt821034->mutex);
+
+	if (ret)
+		dev_err(&idt821034->spi->dev, "set gpio %d (%u, 0x%x) failed (%d)\n",
+			offset, ch, mask, ret);
+
+	return ret;
 }
 
 static int idt821034_chip_gpio_get(struct gpio_chip *c, unsigned int offset)
@@ -1054,7 +1057,9 @@ static int idt821034_chip_direction_output(struct gpio_chip *c, unsigned int off
 	u8 slic_conf;
 	int ret;
 
-	idt821034_chip_gpio_set(c, offset, val);
+	ret = idt821034_chip_gpio_set(c, offset, val);
+	if (ret)
+		return ret;
 
 	mutex_lock(&idt821034->mutex);
 
@@ -1062,7 +1067,7 @@ static int idt821034_chip_direction_output(struct gpio_chip *c, unsigned int off
 
 	ret = idt821034_set_slic_conf(idt821034, ch, slic_conf);
 	if (ret) {
-		dev_err(&idt821034->spi->dev, "dir in gpio %d (%u, 0x%x) failed (%d)\n",
+		dev_err(&idt821034->spi->dev, "dir out gpio %d (%u, 0x%x) failed (%d)\n",
 			offset, ch, mask, ret);
 	}
 

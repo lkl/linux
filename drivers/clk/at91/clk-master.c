@@ -20,7 +20,7 @@
 
 #define PMC_MCR_CSS_SHIFT	(16)
 
-#define MASTER_MAX_ID		4
+#define MASTER_MAX_ID		9
 
 #define to_clk_master(hw) container_of(hw, struct clk_master, hw)
 
@@ -579,6 +579,9 @@ clk_sama7g5_master_recalc_rate(struct clk_hw *hw,
 			       unsigned long parent_rate)
 {
 	struct clk_master *master = to_clk_master(hw);
+
+	if (master->div == MASTER_PRES_MAX)
+		return DIV_ROUND_CLOSEST_ULL(parent_rate, 3);
 
 	return DIV_ROUND_CLOSEST_ULL(parent_rate, (1 << master->div));
 }

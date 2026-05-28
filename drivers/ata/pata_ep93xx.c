@@ -879,8 +879,8 @@ static const struct scsi_host_template ep93xx_pata_sht = {
 static struct ata_port_operations ep93xx_pata_port_ops = {
 	.inherits		= &ata_bmdma_port_ops,
 
-	.softreset		= ep93xx_pata_softreset,
-	.hardreset		= ATA_OP_NULL,
+	.reset.softreset	= ep93xx_pata_softreset,
+	.reset.hardreset	= ATA_OP_NULL,
 
 	.sff_dev_select		= ep93xx_pata_dev_select,
 	.sff_set_devctl		= ep93xx_pata_set_devctl,
@@ -1015,7 +1015,7 @@ static struct platform_driver ep93xx_pata_platform_driver = {
 		.of_match_table = ep93xx_pata_of_ids,
 	},
 	.probe = ep93xx_pata_probe,
-	.remove_new = ep93xx_pata_remove,
+	.remove = ep93xx_pata_remove,
 };
 
 module_platform_driver(ep93xx_pata_platform_driver);

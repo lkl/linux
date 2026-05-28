@@ -49,7 +49,7 @@ struct xfs_efi_log_item {
 	struct xfs_log_item	efi_item;
 	atomic_t		efi_refcount;
 	atomic_t		efi_next_extent;
-	xfs_efi_log_format_t	efi_format;
+	struct xfs_efi_log_format efi_format;
 };
 
 static inline size_t
@@ -69,7 +69,7 @@ struct xfs_efd_log_item {
 	struct xfs_log_item	efd_item;
 	struct xfs_efi_log_item *efd_efip;
 	uint			efd_next_extent;
-	xfs_efd_log_format_t	efd_format;
+	struct xfs_efd_log_format efd_format;
 };
 
 static inline size_t
@@ -93,5 +93,8 @@ struct xfs_extent_free_item;
 void xfs_extent_free_defer_add(struct xfs_trans *tp,
 		struct xfs_extent_free_item *xefi,
 		struct xfs_defer_pending **dfpp);
+
+unsigned int xfs_efi_log_space(unsigned int nr);
+unsigned int xfs_efd_log_space(unsigned int nr);
 
 #endif	/* __XFS_EXTFREE_ITEM_H__ */

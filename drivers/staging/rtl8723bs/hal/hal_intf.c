@@ -9,52 +9,33 @@
 
 void rtw_hal_chip_configure(struct adapter *padapter)
 {
-	if (padapter->HalFunc.intf_chip_configure)
-		padapter->HalFunc.intf_chip_configure(padapter);
+	rtl8723bs_interface_configure(padapter);
 }
 
 void rtw_hal_read_chip_info(struct adapter *padapter)
 {
-	if (padapter->HalFunc.read_adapter_info)
-		padapter->HalFunc.read_adapter_info(padapter);
+	ReadAdapterInfo8723BS(padapter);
 }
 
 void rtw_hal_read_chip_version(struct adapter *padapter)
 {
-	if (padapter->HalFunc.read_chip_version)
-		padapter->HalFunc.read_chip_version(padapter);
+	rtl8723b_read_chip_version(padapter);
 }
 
 void rtw_hal_def_value_init(struct adapter *padapter)
 {
-	if (is_primary_adapter(padapter))
-		if (padapter->HalFunc.init_default_value)
-			padapter->HalFunc.init_default_value(padapter);
+	rtl8723bs_init_default_value(padapter);
 }
 
 void rtw_hal_free_data(struct adapter *padapter)
 {
 	/* free HAL Data */
 	rtw_hal_data_deinit(padapter);
-
-	if (is_primary_adapter(padapter))
-		if (padapter->HalFunc.free_hal_data)
-			padapter->HalFunc.free_hal_data(padapter);
 }
 
 void rtw_hal_dm_init(struct adapter *padapter)
 {
-	if (is_primary_adapter(padapter))
-		if (padapter->HalFunc.dm_init)
-			padapter->HalFunc.dm_init(padapter);
-}
-
-void rtw_hal_dm_deinit(struct adapter *padapter)
-{
-	/*  cancel dm  timer */
-	if (is_primary_adapter(padapter))
-		if (padapter->HalFunc.dm_deinit)
-			padapter->HalFunc.dm_deinit(padapter);
+	rtl8723b_init_dm_priv(padapter);
 }
 
 static void rtw_hal_init_opmode(struct adapter *padapter)
@@ -82,7 +63,7 @@ uint rtw_hal_init(struct adapter *padapter)
 	uint status;
 	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
 
-	status = padapter->HalFunc.hal_init(padapter);
+	status = rtl8723bs_hal_init(padapter);
 
 	if (status == _SUCCESS) {
 		rtw_hal_init_opmode(padapter);
@@ -91,8 +72,6 @@ uint rtw_hal_init(struct adapter *padapter)
 
 		if (padapter->registrypriv.notch_filter == 1)
 			rtw_hal_notch_filter(padapter, 1);
-
-		rtw_hal_reset_security_engine(padapter);
 
 		rtw_sec_restore_wep_key(dvobj->padapters);
 
@@ -111,7 +90,7 @@ uint rtw_hal_deinit(struct adapter *padapter)
 	uint status = _SUCCESS;
 	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
 
-	status = padapter->HalFunc.hal_deinit(padapter);
+	status = rtl8723bs_hal_deinit(padapter);
 
 	if (status == _SUCCESS) {
 		padapter = dvobj->padapters;
@@ -123,78 +102,57 @@ uint rtw_hal_deinit(struct adapter *padapter)
 
 void rtw_hal_set_hwreg(struct adapter *padapter, u8 variable, u8 *val)
 {
-	if (padapter->HalFunc.SetHwRegHandler)
-		padapter->HalFunc.SetHwRegHandler(padapter, variable, val);
+	SetHwReg8723BS(padapter, variable, val);
 }
 
 void rtw_hal_get_hwreg(struct adapter *padapter, u8 variable, u8 *val)
 {
-	if (padapter->HalFunc.GetHwRegHandler)
-		padapter->HalFunc.GetHwRegHandler(padapter, variable, val);
+	GetHwReg8723BS(padapter, variable, val);
 }
 
 void rtw_hal_set_hwreg_with_buf(struct adapter *padapter, u8 variable, u8 *pbuf, int len)
 {
-	if (padapter->HalFunc.SetHwRegHandlerWithBuf)
-		padapter->HalFunc.SetHwRegHandlerWithBuf(padapter, variable, pbuf, len);
+	SetHwRegWithBuf8723B(padapter, variable, pbuf, len);
 }
 
 u8 rtw_hal_set_def_var(struct adapter *padapter, enum hal_def_variable eVariable, void *pValue)
 {
-	if (padapter->HalFunc.SetHalDefVarHandler)
-		return padapter->HalFunc.SetHalDefVarHandler(padapter, eVariable, pValue);
-	return _FAIL;
+	return SetHalDefVar8723BSDIO(padapter, eVariable, pValue);
 }
 
 u8 rtw_hal_get_def_var(struct adapter *padapter, enum hal_def_variable eVariable, void *pValue)
 {
-	if (padapter->HalFunc.GetHalDefVarHandler)
-		return padapter->HalFunc.GetHalDefVarHandler(padapter, eVariable, pValue);
-	return _FAIL;
+	return GetHalDefVar8723BSDIO(padapter, eVariable, pValue);
 }
 
 void rtw_hal_set_odm_var(struct adapter *padapter, enum hal_odm_variable eVariable, void *pValue1, bool bSet)
 {
-	if (padapter->HalFunc.SetHalODMVarHandler)
-		padapter->HalFunc.SetHalODMVarHandler(padapter, eVariable, pValue1, bSet);
+	SetHalODMVar(padapter, eVariable, pValue1, bSet);
 }
 
 void rtw_hal_enable_interrupt(struct adapter *padapter)
 {
-	if (padapter->HalFunc.enable_interrupt)
-		padapter->HalFunc.enable_interrupt(padapter);
+	EnableInterrupt8723BSdio(padapter);
 }
 
 void rtw_hal_disable_interrupt(struct adapter *padapter)
 {
-	if (padapter->HalFunc.disable_interrupt)
-		padapter->HalFunc.disable_interrupt(padapter);
+	DisableInterrupt8723BSdio(padapter);
 }
 
 u8 rtw_hal_check_ips_status(struct adapter *padapter)
 {
-	u8 val = false;
-
-	if (padapter->HalFunc.check_ips_status)
-		val = padapter->HalFunc.check_ips_status(padapter);
-
-	return val;
+	return CheckIPSStatus(padapter);
 }
 
 s32	rtw_hal_xmitframe_enqueue(struct adapter *padapter, struct xmit_frame *pxmitframe)
 {
-	if (padapter->HalFunc.hal_xmitframe_enqueue)
-		return padapter->HalFunc.hal_xmitframe_enqueue(padapter, pxmitframe);
-
-	return false;
+	return rtl8723bs_hal_xmitframe_enqueue(padapter, pxmitframe);
 }
 
 s32	rtw_hal_xmit(struct adapter *padapter, struct xmit_frame *pxmitframe)
 {
-	if (padapter->HalFunc.hal_xmit)
-		return padapter->HalFunc.hal_xmit(padapter, pxmitframe);
-
-	return false;
+	return rtl8723bs_hal_xmit(padapter, pxmitframe);
 }
 
 /*
@@ -202,8 +160,6 @@ s32	rtw_hal_xmit(struct adapter *padapter, struct xmit_frame *pxmitframe)
  */
 s32	rtw_hal_mgnt_xmit(struct adapter *padapter, struct xmit_frame *pmgntframe)
 {
-	s32 ret = _FAIL;
-
 	update_mgntframe_attrib_addr(padapter, pmgntframe);
 	/* pframe = (u8 *)(pmgntframe->buf_addr) + TXDESC_OFFSET; */
 	/* pwlanhdr = (struct rtw_ieee80211_hdr *)pframe; */
@@ -220,36 +176,27 @@ s32	rtw_hal_mgnt_xmit(struct adapter *padapter, struct xmit_frame *pmgntframe)
 		rtw_mgmt_xmitframe_coalesce(padapter, pmgntframe->pkt, pmgntframe);
 	}
 
-	if (padapter->HalFunc.mgnt_xmit)
-		ret = padapter->HalFunc.mgnt_xmit(padapter, pmgntframe);
-	return ret;
+	return rtl8723bs_mgnt_xmit(padapter, pmgntframe);
 }
 
 s32	rtw_hal_init_xmit_priv(struct adapter *padapter)
 {
-	if (padapter->HalFunc.init_xmit_priv)
-		return padapter->HalFunc.init_xmit_priv(padapter);
-	return _FAIL;
+	return rtl8723bs_init_xmit_priv(padapter);
 }
 
 void rtw_hal_free_xmit_priv(struct adapter *padapter)
 {
-	if (padapter->HalFunc.free_xmit_priv)
-		padapter->HalFunc.free_xmit_priv(padapter);
+	rtl8723bs_free_xmit_priv(padapter);
 }
 
 s32	rtw_hal_init_recv_priv(struct adapter *padapter)
 {
-	if (padapter->HalFunc.init_recv_priv)
-		return padapter->HalFunc.init_recv_priv(padapter);
-
-	return _FAIL;
+	return rtl8723bs_init_recv_priv(padapter);
 }
 
 void rtw_hal_free_recv_priv(struct adapter *padapter)
 {
-	if (padapter->HalFunc.free_recv_priv)
-		padapter->HalFunc.free_recv_priv(padapter);
+	rtl8723bs_free_recv_priv(padapter);
 }
 
 void rtw_hal_update_ra_mask(struct sta_info *psta, u8 rssi_level)
@@ -267,111 +214,81 @@ void rtw_hal_update_ra_mask(struct sta_info *psta, u8 rssi_level)
 	if (check_fwstate(pmlmepriv, WIFI_AP_STATE) == true)
 		add_RATid(padapter, psta, rssi_level);
 	else {
-		if (padapter->HalFunc.UpdateRAMaskHandler)
-			padapter->HalFunc.UpdateRAMaskHandler(padapter, psta->mac_id, rssi_level);
+		UpdateHalRAMask8723B(padapter, psta->mac_id, rssi_level);
 	}
 }
 
 void rtw_hal_add_ra_tid(struct adapter *padapter, u32 bitmap, u8 *arg, u8 rssi_level)
 {
-	if (padapter->HalFunc.Add_RateATid)
-		padapter->HalFunc.Add_RateATid(padapter, bitmap, arg, rssi_level);
+	rtl8723b_Add_RateATid(padapter, bitmap, arg, rssi_level);
 }
 
 /*Start specifical interface thread		*/
 void rtw_hal_start_thread(struct adapter *padapter)
 {
-	if (padapter->HalFunc.run_thread)
-		padapter->HalFunc.run_thread(padapter);
+	rtl8723b_start_thread(padapter);
 }
 /*Start specifical interface thread		*/
 void rtw_hal_stop_thread(struct adapter *padapter)
 {
-	if (padapter->HalFunc.cancel_thread)
-		padapter->HalFunc.cancel_thread(padapter);
+	rtl8723b_stop_thread(padapter);
 }
 
 u32 rtw_hal_read_bbreg(struct adapter *padapter, u32 RegAddr, u32 BitMask)
 {
-	u32 data = 0;
-
-	if (padapter->HalFunc.read_bbreg)
-		 data = padapter->HalFunc.read_bbreg(padapter, RegAddr, BitMask);
-	return data;
+	return PHY_QueryBBReg_8723B(padapter, RegAddr, BitMask);
 }
 void rtw_hal_write_bbreg(struct adapter *padapter, u32 RegAddr, u32 BitMask, u32 Data)
 {
-	if (padapter->HalFunc.write_bbreg)
-		padapter->HalFunc.write_bbreg(padapter, RegAddr, BitMask, Data);
+	PHY_SetBBReg_8723B(padapter, RegAddr, BitMask, Data);
 }
 
 u32 rtw_hal_read_rfreg(struct adapter *padapter, u32 eRFPath, u32 RegAddr, u32 BitMask)
 {
-	u32 data = 0;
-
-	if (padapter->HalFunc.read_rfreg)
-		data = padapter->HalFunc.read_rfreg(padapter, eRFPath, RegAddr, BitMask);
-	return data;
+	return PHY_QueryRFReg_8723B(padapter, eRFPath, RegAddr, BitMask);
 }
 void rtw_hal_write_rfreg(struct adapter *padapter, u32 eRFPath, u32 RegAddr, u32 BitMask, u32 Data)
 {
-	if (padapter->HalFunc.write_rfreg)
-		padapter->HalFunc.write_rfreg(padapter, eRFPath, RegAddr, BitMask, Data);
+	PHY_SetRFReg_8723B(padapter, eRFPath, RegAddr, BitMask, Data);
 }
 
 void rtw_hal_set_chan(struct adapter *padapter, u8 channel)
 {
-	if (padapter->HalFunc.set_channel_handler)
-		padapter->HalFunc.set_channel_handler(padapter, channel);
+	PHY_SwChnl8723B(padapter, channel);
 }
 
 void rtw_hal_set_chnl_bw(struct adapter *padapter, u8 channel,
 			 enum channel_width Bandwidth, u8 Offset40, u8 Offset80)
 {
-	if (padapter->HalFunc.set_chnl_bw_handler)
-		padapter->HalFunc.set_chnl_bw_handler(padapter, channel,
-						      Bandwidth, Offset40,
-						      Offset80);
+	PHY_SetSwChnlBWMode8723B(padapter, channel, Bandwidth, Offset40, Offset80);
 }
 
 void rtw_hal_dm_watchdog(struct adapter *padapter)
 {
-	if (padapter->HalFunc.hal_dm_watchdog)
-		padapter->HalFunc.hal_dm_watchdog(padapter);
+	rtl8723b_HalDmWatchDog(padapter);
 }
 
 void rtw_hal_dm_watchdog_in_lps(struct adapter *padapter)
 {
 	if (adapter_to_pwrctl(padapter)->fw_current_in_ps_mode) {
-		if (padapter->HalFunc.hal_dm_watchdog_in_lps)
-			padapter->HalFunc.hal_dm_watchdog_in_lps(padapter); /* this function caller is in interrupt context */
+		rtl8723b_HalDmWatchDog_in_LPS(padapter); /* this function caller is in interrupt context */
 	}
 }
 
 void beacon_timing_control(struct adapter *padapter)
 {
-	if (padapter->HalFunc.SetBeaconRelatedRegistersHandler)
-		padapter->HalFunc.SetBeaconRelatedRegistersHandler(padapter);
+	rtl8723b_SetBeaconRelatedRegisters(padapter);
 }
 
 
 s32 rtw_hal_xmit_thread_handler(struct adapter *padapter)
 {
-	if (padapter->HalFunc.xmit_thread_handler)
-		return padapter->HalFunc.xmit_thread_handler(padapter);
-	return _FAIL;
+	return rtl8723bs_xmit_buf_handler(padapter);
 }
 
 void rtw_hal_notch_filter(struct adapter *adapter, bool enable)
 {
-	if (adapter->HalFunc.hal_notch_filter)
-		adapter->HalFunc.hal_notch_filter(adapter, enable);
-}
-
-void rtw_hal_reset_security_engine(struct adapter *adapter)
-{
-	if (adapter->HalFunc.hal_reset_security_engine)
-		adapter->HalFunc.hal_reset_security_engine(adapter);
+	hal_notch_filter_8723b(adapter, enable);
 }
 
 bool rtw_hal_c2h_valid(struct adapter *adapter, u8 *buf)
@@ -381,16 +298,12 @@ bool rtw_hal_c2h_valid(struct adapter *adapter, u8 *buf)
 
 s32 rtw_hal_c2h_handler(struct adapter *adapter, u8 *c2h_evt)
 {
-	s32 ret = _FAIL;
-
-	if (adapter->HalFunc.c2h_handler)
-		ret = adapter->HalFunc.c2h_handler(adapter, c2h_evt);
-	return ret;
+	return c2h_handler_8723b(adapter, c2h_evt);
 }
 
 c2h_id_filter rtw_hal_c2h_id_filter_ccx(struct adapter *adapter)
 {
-	return adapter->HalFunc.c2h_id_filter_ccx;
+	return c2h_id_filter_ccx_8723b;
 }
 
 s32 rtw_hal_macid_sleep(struct adapter *padapter, u32 macid)
@@ -423,10 +336,5 @@ s32 rtw_hal_macid_wakeup(struct adapter *padapter, u32 macid)
 
 s32 rtw_hal_fill_h2c_cmd(struct adapter *padapter, u8 ElementID, u32 CmdLen, u8 *pCmdBuffer)
 {
-	s32 ret = _FAIL;
-
-	if (padapter->HalFunc.fill_h2c_cmd)
-		ret = padapter->HalFunc.fill_h2c_cmd(padapter, ElementID, CmdLen, pCmdBuffer);
-
-	return ret;
+	return FillH2CCmd8723B(padapter, ElementID, CmdLen, pCmdBuffer);
 }

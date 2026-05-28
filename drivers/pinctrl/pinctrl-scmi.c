@@ -253,7 +253,7 @@ static int pinctrl_scmi_map_pinconf_type(enum pin_config_param param,
 	case PIN_CONFIG_MODE_LOW_POWER:
 		*type = SCMI_PIN_LOW_POWER_MODE;
 		break;
-	case PIN_CONFIG_OUTPUT:
+	case PIN_CONFIG_LEVEL:
 		*type = SCMI_PIN_OUTPUT_VALUE;
 		break;
 	case PIN_CONFIG_OUTPUT_ENABLE:
@@ -507,6 +507,7 @@ static int pinctrl_scmi_get_pins(struct scmi_pinctrl *pmx,
 
 static const char * const scmi_pinctrl_blocklist[] = {
 	"fsl,imx95",
+	"fsl,imx94",
 	NULL
 };
 

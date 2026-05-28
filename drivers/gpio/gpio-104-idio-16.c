@@ -59,6 +59,7 @@ static const struct regmap_config idio_16_regmap_config = {
 	.reg_stride = 1,
 	.val_bits = 8,
 	.io_port = true,
+	.max_register = 0x5,
 	.wr_table = &idio_16_wr_table,
 	.rd_table = &idio_16_rd_table,
 	.volatile_table = &idio_16_rd_table,
@@ -126,4 +127,4 @@ module_isa_driver_with_irq(idio_16_driver, num_idio_16, num_irq);
 MODULE_AUTHOR("William Breathitt Gray <vilhelm.gray@gmail.com>");
 MODULE_DESCRIPTION("ACCES 104-IDIO-16 GPIO driver");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(GPIO_IDIO_16);
+MODULE_IMPORT_NS("GPIO_IDIO_16");

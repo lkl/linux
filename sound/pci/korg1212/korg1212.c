@@ -308,9 +308,6 @@ struct snd_korg1212 {
         spinlock_t    lock;
 	struct mutex open_mutex;
 
-	struct timer_list timer;	/* timer callback for checking ack of stop request */
-	int stop_pending_cnt;		/* counter for stop pending check */
-
         wait_queue_head_t wait;
 
         unsigned long iomem;
@@ -382,7 +379,7 @@ struct snd_korg1212 {
 	unsigned long totalerrorcnt; // Total Error Count
 
 	int dsp_is_loaded;
-	int dsp_stop_is_processed;
+	int dsp_stop_processing;
 
 };
 
@@ -565,66 +562,25 @@ static int snd_korg1212_Send1212Command(struct snd_korg1212 *korg1212,
 /* spinlock already held */
 static void snd_korg1212_SendStop(struct snd_korg1212 *korg1212)
 {
-	if (! korg1212->stop_pending_cnt) {
-		korg1212->sharedBufferPtr->cardCommand = 0xffffffff;
-		/* program the timer */
-		korg1212->stop_pending_cnt = HZ;
-		mod_timer(&korg1212->timer, jiffies + 1);
-	}
+	korg1212->dsp_stop_processing = 1;
+	korg1212->sharedBufferPtr->cardCommand = 0xffffffff;
 }
 
 static void snd_korg1212_SendStopAndWait(struct snd_korg1212 *korg1212)
 {
-	unsigned long flags;
-	spin_lock_irqsave(&korg1212->lock, flags);
-	korg1212->dsp_stop_is_processed = 0;
-	snd_korg1212_SendStop(korg1212);
-	spin_unlock_irqrestore(&korg1212->lock, flags);
-	wait_event_timeout(korg1212->wait, korg1212->dsp_stop_is_processed, (HZ * 3) / 2);
-}
-
-/* timer callback for checking the ack of stop request */
-static void snd_korg1212_timer_func(struct timer_list *t)
-{
-	struct snd_korg1212 *korg1212 = from_timer(korg1212, t, timer);
-	unsigned long flags;
-	
-	spin_lock_irqsave(&korg1212->lock, flags);
-	if (korg1212->sharedBufferPtr->cardCommand == 0) {
-		/* ack'ed */
-		korg1212->stop_pending_cnt = 0;
-		korg1212->dsp_stop_is_processed = 1;
-		wake_up(&korg1212->wait);
-		K1212_DEBUG_PRINTK_VERBOSE("K1212_DEBUG: Stop ack'ed [%s]\n",
-					   stateName[korg1212->cardState]);
-	} else {
-		if (--korg1212->stop_pending_cnt > 0) {
-			/* reprogram timer */
-			mod_timer(&korg1212->timer, jiffies + 1);
-		} else {
-			dev_dbg(korg1212->card->dev, "korg1212_timer_func timeout\n");
-			korg1212->sharedBufferPtr->cardCommand = 0;
-			korg1212->dsp_stop_is_processed = 1;
-			wake_up(&korg1212->wait);
-			K1212_DEBUG_PRINTK("K1212_DEBUG: Stop timeout [%s]\n",
-					   stateName[korg1212->cardState]);
-		}
+	scoped_guard(spinlock_irqsave, &korg1212->lock) {
+		snd_korg1212_SendStop(korg1212);
 	}
-	spin_unlock_irqrestore(&korg1212->lock, flags);
+	wait_event_timeout(korg1212->wait, !korg1212->dsp_stop_processing, HZ);
 }
 
 static int snd_korg1212_TurnOnIdleMonitor(struct snd_korg1212 *korg1212)
 {
-	unsigned long flags;
-	int rc;
-
         udelay(INTERCOMMAND_DELAY);
-	spin_lock_irqsave(&korg1212->lock, flags);
+	guard(spinlock_irqsave)(&korg1212->lock);
         korg1212->idleMonitorOn = 1;
-        rc = snd_korg1212_Send1212Command(korg1212, K1212_DB_SelectPlayMode,
-					  K1212_MODE_MonitorOn, 0, 0, 0);
-        spin_unlock_irqrestore(&korg1212->lock, flags);
-	return rc;
+	return snd_korg1212_Send1212Command(korg1212, K1212_DB_SelectPlayMode,
+					    K1212_MODE_MonitorOn, 0, 0, 0);
 }
 
 static void snd_korg1212_TurnOffIdleMonitor(struct snd_korg1212 *korg1212)
@@ -644,13 +600,12 @@ static int snd_korg1212_OpenCard(struct snd_korg1212 * korg1212)
 {
 	K1212_DEBUG_PRINTK("K1212_DEBUG: OpenCard [%s] %d\n",
 			   stateName[korg1212->cardState], korg1212->opencnt);
-	mutex_lock(&korg1212->open_mutex);
+	guard(mutex)(&korg1212->open_mutex);
         if (korg1212->opencnt++ == 0) {
 		snd_korg1212_TurnOffIdleMonitor(korg1212);
 		snd_korg1212_setCardState(korg1212, K1212_STATE_OPEN);
 	}
 
-	mutex_unlock(&korg1212->open_mutex);
         return 1;
 }
 
@@ -659,11 +614,9 @@ static int snd_korg1212_CloseCard(struct snd_korg1212 * korg1212)
 	K1212_DEBUG_PRINTK("K1212_DEBUG: CloseCard [%s] %d\n",
 			   stateName[korg1212->cardState], korg1212->opencnt);
 
-	mutex_lock(&korg1212->open_mutex);
-	if (--(korg1212->opencnt)) {
-		mutex_unlock(&korg1212->open_mutex);
+	guard(mutex)(&korg1212->open_mutex);
+	if (--(korg1212->opencnt))
 		return 0;
-	}
 
         if (korg1212->cardState == K1212_STATE_SETUP) {
                 int rc = snd_korg1212_Send1212Command(korg1212, K1212_DB_SelectPlayMode,
@@ -671,10 +624,8 @@ static int snd_korg1212_CloseCard(struct snd_korg1212 * korg1212)
 		if (rc)
 			K1212_DEBUG_PRINTK("K1212_DEBUG: CloseCard - RC = %d [%s]\n",
 					   rc, stateName[korg1212->cardState]);
-		if (rc != K1212_CMDRET_Success) {
-			mutex_unlock(&korg1212->open_mutex);
+		if (rc != K1212_CMDRET_Success)
                         return 0;
-		}
         } else if (korg1212->cardState > K1212_STATE_SETUP) {
 		snd_korg1212_SendStopAndWait(korg1212);
         }
@@ -684,7 +635,6 @@ static int snd_korg1212_CloseCard(struct snd_korg1212 * korg1212)
                 snd_korg1212_setCardState(korg1212, K1212_STATE_READY);
 	}
 
-	mutex_unlock(&korg1212->open_mutex);
         return 0;
 }
 
@@ -882,7 +832,6 @@ static int snd_korg1212_WriteADCSensitivity(struct snd_korg1212 *korg1212)
         u16       controlValue;    // this keeps the current value to be written to
                                    //  the card's eeprom control register.
         u16       count;
-	unsigned long flags;
 
 	K1212_DEBUG_PRINTK("K1212_DEBUG: WriteADCSensivity [%s]\n",
 			   stateName[korg1212->cardState]);
@@ -903,7 +852,7 @@ static int snd_korg1212_WriteADCSensitivity(struct snd_korg1212 *korg1212)
         } else
                 monModeSet = 0;
 
-	spin_lock_irqsave(&korg1212->lock, flags);
+	guard(spinlock_irqsave)(&korg1212->lock);
 
         // ----------------------------------------------------------------------------
         // we are about to send new values to the card, so clear the new values queued
@@ -1012,8 +961,6 @@ static int snd_korg1212_WriteADCSensitivity(struct snd_korg1212 *korg1212)
 					   rc, stateName[korg1212->cardState]);
         }
 
-	spin_unlock_irqrestore(&korg1212->lock, flags);
-
         return 1;
 }
 
@@ -1105,7 +1052,7 @@ static irqreturn_t snd_korg1212_interrupt(int irq, void *dev_id)
         if (!doorbellValue)
 		return IRQ_NONE;
 
-	spin_lock(&korg1212->lock);
+	guard(spinlock)(&korg1212->lock);
 
 	writel(doorbellValue, korg1212->inDoorbellPtr);
 
@@ -1135,7 +1082,9 @@ static irqreturn_t snd_korg1212_interrupt(int irq, void *dev_id)
 			korg1212->errorcnt++;
 			korg1212->totalerrorcnt++;
 			korg1212->sharedBufferPtr->cardCommand = 0;
+			korg1212->dsp_stop_processing = 0;
 			snd_korg1212_setCardState(korg1212, K1212_STATE_ERRORSTOP);
+			wake_up(&korg1212->wait);
                         break;
 
                 // ------------------------------------------------------------------------
@@ -1147,6 +1096,8 @@ static irqreturn_t snd_korg1212_interrupt(int irq, void *dev_id)
 						   korg1212->irqcount, doorbellValue,
 						   stateName[korg1212->cardState]);
 			korg1212->sharedBufferPtr->cardCommand = 0;
+			korg1212->dsp_stop_processing = 0;
+			wake_up(&korg1212->wait);
                         break;
 
                 default:
@@ -1178,8 +1129,6 @@ static irqreturn_t snd_korg1212_interrupt(int irq, void *dev_id)
         }
 
 	korg1212->inIRQ--;
-
-	spin_unlock(&korg1212->lock);
 
 	return IRQ_HANDLED;
 }
@@ -1366,7 +1315,6 @@ static void snd_korg1212_free_pcm(struct snd_pcm *pcm)
 
 static int snd_korg1212_playback_open(struct snd_pcm_substream *substream)
 {
-        unsigned long flags;
         struct snd_korg1212 *korg1212 = snd_pcm_substream_chip(substream);
         struct snd_pcm_runtime *runtime = substream->runtime;
 
@@ -1378,15 +1326,13 @@ static int snd_korg1212_playback_open(struct snd_pcm_substream *substream)
         runtime->hw = snd_korg1212_playback_info;
 	snd_pcm_set_runtime_buffer(substream, korg1212->dma_play);
 
-        spin_lock_irqsave(&korg1212->lock, flags);
-
-        korg1212->playback_substream = substream;
-	korg1212->playback_pid = current->pid;
-        korg1212->periodsize = K1212_PERIODS;
-	korg1212->channels = K1212_CHANNELS;
-	korg1212->errorcnt = 0;
-
-        spin_unlock_irqrestore(&korg1212->lock, flags);
+	scoped_guard(spinlock_irqsave, &korg1212->lock) {
+		korg1212->playback_substream = substream;
+		korg1212->playback_pid = current->pid;
+		korg1212->periodsize = K1212_PERIODS;
+		korg1212->channels = K1212_CHANNELS;
+		korg1212->errorcnt = 0;
+	}
 
 	snd_pcm_hw_constraint_single(runtime, SNDRV_PCM_HW_PARAM_PERIOD_SIZE,
 				     kPlayBufferFrames);
@@ -1397,7 +1343,6 @@ static int snd_korg1212_playback_open(struct snd_pcm_substream *substream)
 
 static int snd_korg1212_capture_open(struct snd_pcm_substream *substream)
 {
-        unsigned long flags;
         struct snd_korg1212 *korg1212 = snd_pcm_substream_chip(substream);
         struct snd_pcm_runtime *runtime = substream->runtime;
 
@@ -1409,14 +1354,12 @@ static int snd_korg1212_capture_open(struct snd_pcm_substream *substream)
         runtime->hw = snd_korg1212_capture_info;
 	snd_pcm_set_runtime_buffer(substream, korg1212->dma_rec);
 
-        spin_lock_irqsave(&korg1212->lock, flags);
-
-        korg1212->capture_substream = substream;
-	korg1212->capture_pid = current->pid;
-        korg1212->periodsize = K1212_PERIODS;
-	korg1212->channels = K1212_CHANNELS;
-
-        spin_unlock_irqrestore(&korg1212->lock, flags);
+	scoped_guard(spinlock_irqsave, &korg1212->lock) {
+		korg1212->capture_substream = substream;
+		korg1212->capture_pid = current->pid;
+		korg1212->periodsize = K1212_PERIODS;
+		korg1212->channels = K1212_CHANNELS;
+	}
 
 	snd_pcm_hw_constraint_single(runtime, SNDRV_PCM_HW_PARAM_PERIOD_SIZE,
 				     kPlayBufferFrames);
@@ -1425,7 +1368,6 @@ static int snd_korg1212_capture_open(struct snd_pcm_substream *substream)
 
 static int snd_korg1212_playback_close(struct snd_pcm_substream *substream)
 {
-        unsigned long flags;
         struct snd_korg1212 *korg1212 = snd_pcm_substream_chip(substream);
 
 	K1212_DEBUG_PRINTK("K1212_DEBUG: snd_korg1212_playback_close [%s]\n",
@@ -1433,13 +1375,11 @@ static int snd_korg1212_playback_close(struct snd_pcm_substream *substream)
 
 	snd_korg1212_silence(korg1212, 0, K1212_MAX_SAMPLES, 0, korg1212->channels * 2);
 
-        spin_lock_irqsave(&korg1212->lock, flags);
-
-	korg1212->playback_pid = -1;
-        korg1212->playback_substream = NULL;
-        korg1212->periodsize = 0;
-
-        spin_unlock_irqrestore(&korg1212->lock, flags);
+	scoped_guard(spinlock_irqsave, &korg1212->lock) {
+		korg1212->playback_pid = -1;
+		korg1212->playback_substream = NULL;
+		korg1212->periodsize = 0;
+	}
 
 	snd_korg1212_CloseCard(korg1212);
         return 0;
@@ -1447,19 +1387,16 @@ static int snd_korg1212_playback_close(struct snd_pcm_substream *substream)
 
 static int snd_korg1212_capture_close(struct snd_pcm_substream *substream)
 {
-        unsigned long flags;
         struct snd_korg1212 *korg1212 = snd_pcm_substream_chip(substream);
 
 	K1212_DEBUG_PRINTK("K1212_DEBUG: snd_korg1212_capture_close [%s]\n",
 			   stateName[korg1212->cardState]);
 
-        spin_lock_irqsave(&korg1212->lock, flags);
-
-	korg1212->capture_pid = -1;
-        korg1212->capture_substream = NULL;
-        korg1212->periodsize = 0;
-
-        spin_unlock_irqrestore(&korg1212->lock, flags);
+	scoped_guard(spinlock_irqsave, &korg1212->lock) {
+		korg1212->capture_pid = -1;
+		korg1212->capture_substream = NULL;
+		korg1212->periodsize = 0;
+	}
 
 	snd_korg1212_CloseCard(korg1212);
         return 0;
@@ -1485,7 +1422,6 @@ static int snd_korg1212_ioctl(struct snd_pcm_substream *substream,
 static int snd_korg1212_hw_params(struct snd_pcm_substream *substream,
                              struct snd_pcm_hw_params *params)
 {
-        unsigned long flags;
         struct snd_korg1212 *korg1212 = snd_pcm_substream_chip(substream);
         int err;
 	pid_t this_pid;
@@ -1494,7 +1430,7 @@ static int snd_korg1212_hw_params(struct snd_pcm_substream *substream,
 	K1212_DEBUG_PRINTK("K1212_DEBUG: snd_korg1212_hw_params [%s]\n",
 			   stateName[korg1212->cardState]);
 
-        spin_lock_irqsave(&korg1212->lock, flags);
+	guard(spinlock_irqsave)(&korg1212->lock);
 
 	if (substream->pstr->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		this_pid = korg1212->playback_pid;
@@ -1512,27 +1448,29 @@ static int snd_korg1212_hw_params(struct snd_pcm_substream *substream,
 		 */
 
 		if ((int)params_rate(params) != korg1212->clkRate) {
-			spin_unlock_irqrestore(&korg1212->lock, flags);
 			_snd_pcm_hw_param_setempty(params, SNDRV_PCM_HW_PARAM_RATE);
 			return -EBUSY;
 		}
 
-        	spin_unlock_irqrestore(&korg1212->lock, flags);
 	        return 0;
 	}
 
 	err = snd_korg1212_SetRate(korg1212, params_rate(params));
-	if (err < 0) {
-                spin_unlock_irqrestore(&korg1212->lock, flags);
+	if (err < 0)
                 return err;
-        }
 
 	korg1212->channels = params_channels(params);
         korg1212->periodsize = K1212_PERIOD_BYTES;
 
-        spin_unlock_irqrestore(&korg1212->lock, flags);
-
         return 0;
+}
+
+static int snd_korg1212_sync_stop(struct snd_pcm_substream *substream)
+{
+	struct snd_korg1212 *korg1212 = snd_pcm_substream_chip(substream);
+
+	wait_event_timeout(korg1212->wait, !korg1212->dsp_stop_processing, HZ);
+	return 0;
 }
 
 static int snd_korg1212_prepare(struct snd_pcm_substream *substream)
@@ -1543,26 +1481,12 @@ static int snd_korg1212_prepare(struct snd_pcm_substream *substream)
 	K1212_DEBUG_PRINTK("K1212_DEBUG: snd_korg1212_prepare [%s]\n",
 			   stateName[korg1212->cardState]);
 
-	spin_lock_irq(&korg1212->lock);
-
-	/* FIXME: we should wait for ack! */
-	if (korg1212->stop_pending_cnt > 0) {
-		K1212_DEBUG_PRINTK("K1212_DEBUG: snd_korg1212_prepare - Stop is pending... [%s]\n",
-				   stateName[korg1212->cardState]);
-        	spin_unlock_irq(&korg1212->lock);
-		return -EAGAIN;
-		/*
-		korg1212->sharedBufferPtr->cardCommand = 0;
-		del_timer(&korg1212->timer);
-		korg1212->stop_pending_cnt = 0;
-		*/
-	}
+	guard(spinlock_irq)(&korg1212->lock);
+	korg1212->dsp_stop_processing = 0;
 
         rc = snd_korg1212_SetupForPlay(korg1212);
 
         korg1212->currentBuffer = 0;
-
-        spin_unlock_irq(&korg1212->lock);
 
 	return rc ? -EINVAL : 0;
 }
@@ -1576,7 +1500,7 @@ static int snd_korg1212_trigger(struct snd_pcm_substream *substream,
 	K1212_DEBUG_PRINTK("K1212_DEBUG: snd_korg1212_trigger [%s] cmd=%d\n",
 			   stateName[korg1212->cardState], cmd);
 
-	spin_lock(&korg1212->lock);
+	guard(spinlock)(&korg1212->lock);
         switch (cmd) {
                 case SNDRV_PCM_TRIGGER_START:
 /*
@@ -1604,7 +1528,6 @@ static int snd_korg1212_trigger(struct snd_pcm_substream *substream,
 			rc = 1;
 			break;
         }
-	spin_unlock(&korg1212->lock);
         return rc ? -EINVAL : 0;
 }
 
@@ -1668,6 +1591,7 @@ static const struct snd_pcm_ops snd_korg1212_playback_ops = {
         .hw_params =	snd_korg1212_hw_params,
         .prepare =	snd_korg1212_prepare,
         .trigger =	snd_korg1212_trigger,
+	.sync_stop =	snd_korg1212_sync_stop,
         .pointer =	snd_korg1212_playback_pointer,
 	.copy =		snd_korg1212_playback_copy,
 	.fill_silence =	snd_korg1212_playback_silence,
@@ -1680,6 +1604,7 @@ static const struct snd_pcm_ops snd_korg1212_capture_ops = {
 	.hw_params =	snd_korg1212_hw_params,
 	.prepare =	snd_korg1212_prepare,
 	.trigger =	snd_korg1212_trigger,
+	.sync_stop =	snd_korg1212_sync_stop,
 	.pointer =	snd_korg1212_capture_pointer,
 	.copy =		snd_korg1212_capture_copy,
 };
@@ -1702,14 +1627,12 @@ static int snd_korg1212_control_phase_get(struct snd_kcontrol *kcontrol,
 	struct snd_korg1212 *korg1212 = snd_kcontrol_chip(kcontrol);
 	int i = kcontrol->private_value;
 
-	spin_lock_irq(&korg1212->lock);
+	guard(spinlock_irq)(&korg1212->lock);
 
         u->value.integer.value[0] = korg1212->volumePhase[i];
 
 	if (i >= 8)
         	u->value.integer.value[1] = korg1212->volumePhase[i+1];
-
-	spin_unlock_irq(&korg1212->lock);
 
         return 0;
 }
@@ -1721,7 +1644,7 @@ static int snd_korg1212_control_phase_put(struct snd_kcontrol *kcontrol,
         int change = 0;
         int i, val;
 
-	spin_lock_irq(&korg1212->lock);
+	guard(spinlock_irq)(&korg1212->lock);
 
 	i = kcontrol->private_value;
 
@@ -1747,8 +1670,6 @@ static int snd_korg1212_control_phase_put(struct snd_kcontrol *kcontrol,
 		}
 	}
 
-	spin_unlock_irq(&korg1212->lock);
-
         return change;
 }
 
@@ -1768,15 +1689,13 @@ static int snd_korg1212_control_volume_get(struct snd_kcontrol *kcontrol,
 	struct snd_korg1212 *korg1212 = snd_kcontrol_chip(kcontrol);
         int i;
 
-	spin_lock_irq(&korg1212->lock);
+	guard(spinlock_irq)(&korg1212->lock);
 
 	i = kcontrol->private_value;
         u->value.integer.value[0] = abs(korg1212->sharedBufferPtr->volumeData[i]);
 
 	if (i >= 8) 
                 u->value.integer.value[1] = abs(korg1212->sharedBufferPtr->volumeData[i+1]);
-
-        spin_unlock_irq(&korg1212->lock);
 
         return 0;
 }
@@ -1789,7 +1708,7 @@ static int snd_korg1212_control_volume_put(struct snd_kcontrol *kcontrol,
         int i;
 	int val;
 
-	spin_lock_irq(&korg1212->lock);
+	guard(spinlock_irq)(&korg1212->lock);
 
 	i = kcontrol->private_value;
 
@@ -1815,8 +1734,6 @@ static int snd_korg1212_control_volume_put(struct snd_kcontrol *kcontrol,
 		}
 	}
 
-	spin_unlock_irq(&korg1212->lock);
-
         return change;
 }
 
@@ -1834,15 +1751,13 @@ static int snd_korg1212_control_route_get(struct snd_kcontrol *kcontrol,
 	struct snd_korg1212 *korg1212 = snd_kcontrol_chip(kcontrol);
         int i;
 
-	spin_lock_irq(&korg1212->lock);
+	guard(spinlock_irq)(&korg1212->lock);
 
 	i = kcontrol->private_value;
 	u->value.enumerated.item[0] = korg1212->sharedBufferPtr->routeData[i];
 
 	if (i >= 8) 
 		u->value.enumerated.item[1] = korg1212->sharedBufferPtr->routeData[i+1];
-
-        spin_unlock_irq(&korg1212->lock);
 
         return 0;
 }
@@ -1853,7 +1768,7 @@ static int snd_korg1212_control_route_put(struct snd_kcontrol *kcontrol,
 	struct snd_korg1212 *korg1212 = snd_kcontrol_chip(kcontrol);
         int change = 0, i;
 
-	spin_lock_irq(&korg1212->lock);
+	guard(spinlock_irq)(&korg1212->lock);
 
 	i = kcontrol->private_value;
 
@@ -1873,8 +1788,6 @@ static int snd_korg1212_control_route_put(struct snd_kcontrol *kcontrol,
 		}
 	}
 
-	spin_unlock_irq(&korg1212->lock);
-
         return change;
 }
 
@@ -1893,12 +1806,10 @@ static int snd_korg1212_control_get(struct snd_kcontrol *kcontrol,
 {
 	struct snd_korg1212 *korg1212 = snd_kcontrol_chip(kcontrol);
 
-	spin_lock_irq(&korg1212->lock);
+	guard(spinlock_irq)(&korg1212->lock);
 
         u->value.integer.value[0] = korg1212->leftADCInSens;
         u->value.integer.value[1] = korg1212->rightADCInSens;
-
-	spin_unlock_irq(&korg1212->lock);
 
         return 0;
 }
@@ -1909,22 +1820,20 @@ static int snd_korg1212_control_put(struct snd_kcontrol *kcontrol,
 	struct snd_korg1212 *korg1212 = snd_kcontrol_chip(kcontrol);
         int change = 0;
 
-	spin_lock_irq(&korg1212->lock);
-
-	if (u->value.integer.value[0] >= k1212MinADCSens &&
-	    u->value.integer.value[0] <= k1212MaxADCSens &&
-	    u->value.integer.value[0] != korg1212->leftADCInSens) {
-                korg1212->leftADCInSens = u->value.integer.value[0];
-                change = 1;
-        }
-	if (u->value.integer.value[1] >= k1212MinADCSens &&
-	    u->value.integer.value[1] <= k1212MaxADCSens &&
-	    u->value.integer.value[1] != korg1212->rightADCInSens) {
-                korg1212->rightADCInSens = u->value.integer.value[1];
-                change = 1;
-        }
-
-	spin_unlock_irq(&korg1212->lock);
+	scoped_guard(spinlock_irq, &korg1212->lock) {
+		if (u->value.integer.value[0] >= k1212MinADCSens &&
+		    u->value.integer.value[0] <= k1212MaxADCSens &&
+		    u->value.integer.value[0] != korg1212->leftADCInSens) {
+			korg1212->leftADCInSens = u->value.integer.value[0];
+			change = 1;
+		}
+		if (u->value.integer.value[1] >= k1212MinADCSens &&
+		    u->value.integer.value[1] <= k1212MaxADCSens &&
+		    u->value.integer.value[1] != korg1212->rightADCInSens) {
+			korg1212->rightADCInSens = u->value.integer.value[1];
+			change = 1;
+		}
+	}
 
         if (change)
                 snd_korg1212_WriteADCSensitivity(korg1212);
@@ -1943,11 +1852,9 @@ static int snd_korg1212_control_sync_get(struct snd_kcontrol *kcontrol,
 {
 	struct snd_korg1212 *korg1212 = snd_kcontrol_chip(kcontrol);
 
-	spin_lock_irq(&korg1212->lock);
+	guard(spinlock_irq)(&korg1212->lock);
 
 	ucontrol->value.enumerated.item[0] = korg1212->clkSource;
-
-	spin_unlock_irq(&korg1212->lock);
 	return 0;
 }
 
@@ -1959,10 +1866,9 @@ static int snd_korg1212_control_sync_put(struct snd_kcontrol *kcontrol,
 	int change;
 
 	val = ucontrol->value.enumerated.item[0] % 3;
-	spin_lock_irq(&korg1212->lock);
+	guard(spinlock_irq)(&korg1212->lock);
 	change = val != korg1212->clkSource;
         snd_korg1212_SetClockSource(korg1212, val);
-	spin_unlock_irq(&korg1212->lock);
 	return change;
 }
 
@@ -2086,7 +1992,6 @@ static int snd_korg1212_create(struct snd_card *card, struct pci_dev *pci)
         init_waitqueue_head(&korg1212->wait);
         spin_lock_init(&korg1212->lock);
 	mutex_init(&korg1212->open_mutex);
-	timer_setup(&korg1212->timer, snd_korg1212_timer_func, 0);
 
         korg1212->irq = -1;
         korg1212->clkSource = K1212_CLKIDX_Local;
@@ -2108,7 +2013,7 @@ static int snd_korg1212_create(struct snd_card *card, struct pci_dev *pci)
         for (i=0; i<kAudioChannels; i++)
                 korg1212->volumePhase[i] = 0;
 
-	err = pcim_iomap_regions_request_all(pci, 1 << 0, "korg1212");
+	err = pcim_request_all_regions(pci, "korg1212");
 	if (err < 0)
 		return err;
 
@@ -2130,7 +2035,9 @@ static int snd_korg1212_create(struct snd_card *card, struct pci_dev *pci)
 		   korg1212->iomem2, iomem2_size,
 		   stateName[korg1212->cardState]);
 
-	korg1212->iobase = pcim_iomap_table(pci)[0];
+	korg1212->iobase = pcim_iomap(pci, 0, 0);
+	if (!korg1212->iobase)
+		return -ENOMEM;
 
 	err = devm_request_irq(&pci->dev, pci->irq, snd_korg1212_interrupt,
                           IRQF_SHARED,
@@ -2284,7 +2191,7 @@ static int snd_korg1212_create(struct snd_card *card, struct pci_dev *pci)
 
 	korg1212->pcm->private_data = korg1212;
         korg1212->pcm->private_free = snd_korg1212_free_pcm;
-        strcpy(korg1212->pcm->name, "korg1212");
+        strscpy(korg1212->pcm->name, "korg1212");
 
         snd_pcm_set_ops(korg1212->pcm, SNDRV_PCM_STREAM_PLAYBACK, &snd_korg1212_playback_ops);
         
@@ -2333,8 +2240,8 @@ snd_korg1212_probe(struct pci_dev *pci,
 	if (err < 0)
 		goto error;
 
-	strcpy(card->driver, "korg1212");
-	strcpy(card->shortname, "korg1212");
+	strscpy(card->driver, "korg1212");
+	strscpy(card->shortname, "korg1212");
 	sprintf(card->longname, "%s at 0x%lx, irq %d", card->shortname,
 		korg1212->iomem, korg1212->irq);
 

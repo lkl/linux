@@ -607,7 +607,6 @@ static int ab8500_gpadc_read(struct ab8500_gpadc *gpadc,
 	}
 
 	/* This eventually drops the regulator */
-	pm_runtime_mark_last_busy(gpadc->dev);
 	pm_runtime_put_autosuspend(gpadc->dev);
 
 	return (high_data << 8) | low_data;
@@ -1194,7 +1193,7 @@ static DEFINE_RUNTIME_DEV_PM_OPS(ab8500_gpadc_pm_ops,
 
 static struct platform_driver ab8500_gpadc_driver = {
 	.probe = ab8500_gpadc_probe,
-	.remove_new = ab8500_gpadc_remove,
+	.remove = ab8500_gpadc_remove,
 	.driver = {
 		.name = "ab8500-gpadc",
 		.pm = pm_ptr(&ab8500_gpadc_pm_ops),

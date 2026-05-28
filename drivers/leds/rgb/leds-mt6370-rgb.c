@@ -199,17 +199,17 @@ static const struct reg_field mt6372_reg_fields[F_MAX_FIELDS] = {
 
 /* Current unit: microamp, time unit: millisecond */
 static const struct linear_range common_led_ranges[R_MAX_RANGES] = {
-	[R_LED123_CURR]	= { 4000, 1, 6, 4000 },
-	[R_LED4_CURR]	= { 2000, 1, 3, 2000 },
-	[R_LED_TRFON]	= { 125, 0, 15, 200 },
-	[R_LED_TOFF]	= { 250, 0, 15, 400 },
+	[R_LED123_CURR]	= LINEAR_RANGE(4000, 1, 6, 4000),
+	[R_LED4_CURR]	= LINEAR_RANGE(2000, 1, 3, 2000),
+	[R_LED_TRFON]	= LINEAR_RANGE(125, 0, 15, 200),
+	[R_LED_TOFF]	= LINEAR_RANGE(250, 0, 15, 400),
 };
 
 static const struct linear_range mt6372_led_ranges[R_MAX_RANGES] = {
-	[R_LED123_CURR]	= { 2000, 1, 14, 2000 },
-	[R_LED4_CURR]	= { 2000, 1, 14, 2000 },
-	[R_LED_TRFON]	= { 125, 0, 15, 250 },
-	[R_LED_TOFF]	= { 250, 0, 15, 500 },
+	[R_LED123_CURR]	= LINEAR_RANGE(2000, 1, 14, 2000),
+	[R_LED4_CURR]	= LINEAR_RANGE(2000, 1, 14, 2000),
+	[R_LED_TRFON]	= LINEAR_RANGE(125, 0, 15, 250),
+	[R_LED_TOFF]	= LINEAR_RANGE(250, 0, 15, 500),
 };
 
 static const unsigned int common_tfreqs[] = {
@@ -587,7 +587,7 @@ static inline int mt6370_mc_pattern_clear(struct led_classdev *lcdev)
 	struct mt6370_led *led = container_of(mccdev, struct mt6370_led, mc);
 	struct mt6370_priv *priv = led->priv;
 	struct mc_subled *subled;
-	int i, ret;
+	int i, ret = 0;
 
 	mutex_lock(&led->priv->lock);
 
@@ -905,7 +905,6 @@ static int mt6370_leds_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct mt6370_priv *priv;
-	struct fwnode_handle *child;
 	size_t count;
 	unsigned int i = 0;
 	int ret;
@@ -936,37 +935,27 @@ static int mt6370_leds_probe(struct platform_device *pdev)
 	if (ret)
 		return dev_err_probe(dev, ret, "Failed to allocate regmap field\n");
 
-	device_for_each_child_node(dev, child) {
+	device_for_each_child_node_scoped(dev, child) {
 		struct mt6370_led *led = priv->leds + i++;
 		struct led_init_data init_data = { .fwnode = child };
 		u32 reg, color;
 
 		ret = fwnode_property_read_u32(child, "reg", &reg);
-		if (ret) {
-			dev_err(dev, "Failed to parse reg property\n");
-			goto fwnode_release;
-		}
+		if (ret)
+			dev_err_probe(dev, ret, "Failed to parse reg property\n");
 
-		if (reg >= MT6370_MAX_LEDS) {
-			ret = -EINVAL;
-			dev_err(dev, "Error reg property number\n");
-			goto fwnode_release;
-		}
+		if (reg >= MT6370_MAX_LEDS)
+			return dev_err_probe(dev, -EINVAL, "Error reg property number\n");
 
 		ret = fwnode_property_read_u32(child, "color", &color);
-		if (ret) {
-			dev_err(dev, "Failed to parse color property\n");
-			goto fwnode_release;
-		}
+		if (ret)
+			return dev_err_probe(dev, ret, "Failed to parse color property\n");
 
 		if (color == LED_COLOR_ID_RGB || color == LED_COLOR_ID_MULTI)
 			reg = MT6370_VIRTUAL_MULTICOLOR;
 
-		if (priv->leds_active & BIT(reg)) {
-			ret = -EINVAL;
-			dev_err(dev, "Duplicate reg property\n");
-			goto fwnode_release;
-		}
+		if (priv->leds_active & BIT(reg))
+			return dev_err_probe(dev, -EINVAL, "Duplicate reg property\n");
 
 		priv->leds_active |= BIT(reg);
 
@@ -975,18 +964,14 @@ static int mt6370_leds_probe(struct platform_device *pdev)
 
 		ret = mt6370_init_led_properties(dev, led, &init_data);
 		if (ret)
-			goto fwnode_release;
+			return ret;
 
 		ret = mt6370_led_register(dev, led, &init_data);
 		if (ret)
-			goto fwnode_release;
+			return ret;
 	}
 
 	return 0;
-
-fwnode_release:
-	fwnode_handle_put(child);
-	return ret;
 }
 
 static const struct of_device_id mt6370_rgbled_device_table[] = {

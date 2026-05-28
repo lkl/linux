@@ -14,17 +14,22 @@
 #include <netinet/in.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <linux/keyctl.h>
 #include <sys/un.h>
 #include <bpf/btf.h>
+#include <time.h>
 #include "json_writer.h"
 
 #include "network_helpers.h"
+#include "verification_cert.h"
 
+/* backtrace() and backtrace_symbols_fd() are glibc specific,
+ * use header file when glibc is available and provide stub
+ * implementations when another libc implementation is used.
+ */
 #ifdef __GLIBC__
 #include <execinfo.h> /* backtrace */
-#endif
-
-/* Default backtrace funcs if missing at link */
+#else
 __weak int backtrace(void **buffer, int size)
 {
 	return 0;
@@ -34,6 +39,7 @@ __weak void backtrace_symbols_fd(void *const *buffer, int size, int fd)
 {
 	dprintf(fd, "<backtrace not supported>\n");
 }
+#endif /*__GLIBC__ */
 
 int env_verbosity = 0;
 
@@ -84,27 +90,7 @@ static void stdio_hijack(char **log_buf, size_t *log_cnt)
 #endif
 }
 
-static void stdio_restore_cleanup(void)
-{
-#ifdef __GLIBC__
-	if (verbose() && env.worker_id == -1) {
-		/* nothing to do, output to stdout by default */
-		return;
-	}
-
-	fflush(stdout);
-
-	if (env.subtest_state) {
-		fclose(env.subtest_state->stdout_saved);
-		env.subtest_state->stdout_saved = NULL;
-		stdout = env.test_state->stdout_saved;
-		stderr = env.test_state->stdout_saved;
-	} else {
-		fclose(env.test_state->stdout_saved);
-		env.test_state->stdout_saved = NULL;
-	}
-#endif
-}
+static pthread_mutex_t stdout_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void stdio_restore(void)
 {
@@ -114,14 +100,35 @@ static void stdio_restore(void)
 		return;
 	}
 
-	if (stdout == env.stdout_saved)
-		return;
+	fflush(stdout);
 
-	stdio_restore_cleanup();
+	pthread_mutex_lock(&stdout_lock);
 
-	stdout = env.stdout_saved;
-	stderr = env.stderr_saved;
+	if (env.subtest_state) {
+		if (env.subtest_state->stdout_saved)
+			fclose(env.subtest_state->stdout_saved);
+		env.subtest_state->stdout_saved = NULL;
+		stdout = env.test_state->stdout_saved;
+		stderr = env.test_state->stdout_saved;
+	} else {
+		if (env.test_state->stdout_saved)
+			fclose(env.test_state->stdout_saved);
+		env.test_state->stdout_saved = NULL;
+		stdout = env.stdout_saved;
+		stderr = env.stderr_saved;
+	}
+
+	pthread_mutex_unlock(&stdout_lock);
 #endif
+}
+
+static int traffic_monitor_print_fn(const char *format, va_list args)
+{
+	pthread_mutex_lock(&stdout_lock);
+	vfprintf(stdout, format, args);
+	pthread_mutex_unlock(&stdout_lock);
+
+	return 0;
 }
 
 /* Adapted from perf/util/string.c */
@@ -174,6 +181,88 @@ int usleep(useconds_t usec)
 	};
 
 	return syscall(__NR_nanosleep, &ts, NULL);
+}
+
+/* Watchdog timer is started by watchdog_start() and stopped by watchdog_stop().
+ * If timer is active for longer than env.secs_till_notify,
+ * it prints the name of the current test to the stderr.
+ * If timer is active for longer than env.secs_till_kill,
+ * it kills the thread executing the test by sending a SIGSEGV signal to it.
+ */
+static void watchdog_timer_func(union sigval sigval)
+{
+	struct itimerspec timeout = {};
+	char test_name[256];
+	int err;
+
+	if (env.subtest_state)
+		snprintf(test_name, sizeof(test_name), "%s/%s",
+			 env.test->test_name, env.subtest_state->name);
+	else
+		snprintf(test_name, sizeof(test_name), "%s",
+			 env.test->test_name);
+
+	switch (env.watchdog_state) {
+	case WD_NOTIFY:
+		fprintf(env.stderr_saved, "WATCHDOG: test case %s executes for %d seconds...\n",
+			test_name, env.secs_till_notify);
+		timeout.it_value.tv_sec = env.secs_till_kill - env.secs_till_notify;
+		env.watchdog_state = WD_KILL;
+		err = timer_settime(env.watchdog, 0, &timeout, NULL);
+		if (err)
+			fprintf(env.stderr_saved, "Failed to arm watchdog timer\n");
+		break;
+	case WD_KILL:
+		fprintf(env.stderr_saved,
+			"WATCHDOG: test case %s executes for %d seconds, terminating with SIGSEGV\n",
+			test_name, env.secs_till_kill);
+		pthread_kill(env.main_thread, SIGSEGV);
+		break;
+	}
+}
+
+static void watchdog_start(void)
+{
+	struct itimerspec timeout = {};
+	int err;
+
+	if (env.secs_till_kill == 0)
+		return;
+	if (env.secs_till_notify > 0) {
+		env.watchdog_state = WD_NOTIFY;
+		timeout.it_value.tv_sec = env.secs_till_notify;
+	} else {
+		env.watchdog_state = WD_KILL;
+		timeout.it_value.tv_sec = env.secs_till_kill;
+	}
+	err = timer_settime(env.watchdog, 0, &timeout, NULL);
+	if (err)
+		fprintf(env.stderr_saved, "Failed to start watchdog timer\n");
+}
+
+static void watchdog_stop(void)
+{
+	struct itimerspec timeout = {};
+	int err;
+
+	env.watchdog_state = WD_NOTIFY;
+	err = timer_settime(env.watchdog, 0, &timeout, NULL);
+	if (err)
+		fprintf(env.stderr_saved, "Failed to stop watchdog timer\n");
+}
+
+static void watchdog_init(void)
+{
+	struct sigevent watchdog_sev = {
+		.sigev_notify = SIGEV_THREAD,
+		.sigev_notify_function = watchdog_timer_func,
+	};
+	int err;
+
+	env.main_thread = pthread_self();
+	err = timer_create(CLOCK_MONOTONIC, &watchdog_sev, &env.watchdog);
+	if (err)
+		fprintf(stderr, "Failed to initialize watchdog timer\n");
 }
 
 static bool should_run(struct test_selector *sel, int num, const char *name)
@@ -388,8 +477,6 @@ static void dump_test_log(const struct prog_test_def *test,
 	print_test_result(test, test_state);
 }
 
-static void stdio_restore(void);
-
 /* A bunch of tests set custom affinity per-thread and/or per-process. Reset
  * it after each test/sub-test.
  */
@@ -404,13 +491,11 @@ static void reset_affinity(void)
 
 	err = sched_setaffinity(0, sizeof(cpuset), &cpuset);
 	if (err < 0) {
-		stdio_restore();
 		fprintf(stderr, "Failed to reset process affinity: %d!\n", err);
 		exit(EXIT_ERR_SETUP_INFRA);
 	}
 	err = pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
 	if (err < 0) {
-		stdio_restore();
 		fprintf(stderr, "Failed to reset thread affinity: %d!\n", err);
 		exit(EXIT_ERR_SETUP_INFRA);
 	}
@@ -428,7 +513,6 @@ static void save_netns(void)
 static void restore_netns(void)
 {
 	if (setns(env.saved_netns_fd, CLONE_NEWNET) == -1) {
-		stdio_restore();
 		perror("setns(CLONE_NEWNS)");
 		exit(EXIT_ERR_SETUP_INFRA);
 	}
@@ -455,7 +539,8 @@ void test__end_subtest(void)
 				   test_result(subtest_state->error_cnt,
 					       subtest_state->skipped));
 
-	stdio_restore_cleanup();
+	stdio_restore();
+
 	env.subtest_state = NULL;
 }
 
@@ -512,6 +597,7 @@ bool test__start_subtest(const char *subtest_name)
 
 	env.subtest_state = subtest_state;
 	stdio_hijack_init(&subtest_state->log_buf, &subtest_state->log_cnt);
+	watchdog_start();
 
 	return true;
 }
@@ -777,6 +863,7 @@ enum ARG_KEYS {
 	ARG_DEBUG = -1,
 	ARG_JSON_SUMMARY = 'J',
 	ARG_TRAFFIC_MONITOR = 'm',
+	ARG_WATCHDOG_TIMEOUT = 'w',
 };
 
 static const struct argp_option opts[] = {
@@ -807,6 +894,8 @@ static const struct argp_option opts[] = {
 	{ "traffic-monitor", ARG_TRAFFIC_MONITOR, "NAMES", 0,
 	  "Monitor network traffic of tests with name matching the pattern (supports '*' wildcard)." },
 #endif
+	{ "watchdog-timeout", ARG_WATCHDOG_TIMEOUT, "SECONDS", 0,
+	  "Kill the process if tests are not making progress for specified number of seconds." },
 	{},
 };
 
@@ -868,6 +957,7 @@ static int libbpf_print_fn(enum libbpf_print_level level,
 
 		va_copy(args2, args);
 		vfprintf(libbpf_capture_stream, format, args2);
+		va_end(args2);
 	}
 
 	if (env.verbosity < VERBOSE_VERY && level == LIBBPF_DEBUG)
@@ -1031,6 +1121,16 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 					      true);
 		break;
 #endif
+	case ARG_WATCHDOG_TIMEOUT:
+		env->secs_till_kill = atoi(arg);
+		if (env->secs_till_kill < 0) {
+			fprintf(stderr, "Invalid watchdog timeout: %s.\n", arg);
+			return -EINVAL;
+		}
+		if (env->secs_till_kill < env->secs_till_notify) {
+			env->secs_till_notify = 0;
+		}
+		break;
 	default:
 		return ARGP_ERR_UNKNOWN;
 	}
@@ -1169,8 +1269,10 @@ void crash_handler(int signum)
 
 	sz = backtrace(bt, ARRAY_SIZE(bt));
 
-	if (env.stdout_saved)
-		stdio_restore();
+	fflush(stdout);
+	stdout = env.stdout_saved;
+	stderr = env.stderr_saved;
+
 	if (env.test) {
 		env.test_state->error_cnt++;
 		dump_test_log(env.test, env.test_state, true, false, NULL);
@@ -1179,6 +1281,21 @@ void crash_handler(int signum)
 		fprintf(stderr, "[%d]: ", env.worker_id);
 	fprintf(stderr, "Caught signal #%d!\nStack trace:\n", signum);
 	backtrace_symbols_fd(bt, sz, STDERR_FILENO);
+}
+
+void hexdump(const char *prefix, const void *buf, size_t len)
+{
+	for (int i = 0; i < len; i++) {
+		if (!(i % 16)) {
+			if (i)
+				fprintf(stdout, "\n");
+			fprintf(stdout, "%s", prefix);
+		}
+		if (i && !(i % 8) && (i % 16))
+			fprintf(stdout, "\t");
+		fprintf(stdout, "%02X ", ((uint8_t *)(buf))[i]);
+	}
+	fprintf(stdout, "\n");
 }
 
 static void sigint_handler(int signum)
@@ -1249,26 +1366,42 @@ static int recv_message(int sock, struct msg *msg)
 	return ret;
 }
 
+static bool ns_is_needed(const char *test_name)
+{
+	if (strlen(test_name) < 3)
+		return false;
+
+	return !strncmp(test_name, "ns_", 3);
+}
+
 static void run_one_test(int test_num)
 {
 	struct prog_test_def *test = &prog_test_defs[test_num];
 	struct test_state *state = &test_states[test_num];
+	struct netns_obj *ns = NULL;
 
 	env.test = test;
 	env.test_state = state;
 
 	stdio_hijack(&state->log_buf, &state->log_cnt);
 
+	watchdog_start();
+	if (ns_is_needed(test->test_name))
+		ns = netns_new(test->test_name, true);
 	if (test->run_test)
 		test->run_test();
 	else if (test->run_serial_test)
 		test->run_serial_test();
+	netns_free(ns);
+	watchdog_stop();
 
 	/* ensure last sub-test is finalized properly */
 	if (env.subtest_state)
 		test__end_subtest();
 
 	state->tested = true;
+
+	stdio_restore();
 
 	if (verbose() && env.worker_id == -1)
 		print_test_result(test, state);
@@ -1278,7 +1411,6 @@ static void run_one_test(int test_num)
 	if (test->need_cgroup_cleanup)
 		cleanup_cgroup_environment();
 
-	stdio_restore();
 	free(stop_libbpf_log_capture());
 
 	dump_test_log(test, state, false, false, NULL);
@@ -1703,6 +1835,7 @@ out:
 static int worker_main(int sock)
 {
 	save_netns();
+	watchdog_init();
 
 	while (true) {
 		/* receive command */
@@ -1797,6 +1930,13 @@ static void free_test_states(void)
 	}
 }
 
+static __u32 register_session_key(const char *key_data, size_t key_data_size)
+{
+	return syscall(__NR_add_key, "asymmetric", "libbpf_session_key",
+			(const void *)key_data, key_data_size,
+			KEY_SPEC_SESSION_KEYRING);
+}
+
 int main(int argc, char **argv)
 {
 	static const struct argp argp = {
@@ -1812,6 +1952,11 @@ int main(int argc, char **argv)
 
 	sigaction(SIGSEGV, &sigact, NULL);
 
+	env.stdout_saved = stdout;
+	env.stderr_saved = stderr;
+
+	env.secs_till_notify = 10;
+	env.secs_till_kill = 120;
 	err = argp_parse(&argp, argc, argv, 0, NULL, &env);
 	if (err)
 		return err;
@@ -1820,9 +1965,17 @@ int main(int argc, char **argv)
 	if (err)
 		return err;
 
+	watchdog_init();
+
 	/* Use libbpf 1.0 API mode */
 	libbpf_set_strict_mode(LIBBPF_STRICT_ALL);
 	libbpf_set_print(libbpf_print_fn);
+	err = register_session_key((const char *)test_progs_verification_cert,
+				   test_progs_verification_cert_len);
+	if (err < 0)
+		return err;
+
+	traffic_monitor_set_print(traffic_monitor_print_fn);
 
 	srand(time(NULL));
 
@@ -1833,9 +1986,6 @@ int main(int argc, char **argv)
 			env.nr_cpus);
 		return -1;
 	}
-
-	env.stdout_saved = stdout;
-	env.stderr_saved = stderr;
 
 	env.has_testmod = true;
 	if (!env.list_test_names) {

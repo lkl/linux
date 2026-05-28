@@ -58,9 +58,6 @@ xfs_fs_get_uuid(
 {
 	struct xfs_mount	*mp = XFS_M(sb);
 
-	xfs_notice_once(mp,
-"Using experimental pNFS feature, use at your own risk!");
-
 	if (*len < sizeof(uuid_t))
 		return -EINVAL;
 

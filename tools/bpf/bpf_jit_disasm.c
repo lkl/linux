@@ -45,6 +45,8 @@ static void get_exec_path(char *tpath, size_t size)
 	assert(path);
 
 	len = readlink(path, tpath, size);
+	if (len < 0)
+		len = 0;
 	tpath[len] = 0;
 
 	free(path);
@@ -210,7 +212,7 @@ static uint8_t *get_last_jit_image(char *haystack, size_t hlen,
 		return NULL;
 	}
 	if (proglen > 1000000) {
-		printf("proglen of %d too big, stopping\n", proglen);
+		printf("proglen of %u too big, stopping\n", proglen);
 		return NULL;
 	}
 

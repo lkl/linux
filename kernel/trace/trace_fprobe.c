@@ -4,14 +4,17 @@
  * Copyright (C) 2022 Google LLC.
  */
 #define pr_fmt(fmt)	"trace_fprobe: " fmt
-#include <asm/ptrace.h>
 
 #include <linux/fprobe.h>
+#include <linux/list.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/rculist.h>
 #include <linux/security.h>
 #include <linux/tracepoint.h>
 #include <linux/uaccess.h>
+
+#include <asm/ptrace.h>
 
 #include "trace_dynevent.h"
 #include "trace_probe.h"
@@ -21,7 +24,6 @@
 #define FPROBE_EVENT_SYSTEM "fprobes"
 #define TRACEPOINT_EVENT_SYSTEM "tracepoints"
 #define RETHOOK_MAXACTIVE_MAX 4096
-#define TRACEPOINT_STUB ERR_PTR(-ENOENT)
 
 static int trace_fprobe_create(const char *raw_command);
 static int trace_fprobe_show(struct seq_file *m, struct dyn_event *ev);
@@ -38,15 +40,157 @@ static struct dyn_event_operations trace_fprobe_ops = {
 	.match = trace_fprobe_match,
 };
 
+/* List of tracepoint_user */
+static LIST_HEAD(tracepoint_user_list);
+static DEFINE_MUTEX(tracepoint_user_mutex);
+
+/* While living tracepoint_user, @tpoint can be NULL and @refcount != 0. */
+struct tracepoint_user {
+	struct list_head	list;
+	const char		*name;
+	struct tracepoint	*tpoint;
+	unsigned int		refcount;
+};
+
+/* NOTE: you must lock tracepoint_user_mutex. */
+#define for_each_tracepoint_user(tuser)		\
+	list_for_each_entry(tuser, &tracepoint_user_list, list)
+
+static int tracepoint_user_register(struct tracepoint_user *tuser)
+{
+	struct tracepoint *tpoint = tuser->tpoint;
+
+	if (!tpoint)
+		return 0;
+
+	return tracepoint_probe_register_prio_may_exist(tpoint,
+					tpoint->probestub, NULL, 0);
+}
+
+static void tracepoint_user_unregister(struct tracepoint_user *tuser)
+{
+	if (!tuser->tpoint)
+		return;
+
+	WARN_ON_ONCE(tracepoint_probe_unregister(tuser->tpoint, tuser->tpoint->probestub, NULL));
+	tuser->tpoint = NULL;
+}
+
+static unsigned long tracepoint_user_ip(struct tracepoint_user *tuser)
+{
+	if (!tuser->tpoint)
+		return 0UL;
+
+	return (unsigned long)tuser->tpoint->probestub;
+}
+
+static void __tracepoint_user_free(struct tracepoint_user *tuser)
+{
+	if (!tuser)
+		return;
+	kfree(tuser->name);
+	kfree(tuser);
+}
+
+DEFINE_FREE(tuser_free, struct tracepoint_user *, __tracepoint_user_free(_T))
+
+static struct tracepoint_user *__tracepoint_user_init(const char *name, struct tracepoint *tpoint)
+{
+	struct tracepoint_user *tuser __free(tuser_free) = NULL;
+	int ret;
+
+	tuser = kzalloc(sizeof(*tuser), GFP_KERNEL);
+	if (!tuser)
+		return NULL;
+	tuser->name = kstrdup(name, GFP_KERNEL);
+	if (!tuser->name)
+		return NULL;
+
+	/* Register tracepoint if it is loaded. */
+	if (tpoint) {
+		tuser->tpoint = tpoint;
+		ret = tracepoint_user_register(tuser);
+		if (ret)
+			return ERR_PTR(ret);
+	}
+
+	tuser->refcount = 1;
+	INIT_LIST_HEAD(&tuser->list);
+	list_add(&tuser->list, &tracepoint_user_list);
+
+	return_ptr(tuser);
+}
+
+static struct tracepoint *find_tracepoint(const char *tp_name,
+	struct module **tp_mod);
+
+/*
+ * Get tracepoint_user if exist, or allocate new one and register it.
+ * If tracepoint is on a module, get its refcounter too.
+ * This returns errno or NULL (not loaded yet) or tracepoint_user.
+ */
+static struct tracepoint_user *tracepoint_user_find_get(const char *name, struct module **pmod)
+{
+	struct module *mod __free(module_put) = NULL;
+	struct tracepoint_user *tuser;
+	struct tracepoint *tpoint;
+
+	if (!name || !pmod)
+		return ERR_PTR(-EINVAL);
+
+	/* Get and lock the module which has tracepoint. */
+	tpoint = find_tracepoint(name, &mod);
+
+	guard(mutex)(&tracepoint_user_mutex);
+	/* Search existing tracepoint_user */
+	for_each_tracepoint_user(tuser) {
+		if (!strcmp(tuser->name, name)) {
+			tuser->refcount++;
+			*pmod = no_free_ptr(mod);
+			return tuser;
+		}
+	}
+
+	/* The corresponding tracepoint_user is not found. */
+	tuser = __tracepoint_user_init(name, tpoint);
+	if (!IS_ERR_OR_NULL(tuser))
+		*pmod = no_free_ptr(mod);
+
+	return tuser;
+}
+
+static void tracepoint_user_put(struct tracepoint_user *tuser)
+{
+	scoped_guard(mutex, &tracepoint_user_mutex) {
+		if (--tuser->refcount > 0)
+			return;
+
+		list_del(&tuser->list);
+		tracepoint_user_unregister(tuser);
+	}
+
+	__tracepoint_user_free(tuser);
+}
+
+DEFINE_FREE(tuser_put, struct tracepoint_user *,
+	if (!IS_ERR_OR_NULL(_T))
+		tracepoint_user_put(_T))
+
 /*
  * Fprobe event core functions
+ */
+
+/*
+ * @tprobe is true for tracepoint probe.
+ * @tuser can be NULL if the trace_fprobe is disabled or the tracepoint is not
+ * loaded with a module. If @tuser != NULL, this trace_fprobe is enabled.
  */
 struct trace_fprobe {
 	struct dyn_event	devent;
 	struct fprobe		fp;
 	const char		*symbol;
-	struct tracepoint	*tpoint;
-	struct module		*mod;
+	bool			tprobe;
+	struct tracepoint_user	*tuser;
 	struct trace_probe	tp;
 };
 
@@ -76,7 +220,7 @@ static bool trace_fprobe_is_return(struct trace_fprobe *tf)
 
 static bool trace_fprobe_is_tracepoint(struct trace_fprobe *tf)
 {
-	return tf->tpoint != NULL;
+	return tf->tprobe;
 }
 
 static const char *trace_fprobe_symbol(struct trace_fprobe *tf)
@@ -134,7 +278,7 @@ static int
 process_fetch_insn(struct fetch_insn *code, void *rec, void *edata,
 		   void *dest, void *base)
 {
-	struct pt_regs *regs = rec;
+	struct ftrace_regs *fregs = rec;
 	unsigned long val;
 	int ret;
 
@@ -142,17 +286,17 @@ retry:
 	/* 1st stage: get value from context */
 	switch (code->op) {
 	case FETCH_OP_STACK:
-		val = regs_get_kernel_stack_nth(regs, code->param);
+		val = ftrace_regs_get_kernel_stack_nth(fregs, code->param);
 		break;
 	case FETCH_OP_STACKP:
-		val = kernel_stack_pointer(regs);
+		val = ftrace_regs_get_stack_pointer(fregs);
 		break;
 	case FETCH_OP_RETVAL:
-		val = regs_return_value(regs);
+		val = ftrace_regs_get_return_value(fregs);
 		break;
 #ifdef CONFIG_HAVE_FUNCTION_ARG_ACCESS_API
 	case FETCH_OP_ARG:
-		val = regs_get_kernel_argument(regs, code->param);
+		val = ftrace_regs_get_argument(fregs, code->param);
 		break;
 	case FETCH_OP_EDATA:
 		val = *(unsigned long *)((unsigned long)edata + code->offset);
@@ -175,7 +319,7 @@ NOKPROBE_SYMBOL(process_fetch_insn)
 /* function entry handler */
 static nokprobe_inline void
 __fentry_trace_func(struct trace_fprobe *tf, unsigned long entry_ip,
-		    struct pt_regs *regs,
+		    struct ftrace_regs *fregs,
 		    struct trace_event_file *trace_file)
 {
 	struct fentry_trace_entry_head *entry;
@@ -189,41 +333,71 @@ __fentry_trace_func(struct trace_fprobe *tf, unsigned long entry_ip,
 	if (trace_trigger_soft_disabled(trace_file))
 		return;
 
-	dsize = __get_data_size(&tf->tp, regs, NULL);
+	dsize = __get_data_size(&tf->tp, fregs, NULL);
 
 	entry = trace_event_buffer_reserve(&fbuffer, trace_file,
 					   sizeof(*entry) + tf->tp.size + dsize);
 	if (!entry)
 		return;
 
-	fbuffer.regs = regs;
+	fbuffer.regs = ftrace_get_regs(fregs);
 	entry = fbuffer.entry = ring_buffer_event_data(fbuffer.event);
 	entry->ip = entry_ip;
-	store_trace_args(&entry[1], &tf->tp, regs, NULL, sizeof(*entry), dsize);
+	store_trace_args(&entry[1], &tf->tp, fregs, NULL, sizeof(*entry), dsize);
 
 	trace_event_buffer_commit(&fbuffer);
 }
 
 static void
 fentry_trace_func(struct trace_fprobe *tf, unsigned long entry_ip,
-		  struct pt_regs *regs)
+		  struct ftrace_regs *fregs)
 {
 	struct event_file_link *link;
 
 	trace_probe_for_each_link_rcu(link, &tf->tp)
-		__fentry_trace_func(tf, entry_ip, regs, link->file);
+		__fentry_trace_func(tf, entry_ip, fregs, link->file);
 }
 NOKPROBE_SYMBOL(fentry_trace_func);
 
+static nokprobe_inline
+void store_fprobe_entry_data(void *edata, struct trace_probe *tp, struct ftrace_regs *fregs)
+{
+	struct probe_entry_arg *earg = tp->entry_arg;
+	unsigned long val = 0;
+	int i;
+
+	if (!earg)
+		return;
+
+	for (i = 0; i < earg->size; i++) {
+		struct fetch_insn *code = &earg->code[i];
+
+		switch (code->op) {
+		case FETCH_OP_ARG:
+			val = ftrace_regs_get_argument(fregs, code->param);
+			break;
+		case FETCH_OP_ST_EDATA:
+			*(unsigned long *)((unsigned long)edata + code->offset) = val;
+			break;
+		case FETCH_OP_END:
+			goto end;
+		default:
+			break;
+		}
+	}
+end:
+	return;
+}
+
 /* function exit handler */
 static int trace_fprobe_entry_handler(struct fprobe *fp, unsigned long entry_ip,
-				unsigned long ret_ip, struct pt_regs *regs,
+				unsigned long ret_ip, struct ftrace_regs *fregs,
 				void *entry_data)
 {
 	struct trace_fprobe *tf = container_of(fp, struct trace_fprobe, fp);
 
 	if (tf->tp.entry_arg)
-		store_trace_entry_data(entry_data, &tf->tp, regs);
+		store_fprobe_entry_data(entry_data, &tf->tp, fregs);
 
 	return 0;
 }
@@ -231,7 +405,7 @@ NOKPROBE_SYMBOL(trace_fprobe_entry_handler)
 
 static nokprobe_inline void
 __fexit_trace_func(struct trace_fprobe *tf, unsigned long entry_ip,
-		   unsigned long ret_ip, struct pt_regs *regs,
+		   unsigned long ret_ip, struct ftrace_regs *fregs,
 		   void *entry_data, struct trace_event_file *trace_file)
 {
 	struct fexit_trace_entry_head *entry;
@@ -245,60 +419,63 @@ __fexit_trace_func(struct trace_fprobe *tf, unsigned long entry_ip,
 	if (trace_trigger_soft_disabled(trace_file))
 		return;
 
-	dsize = __get_data_size(&tf->tp, regs, entry_data);
+	dsize = __get_data_size(&tf->tp, fregs, entry_data);
 
 	entry = trace_event_buffer_reserve(&fbuffer, trace_file,
 					   sizeof(*entry) + tf->tp.size + dsize);
 	if (!entry)
 		return;
 
-	fbuffer.regs = regs;
+	fbuffer.regs = ftrace_get_regs(fregs);
 	entry = fbuffer.entry = ring_buffer_event_data(fbuffer.event);
 	entry->func = entry_ip;
 	entry->ret_ip = ret_ip;
-	store_trace_args(&entry[1], &tf->tp, regs, entry_data, sizeof(*entry), dsize);
+	store_trace_args(&entry[1], &tf->tp, fregs, entry_data, sizeof(*entry), dsize);
 
 	trace_event_buffer_commit(&fbuffer);
 }
 
 static void
 fexit_trace_func(struct trace_fprobe *tf, unsigned long entry_ip,
-		 unsigned long ret_ip, struct pt_regs *regs, void *entry_data)
+		 unsigned long ret_ip, struct ftrace_regs *fregs, void *entry_data)
 {
 	struct event_file_link *link;
 
 	trace_probe_for_each_link_rcu(link, &tf->tp)
-		__fexit_trace_func(tf, entry_ip, ret_ip, regs, entry_data, link->file);
+		__fexit_trace_func(tf, entry_ip, ret_ip, fregs, entry_data, link->file);
 }
 NOKPROBE_SYMBOL(fexit_trace_func);
 
 #ifdef CONFIG_PERF_EVENTS
 
 static int fentry_perf_func(struct trace_fprobe *tf, unsigned long entry_ip,
-			    struct pt_regs *regs)
+			    struct ftrace_regs *fregs)
 {
 	struct trace_event_call *call = trace_probe_event_call(&tf->tp);
 	struct fentry_trace_entry_head *entry;
 	struct hlist_head *head;
 	int size, __size, dsize;
+	struct pt_regs *regs;
 	int rctx;
 
 	head = this_cpu_ptr(call->perf_events);
 	if (hlist_empty(head))
 		return 0;
 
-	dsize = __get_data_size(&tf->tp, regs, NULL);
+	dsize = __get_data_size(&tf->tp, fregs, NULL);
 	__size = sizeof(*entry) + tf->tp.size + dsize;
 	size = ALIGN(__size + sizeof(u32), sizeof(u64));
 	size -= sizeof(u32);
 
-	entry = perf_trace_buf_alloc(size, NULL, &rctx);
+	entry = perf_trace_buf_alloc(size, &regs, &rctx);
 	if (!entry)
 		return 0;
 
+	regs = ftrace_fill_perf_regs(fregs, regs);
+
 	entry->ip = entry_ip;
 	memset(&entry[1], 0, dsize);
-	store_trace_args(&entry[1], &tf->tp, regs, NULL, sizeof(*entry), dsize);
+	store_trace_args(&entry[1], &tf->tp, fregs, NULL, sizeof(*entry), dsize);
 	perf_trace_buf_submit(entry, size, rctx, call->event.type, 1, regs,
 			      head, NULL);
 	return 0;
@@ -307,31 +484,34 @@ NOKPROBE_SYMBOL(fentry_perf_func);
 
 static void
 fexit_perf_func(struct trace_fprobe *tf, unsigned long entry_ip,
-		unsigned long ret_ip, struct pt_regs *regs,
+		unsigned long ret_ip, struct ftrace_regs *fregs,
 		void *entry_data)
 {
 	struct trace_event_call *call = trace_probe_event_call(&tf->tp);
 	struct fexit_trace_entry_head *entry;
 	struct hlist_head *head;
 	int size, __size, dsize;
+	struct pt_regs *regs;
 	int rctx;
 
 	head = this_cpu_ptr(call->perf_events);
 	if (hlist_empty(head))
 		return;
 
-	dsize = __get_data_size(&tf->tp, regs, entry_data);
+	dsize = __get_data_size(&tf->tp, fregs, entry_data);
 	__size = sizeof(*entry) + tf->tp.size + dsize;
 	size = ALIGN(__size + sizeof(u32), sizeof(u64));
 	size -= sizeof(u32);
 
-	entry = perf_trace_buf_alloc(size, NULL, &rctx);
+	entry = perf_trace_buf_alloc(size, &regs, &rctx);
 	if (!entry)
 		return;
 
+	regs = ftrace_fill_perf_regs(fregs, regs);
+
 	entry->func = entry_ip;
 	entry->ret_ip = ret_ip;
-	store_trace_args(&entry[1], &tf->tp, regs, entry_data, sizeof(*entry), dsize);
+	store_trace_args(&entry[1], &tf->tp, fregs, entry_data, sizeof(*entry), dsize);
 	perf_trace_buf_submit(entry, size, rctx, call->event.type, 1, regs,
 			      head, NULL);
 }
@@ -339,33 +519,36 @@ NOKPROBE_SYMBOL(fexit_perf_func);
 #endif	/* CONFIG_PERF_EVENTS */
 
 static int fentry_dispatcher(struct fprobe *fp, unsigned long entry_ip,
-			     unsigned long ret_ip, struct pt_regs *regs,
+			     unsigned long ret_ip, struct ftrace_regs *fregs,
 			     void *entry_data)
 {
 	struct trace_fprobe *tf = container_of(fp, struct trace_fprobe, fp);
+	unsigned int flags = trace_probe_load_flag(&tf->tp);
 	int ret = 0;
 
-	if (trace_probe_test_flag(&tf->tp, TP_FLAG_TRACE))
-		fentry_trace_func(tf, entry_ip, regs);
+	if (flags & TP_FLAG_TRACE)
+		fentry_trace_func(tf, entry_ip, fregs);
+
 #ifdef CONFIG_PERF_EVENTS
-	if (trace_probe_test_flag(&tf->tp, TP_FLAG_PROFILE))
-		ret = fentry_perf_func(tf, entry_ip, regs);
+	if (flags & TP_FLAG_PROFILE)
+		ret = fentry_perf_func(tf, entry_ip, fregs);
 #endif
 	return ret;
 }
 NOKPROBE_SYMBOL(fentry_dispatcher);
 
 static void fexit_dispatcher(struct fprobe *fp, unsigned long entry_ip,
-			     unsigned long ret_ip, struct pt_regs *regs,
+			     unsigned long ret_ip, struct ftrace_regs *fregs,
 			     void *entry_data)
 {
 	struct trace_fprobe *tf = container_of(fp, struct trace_fprobe, fp);
+	unsigned int flags = trace_probe_load_flag(&tf->tp);
 
-	if (trace_probe_test_flag(&tf->tp, TP_FLAG_TRACE))
-		fexit_trace_func(tf, entry_ip, ret_ip, regs, entry_data);
+	if (flags & TP_FLAG_TRACE)
+		fexit_trace_func(tf, entry_ip, ret_ip, fregs, entry_data);
 #ifdef CONFIG_PERF_EVENTS
-	if (trace_probe_test_flag(&tf->tp, TP_FLAG_PROFILE))
-		fexit_perf_func(tf, entry_ip, ret_ip, regs, entry_data);
+	if (flags & TP_FLAG_PROFILE)
+		fexit_perf_func(tf, entry_ip, ret_ip, fregs, entry_data);
 #endif
 }
 NOKPROBE_SYMBOL(fexit_dispatcher);
@@ -374,10 +557,15 @@ static void free_trace_fprobe(struct trace_fprobe *tf)
 {
 	if (tf) {
 		trace_probe_cleanup(&tf->tp);
+		if (tf->tuser)
+			tracepoint_user_put(tf->tuser);
 		kfree(tf->symbol);
 		kfree(tf);
 	}
 }
+
+/* Since alloc_trace_fprobe() can return error, check the pointer is ERR too. */
+DEFINE_FREE(free_trace_fprobe, struct trace_fprobe *, if (!IS_ERR_OR_NULL(_T)) free_trace_fprobe(_T))
 
 /*
  * Allocate new trace_probe and initialize it (including fprobe).
@@ -385,12 +573,10 @@ static void free_trace_fprobe(struct trace_fprobe *tf)
 static struct trace_fprobe *alloc_trace_fprobe(const char *group,
 					       const char *event,
 					       const char *symbol,
-					       struct tracepoint *tpoint,
-					       struct module *mod,
-					       int maxactive,
-					       int nargs, bool is_return)
+					       int nargs, bool is_return,
+					       bool is_tracepoint)
 {
-	struct trace_fprobe *tf;
+	struct trace_fprobe *tf __free(free_trace_fprobe) = NULL;
 	int ret = -ENOMEM;
 
 	tf = kzalloc(struct_size(tf, tp.args, nargs), GFP_KERNEL);
@@ -399,26 +585,21 @@ static struct trace_fprobe *alloc_trace_fprobe(const char *group,
 
 	tf->symbol = kstrdup(symbol, GFP_KERNEL);
 	if (!tf->symbol)
-		goto error;
+		return ERR_PTR(-ENOMEM);
 
 	if (is_return)
 		tf->fp.exit_handler = fexit_dispatcher;
 	else
 		tf->fp.entry_handler = fentry_dispatcher;
 
-	tf->tpoint = tpoint;
-	tf->mod = mod;
-	tf->fp.nr_maxactive = maxactive;
+	tf->tprobe = is_tracepoint;
 
 	ret = trace_probe_init(&tf->tp, event, group, false, nargs);
 	if (ret < 0)
-		goto error;
+		return ERR_PTR(ret);
 
 	dyn_event_init(&tf->devent, &trace_fprobe_ops);
-	return tf;
-error:
-	free_trace_fprobe(tf);
-	return ERR_PTR(ret);
+	return_ptr(tf);
 }
 
 static struct trace_fprobe *find_trace_fprobe(const char *event,
@@ -432,98 +613,6 @@ static struct trace_fprobe *find_trace_fprobe(const char *event,
 		    strcmp(trace_probe_group_name(&tf->tp), group) == 0)
 			return tf;
 	return NULL;
-}
-
-static inline int __enable_trace_fprobe(struct trace_fprobe *tf)
-{
-	if (trace_fprobe_is_registered(tf))
-		enable_fprobe(&tf->fp);
-
-	return 0;
-}
-
-static void __disable_trace_fprobe(struct trace_probe *tp)
-{
-	struct trace_fprobe *tf;
-
-	list_for_each_entry(tf, trace_probe_probe_list(tp), tp.list) {
-		if (!trace_fprobe_is_registered(tf))
-			continue;
-		disable_fprobe(&tf->fp);
-	}
-}
-
-/*
- * Enable trace_probe
- * if the file is NULL, enable "perf" handler, or enable "trace" handler.
- */
-static int enable_trace_fprobe(struct trace_event_call *call,
-			       struct trace_event_file *file)
-{
-	struct trace_probe *tp;
-	struct trace_fprobe *tf;
-	bool enabled;
-	int ret = 0;
-
-	tp = trace_probe_primary_from_call(call);
-	if (WARN_ON_ONCE(!tp))
-		return -ENODEV;
-	enabled = trace_probe_is_enabled(tp);
-
-	/* This also changes "enabled" state */
-	if (file) {
-		ret = trace_probe_add_file(tp, file);
-		if (ret)
-			return ret;
-	} else
-		trace_probe_set_flag(tp, TP_FLAG_PROFILE);
-
-	if (!enabled) {
-		list_for_each_entry(tf, trace_probe_probe_list(tp), tp.list) {
-			/* TODO: check the fprobe is gone */
-			__enable_trace_fprobe(tf);
-		}
-	}
-
-	return 0;
-}
-
-/*
- * Disable trace_probe
- * if the file is NULL, disable "perf" handler, or disable "trace" handler.
- */
-static int disable_trace_fprobe(struct trace_event_call *call,
-				struct trace_event_file *file)
-{
-	struct trace_probe *tp;
-
-	tp = trace_probe_primary_from_call(call);
-	if (WARN_ON_ONCE(!tp))
-		return -ENODEV;
-
-	if (file) {
-		if (!trace_probe_get_file_link(tp, file))
-			return -ENOENT;
-		if (!trace_probe_has_single_file(tp))
-			goto out;
-		trace_probe_clear_flag(tp, TP_FLAG_TRACE);
-	} else
-		trace_probe_clear_flag(tp, TP_FLAG_PROFILE);
-
-	if (!trace_probe_is_enabled(tp))
-		__disable_trace_fprobe(tp);
-
- out:
-	if (file)
-		/*
-		 * Synchronization is done in below function. For perf event,
-		 * file == NULL and perf_trace_event_unreg() calls
-		 * tracepoint_synchronize_unregister() to ensure synchronize
-		 * event. We don't need to care about it.
-		 */
-		trace_probe_remove_file(tp, file);
-
-	return 0;
 }
 
 /* Event entry printers */
@@ -677,20 +766,52 @@ static int unregister_fprobe_event(struct trace_fprobe *tf)
 
 static int __regsiter_tracepoint_fprobe(struct trace_fprobe *tf)
 {
-	struct tracepoint *tpoint = tf->tpoint;
-	unsigned long ip = (unsigned long)tpoint->probestub;
+	struct tracepoint_user *tuser __free(tuser_put) = NULL;
+	struct module *mod __free(module_put) = NULL;
+	unsigned long ip;
 	int ret;
 
+	if (WARN_ON_ONCE(tf->tuser))
+		return -EINVAL;
+
+	/* If the tracepoint is in a module, it must be locked in this function. */
+	tuser = tracepoint_user_find_get(tf->symbol, &mod);
+	/* This tracepoint is not loaded yet */
+	if (IS_ERR(tuser))
+		return PTR_ERR(tuser);
+	if (!tuser)
+		return -ENOMEM;
+
+	/* Register fprobe only if the tracepoint is loaded. */
+	if (tuser->tpoint) {
+		ip = tracepoint_user_ip(tuser);
+		if (WARN_ON_ONCE(!ip))
+			return -ENOENT;
+
+		ret = register_fprobe_ips(&tf->fp, &ip, 1);
+		if (ret < 0)
+			return ret;
+	}
+
+	tf->tuser = no_free_ptr(tuser);
+	return 0;
+}
+
+/* Returns an error if the target function is not available, or 0 */
+static int trace_fprobe_verify_target(struct trace_fprobe *tf)
+{
+	int ret;
+
+	/* Tracepoint should have a stub function. */
+	if (trace_fprobe_is_tracepoint(tf))
+		return 0;
+
 	/*
-	 * Here, we do 2 steps to enable fprobe on a tracepoint.
-	 * At first, put __probestub_##TP function on the tracepoint
-	 * and put a fprobe on the stub function.
+	 * Note: since we don't lock the module, even if this succeeded,
+	 * register_fprobe() later can fail.
 	 */
-	ret = tracepoint_probe_register_prio_may_exist(tpoint,
-				tpoint->probestub, NULL, 0);
-	if (ret < 0)
-		return ret;
-	return register_fprobe_ips(&tf->fp, &ip, 1);
+	ret = fprobe_count_ips_from_filter(tf->symbol, NULL);
+	return (ret < 0) ? ret : 0;
 }
 
 /* Internal register function - just handle fprobe and flags */
@@ -712,20 +833,10 @@ static int __register_trace_fprobe(struct trace_fprobe *tf)
 			return ret;
 	}
 
-	/* Set/clear disabled flag according to tp->flag */
-	if (trace_probe_is_enabled(&tf->tp))
-		tf->fp.flags &= ~FPROBE_FL_DISABLED;
-	else
-		tf->fp.flags |= FPROBE_FL_DISABLED;
+	tf->fp.flags &= ~FPROBE_FL_DISABLED;
 
-	if (trace_fprobe_is_tracepoint(tf)) {
-
-		/* This tracepoint is not loaded yet */
-		if (tf->tpoint == TRACEPOINT_STUB)
-			return 0;
-
+	if (trace_fprobe_is_tracepoint(tf))
 		return __regsiter_tracepoint_fprobe(tf);
-	}
 
 	/* TODO: handle filter, nofilter or symbol list */
 	return register_fprobe(&tf->fp, tf->symbol, NULL);
@@ -734,15 +845,11 @@ static int __register_trace_fprobe(struct trace_fprobe *tf)
 /* Internal unregister function - just handle fprobe and flags */
 static void __unregister_trace_fprobe(struct trace_fprobe *tf)
 {
-	if (trace_fprobe_is_registered(tf)) {
+	if (trace_fprobe_is_registered(tf))
 		unregister_fprobe(&tf->fp);
-		memset(&tf->fp, 0, sizeof(tf->fp));
-		if (trace_fprobe_is_tracepoint(tf)) {
-			tracepoint_probe_unregister(tf->tpoint,
-					tf->tpoint->probestub, NULL);
-			tf->tpoint = NULL;
-			tf->mod = NULL;
-		}
+	if (tf->tuser) {
+		tracepoint_user_put(tf->tuser);
+		tf->tuser = NULL;
 	}
 }
 
@@ -802,7 +909,7 @@ static bool trace_fprobe_has_same_fprobe(struct trace_fprobe *orig,
 	return false;
 }
 
-static int append_trace_fprobe(struct trace_fprobe *tf, struct trace_fprobe *to)
+static int append_trace_fprobe_event(struct trace_fprobe *tf, struct trace_fprobe *to)
 {
 	int ret;
 
@@ -830,7 +937,7 @@ static int append_trace_fprobe(struct trace_fprobe *tf, struct trace_fprobe *to)
 	if (ret)
 		return ret;
 
-	ret = __register_trace_fprobe(tf);
+	ret = trace_fprobe_verify_target(tf);
 	if (ret)
 		trace_probe_unlink(&tf->tp);
 	else
@@ -839,20 +946,18 @@ static int append_trace_fprobe(struct trace_fprobe *tf, struct trace_fprobe *to)
 	return ret;
 }
 
-/* Register a trace_probe and probe_event */
-static int register_trace_fprobe(struct trace_fprobe *tf)
+/* Register a trace_probe and probe_event, and check the fprobe is available. */
+static int register_trace_fprobe_event(struct trace_fprobe *tf)
 {
 	struct trace_fprobe *old_tf;
 	int ret;
 
-	mutex_lock(&event_mutex);
+	guard(mutex)(&event_mutex);
 
 	old_tf = find_trace_fprobe(trace_probe_name(&tf->tp),
 				   trace_probe_group_name(&tf->tp));
-	if (old_tf) {
-		ret = append_trace_fprobe(tf, old_tf);
-		goto end;
-	}
+	if (old_tf)
+		return append_trace_fprobe_event(tf, old_tf);
 
 	/* Register new event */
 	ret = register_fprobe_event(tf);
@@ -862,18 +967,16 @@ static int register_trace_fprobe(struct trace_fprobe *tf)
 			trace_probe_log_err(0, EVENT_EXIST);
 		} else
 			pr_warn("Failed to register probe event(%d)\n", ret);
-		goto end;
+		return ret;
 	}
 
-	/* Register fprobe */
-	ret = __register_trace_fprobe(tf);
+	/* Verify fprobe is sane. */
+	ret = trace_fprobe_verify_target(tf);
 	if (ret < 0)
 		unregister_fprobe_event(tf);
 	else
 		dyn_event_add(&tf->devent, trace_probe_event_call(&tf->tp));
 
-end:
-	mutex_unlock(&event_mutex);
 	return ret;
 }
 
@@ -888,14 +991,15 @@ static void __find_tracepoint_module_cb(struct tracepoint *tp, struct module *mo
 	struct __find_tracepoint_cb_data *data = priv;
 
 	if (!data->tpoint && !strcmp(data->tp_name, tp->name)) {
-		data->tpoint = tp;
-		if (!data->mod) {
+		/* If module is not specified, try getting module refcount. */
+		if (!data->mod && mod) {
+			/* If failed to get refcount, ignore this tracepoint. */
+			if (!try_module_get(mod))
+				return;
+
 			data->mod = mod;
-			if (!try_module_get(data->mod)) {
-				data->tpoint = NULL;
-				data->mod = NULL;
-			}
 		}
+		data->tpoint = tp;
 	}
 }
 
@@ -908,11 +1012,9 @@ static void __find_tracepoint_cb(struct tracepoint *tp, void *priv)
 }
 
 /*
- * Find a tracepoint from kernel and module. If the tracepoint is in a module,
- * this increments the module refcount to prevent unloading until the
- * trace_fprobe is registered to the list. After registering the trace_fprobe
- * on the trace_fprobe list, the module refcount is decremented because
- * tracepoint_probe_module_cb will handle it.
+ * Find a tracepoint from kernel and module. If the tracepoint is on the module,
+ * the module's refcount is incremented and returned as *@tp_mod. Thus, if it is
+ * not NULL, caller must call module_put(*tp_mod) after used the tracepoint.
  */
 static struct tracepoint *find_tracepoint(const char *tp_name,
 					  struct module **tp_mod)
@@ -933,15 +1035,10 @@ static struct tracepoint *find_tracepoint(const char *tp_name,
 }
 
 #ifdef CONFIG_MODULES
-static void reenable_trace_fprobe(struct trace_fprobe *tf)
-{
-	struct trace_probe *tp = &tf->tp;
-
-	list_for_each_entry(tf, trace_probe_probe_list(tp), tp.list) {
-		__enable_trace_fprobe(tf);
-	}
-}
-
+/*
+ * Find a tracepoint from specified module. In this case, this does not get the
+ * module's refcount. The caller must ensure the module is not freed.
+ */
 static struct tracepoint *find_tracepoint_in_module(struct module *mod,
 						    const char *tp_name)
 {
@@ -954,33 +1051,94 @@ static struct tracepoint *find_tracepoint_in_module(struct module *mod,
 	return data.tpoint;
 }
 
+/* These are CONFIG_MODULES=y specific functions. */
+static bool tracepoint_user_within_module(struct tracepoint_user *tuser,
+					  struct module *mod)
+{
+	return within_module(tracepoint_user_ip(tuser), mod);
+}
+
+static int tracepoint_user_register_again(struct tracepoint_user *tuser,
+					  struct tracepoint *tpoint)
+{
+	tuser->tpoint = tpoint;
+	return tracepoint_user_register(tuser);
+}
+
+static void tracepoint_user_unregister_clear(struct tracepoint_user *tuser)
+{
+	tracepoint_user_unregister(tuser);
+	tuser->tpoint = NULL;
+}
+
+/* module callback for tracepoint_user */
 static int __tracepoint_probe_module_cb(struct notifier_block *self,
 					unsigned long val, void *data)
 {
 	struct tp_module *tp_mod = data;
+	struct tracepoint_user *tuser;
 	struct tracepoint *tpoint;
+
+	if (val != MODULE_STATE_GOING && val != MODULE_STATE_COMING)
+		return NOTIFY_DONE;
+
+	mutex_lock(&tracepoint_user_mutex);
+	for_each_tracepoint_user(tuser) {
+		if (val == MODULE_STATE_COMING) {
+			/* This is not a tracepoint in this module. Skip it. */
+			tpoint = find_tracepoint_in_module(tp_mod->mod, tuser->name);
+			if (!tpoint)
+				continue;
+			WARN_ON_ONCE(tracepoint_user_register_again(tuser, tpoint));
+		} else if (val == MODULE_STATE_GOING &&
+			  tracepoint_user_within_module(tuser, tp_mod->mod)) {
+			/* Unregister all tracepoint_user in this module. */
+			tracepoint_user_unregister_clear(tuser);
+		}
+	}
+	mutex_unlock(&tracepoint_user_mutex);
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block tracepoint_module_nb = {
+	.notifier_call = __tracepoint_probe_module_cb,
+};
+
+/* module callback for tprobe events */
+static int __tprobe_event_module_cb(struct notifier_block *self,
+				     unsigned long val, void *data)
+{
 	struct trace_fprobe *tf;
 	struct dyn_event *pos;
+	struct module *mod = data;
 
 	if (val != MODULE_STATE_GOING && val != MODULE_STATE_COMING)
 		return NOTIFY_DONE;
 
 	mutex_lock(&event_mutex);
 	for_each_trace_fprobe(tf, pos) {
-		if (val == MODULE_STATE_COMING && tf->tpoint == TRACEPOINT_STUB) {
-			tpoint = find_tracepoint_in_module(tp_mod->mod, tf->symbol);
-			if (tpoint) {
-				tf->tpoint = tpoint;
-				tf->mod = tp_mod->mod;
-				if (!WARN_ON_ONCE(__regsiter_tracepoint_fprobe(tf)) &&
-				    trace_probe_is_enabled(&tf->tp))
-					reenable_trace_fprobe(tf);
-			}
-		} else if (val == MODULE_STATE_GOING && tp_mod->mod == tf->mod) {
-			tracepoint_probe_unregister(tf->tpoint,
-					tf->tpoint->probestub, NULL);
-			tf->tpoint = NULL;
-			tf->mod = NULL;
+		/* Skip fprobe and disabled tprobe events. */
+		if (!trace_fprobe_is_tracepoint(tf) || !tf->tuser)
+			continue;
+
+		/* Before this notification, tracepoint notifier has already done. */
+		if (val == MODULE_STATE_COMING &&
+		    tracepoint_user_within_module(tf->tuser, mod)) {
+			unsigned long ip = tracepoint_user_ip(tf->tuser);
+
+			WARN_ON_ONCE(register_fprobe_ips(&tf->fp, &ip, 1));
+		} else if (val == MODULE_STATE_GOING &&
+			   /*
+			    * tracepoint_user_within_module() does not work here because
+			    * tracepoint_user is already unregistered and cleared tpoint.
+			    * Instead, checking whether the fprobe is registered but
+			    * tpoint is cleared(unregistered). Such unbalance probes
+			    * must be adjusted anyway.
+			    */
+			    trace_fprobe_is_registered(tf) &&
+			    !tf->tuser->tpoint) {
+			unregister_fprobe(&tf->fp);
 		}
 	}
 	mutex_unlock(&event_mutex);
@@ -988,8 +1146,11 @@ static int __tracepoint_probe_module_cb(struct notifier_block *self,
 	return NOTIFY_DONE;
 }
 
-static struct notifier_block tracepoint_module_nb = {
-	.notifier_call = __tracepoint_probe_module_cb,
+/* NOTE: this must be called after tracepoint callback */
+static struct notifier_block tprobe_event_module_nb = {
+	.notifier_call = __tprobe_event_module_cb,
+	/* Make sure this is later than tracepoint module notifier. */
+	.priority = -10,
 };
 #endif /* CONFIG_MODULES */
 
@@ -1018,6 +1179,19 @@ static int parse_symbol_and_return(int argc, const char *argv[],
 	if (*is_return)
 		return 0;
 
+	if (is_tracepoint) {
+		tmp = *symbol;
+		while (*tmp && (isalnum(*tmp) || *tmp == '_'))
+			tmp++;
+		if (*tmp) {
+			/* find a wrong character. */
+			trace_probe_log_err(tmp - *symbol, BAD_TP_NAME);
+			kfree(*symbol);
+			*symbol = NULL;
+			return -EINVAL;
+		}
+	}
+
 	/* If there is $retval, this should be a return fprobe. */
 	for (i = 2; i < argc; i++) {
 		tmp = strstr(argv[i], "$retval");
@@ -1025,6 +1199,8 @@ static int parse_symbol_and_return(int argc, const char *argv[],
 			if (is_tracepoint) {
 				trace_probe_log_set_index(i);
 				trace_probe_log_err(tmp - argv[i], RETVAL_ON_PROBE);
+				kfree(*symbol);
+				*symbol = NULL;
 				return -EINVAL;
 			}
 			*is_return = true;
@@ -1034,7 +1210,8 @@ static int parse_symbol_and_return(int argc, const char *argv[],
 	return 0;
 }
 
-static int __trace_fprobe_create(int argc, const char *argv[])
+static int trace_fprobe_create_internal(int argc, const char *argv[],
+					struct traceprobe_parse_context *ctx)
 {
 	/*
 	 * Argument syntax:
@@ -1060,24 +1237,19 @@ static int __trace_fprobe_create(int argc, const char *argv[])
 	 * Type of args:
 	 *  FETCHARG:TYPE : use TYPE instead of unsigned long.
 	 */
-	struct trace_fprobe *tf = NULL;
-	int i, len, new_argc = 0, ret = 0;
-	bool is_return = false;
-	char *symbol = NULL;
+	struct trace_fprobe *tf __free(free_trace_fprobe) = NULL;
 	const char *event = NULL, *group = FPROBE_EVENT_SYSTEM;
-	const char **new_argv = NULL;
-	int maxactive = 0;
-	char buf[MAX_EVENT_NAME_LEN];
-	char gbuf[MAX_EVENT_NAME_LEN];
-	char sbuf[KSYM_NAME_LEN];
-	char abuf[MAX_BTF_ARGS_LEN];
-	char *dbuf = NULL;
+	struct module *mod __free(module_put) = NULL;
+	const char **new_argv __free(kfree) = NULL;
+	char *symbol __free(kfree) = NULL;
+	char *ebuf __free(kfree) = NULL;
+	char *gbuf __free(kfree) = NULL;
+	char *sbuf __free(kfree) = NULL;
+	char *abuf __free(kfree) = NULL;
+	char *dbuf __free(kfree) = NULL;
+	int i, new_argc = 0, ret = 0;
 	bool is_tracepoint = false;
-	struct module *tp_mod = NULL;
-	struct tracepoint *tpoint = NULL;
-	struct traceprobe_parse_context ctx = {
-		.flags = TPARG_FL_KERNEL | TPARG_FL_FPROBE,
-	};
+	bool is_return = false;
 
 	if ((argv[0][0] != 'f' && argv[0][0] != 't') || argc < 2)
 		return -ECANCELED;
@@ -1087,35 +1259,13 @@ static int __trace_fprobe_create(int argc, const char *argv[])
 		group = TRACEPOINT_EVENT_SYSTEM;
 	}
 
-	trace_probe_log_init("trace_fprobe", argc, argv);
-
-	event = strchr(&argv[0][1], ':');
-	if (event)
-		event++;
-
-	if (isdigit(argv[0][1])) {
-		if (event)
-			len = event - &argv[0][1] - 1;
-		else
-			len = strlen(&argv[0][1]);
-		if (len > MAX_EVENT_NAME_LEN - 1) {
+	if (argv[0][1] != '\0') {
+		if (argv[0][1] != ':') {
+			trace_probe_log_set_index(0);
 			trace_probe_log_err(1, BAD_MAXACT);
-			goto parse_error;
+			return -EINVAL;
 		}
-		memcpy(buf, &argv[0][1], len);
-		buf[len] = '\0';
-		ret = kstrtouint(buf, 0, &maxactive);
-		if (ret || !maxactive) {
-			trace_probe_log_err(1, BAD_MAXACT);
-			goto parse_error;
-		}
-		/* fprobe rethook instances are iterated over via a list. The
-		 * maximum should stay reasonable.
-		 */
-		if (maxactive > RETHOOK_MAXACTIVE_MAX) {
-			trace_probe_log_err(1, MAXACT_TOO_BIG);
-			goto parse_error;
-		}
+		event = &argv[0][2];
 	}
 
 	trace_probe_log_set_index(1);
@@ -1123,109 +1273,114 @@ static int __trace_fprobe_create(int argc, const char *argv[])
 	/* a symbol(or tracepoint) must be specified */
 	ret = parse_symbol_and_return(argc, argv, &symbol, &is_return, is_tracepoint);
 	if (ret < 0)
-		goto parse_error;
-
-	if (!is_return && maxactive) {
-		trace_probe_log_set_index(0);
-		trace_probe_log_err(1, BAD_MAXACT_TYPE);
-		goto parse_error;
-	}
+		return -EINVAL;
 
 	trace_probe_log_set_index(0);
 	if (event) {
+		gbuf = kmalloc(MAX_EVENT_NAME_LEN, GFP_KERNEL);
+		if (!gbuf)
+			return -ENOMEM;
 		ret = traceprobe_parse_event_name(&event, &group, gbuf,
 						  event - argv[0]);
 		if (ret)
-			goto parse_error;
+			return -EINVAL;
 	}
 
 	if (!event) {
+		ebuf = kmalloc(MAX_EVENT_NAME_LEN, GFP_KERNEL);
+		if (!ebuf)
+			return -ENOMEM;
 		/* Make a new event name */
 		if (is_tracepoint)
-			snprintf(buf, MAX_EVENT_NAME_LEN, "%s%s",
+			snprintf(ebuf, MAX_EVENT_NAME_LEN, "%s%s",
 				 isdigit(*symbol) ? "_" : "", symbol);
 		else
-			snprintf(buf, MAX_EVENT_NAME_LEN, "%s__%s", symbol,
+			snprintf(ebuf, MAX_EVENT_NAME_LEN, "%s__%s", symbol,
 				 is_return ? "exit" : "entry");
-		sanitize_event_name(buf);
-		event = buf;
+		sanitize_event_name(ebuf);
+		event = ebuf;
 	}
 
 	if (is_return)
-		ctx.flags |= TPARG_FL_RETURN;
+		ctx->flags |= TPARG_FL_RETURN;
 	else
-		ctx.flags |= TPARG_FL_FENTRY;
+		ctx->flags |= TPARG_FL_FENTRY;
 
+	ctx->funcname = NULL;
 	if (is_tracepoint) {
-		ctx.flags |= TPARG_FL_TPOINT;
-		tpoint = find_tracepoint(symbol, &tp_mod);
-		if (tpoint) {
-			ctx.funcname = kallsyms_lookup(
-				(unsigned long)tpoint->probestub,
-				NULL, NULL, NULL, sbuf);
-		} else if (IS_ENABLED(CONFIG_MODULES)) {
-				/* This *may* be loaded afterwards */
-				tpoint = TRACEPOINT_STUB;
-				ctx.funcname = symbol;
-		} else {
-			trace_probe_log_set_index(1);
-			trace_probe_log_err(0, NO_TRACEPOINT);
-			goto parse_error;
-		}
-	} else
-		ctx.funcname = symbol;
+		/* Get tracepoint and lock its module until the end of the registration. */
+		struct tracepoint *tpoint;
 
+		ctx->flags |= TPARG_FL_TPOINT;
+		mod = NULL;
+		tpoint = find_tracepoint(symbol, &mod);
+		if (tpoint) {
+			sbuf = kmalloc(KSYM_NAME_LEN, GFP_KERNEL);
+			if (!sbuf)
+				return -ENOMEM;
+			ctx->funcname = kallsyms_lookup((unsigned long)tpoint->probestub,
+							NULL, NULL, NULL, sbuf);
+		}
+	}
+	if (!ctx->funcname)
+		ctx->funcname = symbol;
+
+	abuf = kmalloc(MAX_BTF_ARGS_LEN, GFP_KERNEL);
+	if (!abuf)
+		return -ENOMEM;
 	argc -= 2; argv += 2;
 	new_argv = traceprobe_expand_meta_args(argc, argv, &new_argc,
-					       abuf, MAX_BTF_ARGS_LEN, &ctx);
-	if (IS_ERR(new_argv)) {
-		ret = PTR_ERR(new_argv);
-		new_argv = NULL;
-		goto out;
-	}
+					       abuf, MAX_BTF_ARGS_LEN, ctx);
+	if (IS_ERR(new_argv))
+		return PTR_ERR(new_argv);
 	if (new_argv) {
 		argc = new_argc;
 		argv = new_argv;
 	}
 	if (argc > MAX_TRACE_ARGS) {
-		ret = -E2BIG;
-		goto out;
+		trace_probe_log_set_index(2);
+		trace_probe_log_err(0, TOO_MANY_ARGS);
+		return -E2BIG;
 	}
 
 	ret = traceprobe_expand_dentry_args(argc, argv, &dbuf);
 	if (ret)
-		goto out;
+		return ret;
 
 	/* setup a probe */
-	tf = alloc_trace_fprobe(group, event, symbol, tpoint, tp_mod,
-				maxactive, argc, is_return);
+	tf = alloc_trace_fprobe(group, event, symbol, argc, is_return, is_tracepoint);
 	if (IS_ERR(tf)) {
 		ret = PTR_ERR(tf);
 		/* This must return -ENOMEM, else there is a bug */
 		WARN_ON_ONCE(ret != -ENOMEM);
-		goto out;	/* We know tf is not allocated */
+		return ret;
 	}
 
 	/* parse arguments */
 	for (i = 0; i < argc; i++) {
 		trace_probe_log_set_index(i + 2);
-		ctx.offset = 0;
-		ret = traceprobe_parse_probe_arg(&tf->tp, i, argv[i], &ctx);
+		ctx->offset = 0;
+		ret = traceprobe_parse_probe_arg(&tf->tp, i, argv[i], ctx);
 		if (ret)
-			goto error;	/* This can be -ENOMEM */
+			return ret;	/* This can be -ENOMEM */
 	}
 
 	if (is_return && tf->tp.entry_arg) {
 		tf->fp.entry_handler = trace_fprobe_entry_handler;
 		tf->fp.entry_data_size = traceprobe_get_entry_data_size(&tf->tp);
+		if (ALIGN(tf->fp.entry_data_size, sizeof(long)) > MAX_FPROBE_DATA_SIZE) {
+			trace_probe_log_set_index(2);
+			trace_probe_log_err(0, TOO_MANY_EARGS);
+			return -E2BIG;
+		}
 	}
 
 	ret = traceprobe_set_print_fmt(&tf->tp,
 			is_return ? PROBE_PRINT_RETURN : PROBE_PRINT_NORMAL);
 	if (ret < 0)
-		goto error;
+		return ret;
 
-	ret = register_trace_fprobe(tf);
+	ret = register_trace_fprobe_event(tf);
 	if (ret) {
 		trace_probe_log_set_index(1);
 		if (ret == -EILSEQ)
@@ -1234,29 +1389,35 @@ static int __trace_fprobe_create(int argc, const char *argv[])
 			trace_probe_log_err(0, BAD_PROBE_ADDR);
 		else if (ret != -ENOMEM && ret != -EEXIST)
 			trace_probe_log_err(0, FAIL_REG_PROBE);
-		goto error;
+		return -EINVAL;
 	}
 
-out:
-	if (tp_mod)
-		module_put(tp_mod);
-	traceprobe_finish_parse(&ctx);
-	trace_probe_log_clear();
-	kfree(new_argv);
-	kfree(symbol);
-	kfree(dbuf);
-	return ret;
+	/* 'tf' is successfully registered. To avoid freeing, assign NULL. */
+	tf = NULL;
 
-parse_error:
-	ret = -EINVAL;
-error:
-	free_trace_fprobe(tf);
-	goto out;
+	return 0;
+}
+
+static int trace_fprobe_create_cb(int argc, const char *argv[])
+{
+	struct traceprobe_parse_context *ctx __free(traceprobe_parse_context) = NULL;
+	int ret;
+
+	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
+
+	ctx->flags = TPARG_FL_KERNEL | TPARG_FL_FPROBE;
+
+	trace_probe_log_init("trace_fprobe", argc, argv);
+	ret = trace_fprobe_create_internal(argc, argv, ctx);
+	trace_probe_log_clear();
+	return ret;
 }
 
 static int trace_fprobe_create(const char *raw_command)
 {
-	return trace_probe_create(raw_command, __trace_fprobe_create);
+	return trace_probe_create(raw_command, trace_fprobe_create_cb);
 }
 
 static int trace_fprobe_release(struct dyn_event *ev)
@@ -1278,8 +1439,6 @@ static int trace_fprobe_show(struct seq_file *m, struct dyn_event *ev)
 		seq_putc(m, 't');
 	else
 		seq_putc(m, 'f');
-	if (trace_fprobe_is_return(tf) && tf->fp.nr_maxactive)
-		seq_printf(m, "%d", tf->fp.nr_maxactive);
 	seq_printf(m, ":%s/%s", trace_probe_group_name(&tf->tp),
 				trace_probe_name(&tf->tp));
 
@@ -1289,6 +1448,88 @@ static int trace_fprobe_show(struct seq_file *m, struct dyn_event *ev)
 	for (i = 0; i < tf->tp.nr_args; i++)
 		seq_printf(m, " %s=%s", tf->tp.args[i].name, tf->tp.args[i].comm);
 	seq_putc(m, '\n');
+
+	return 0;
+}
+
+/*
+ * Enable trace_probe
+ * if the file is NULL, enable "perf" handler, or enable "trace" handler.
+ */
+static int enable_trace_fprobe(struct trace_event_call *call,
+			       struct trace_event_file *file)
+{
+	struct trace_probe *tp;
+	struct trace_fprobe *tf;
+	bool enabled;
+	int ret = 0;
+
+	tp = trace_probe_primary_from_call(call);
+	if (WARN_ON_ONCE(!tp))
+		return -ENODEV;
+	enabled = trace_probe_is_enabled(tp);
+
+	/* This also changes "enabled" state */
+	if (file) {
+		ret = trace_probe_add_file(tp, file);
+		if (ret)
+			return ret;
+	} else
+		trace_probe_set_flag(tp, TP_FLAG_PROFILE);
+
+	if (!enabled) {
+		list_for_each_entry(tf, trace_probe_probe_list(tp), tp.list) {
+			ret = __register_trace_fprobe(tf);
+			if (ret < 0)
+				return ret;
+		}
+	}
+
+	return 0;
+}
+
+/*
+ * Disable trace_probe
+ * if the file is NULL, disable "perf" handler, or disable "trace" handler.
+ */
+static int disable_trace_fprobe(struct trace_event_call *call,
+				struct trace_event_file *file)
+{
+	struct trace_fprobe *tf;
+	struct trace_probe *tp;
+
+	tp = trace_probe_primary_from_call(call);
+	if (WARN_ON_ONCE(!tp))
+		return -ENODEV;
+
+	if (file) {
+		if (!trace_probe_get_file_link(tp, file))
+			return -ENOENT;
+		if (!trace_probe_has_single_file(tp))
+			goto out;
+		trace_probe_clear_flag(tp, TP_FLAG_TRACE);
+	} else
+		trace_probe_clear_flag(tp, TP_FLAG_PROFILE);
+
+	if (!trace_probe_is_enabled(tp)) {
+		list_for_each_entry(tf, trace_probe_probe_list(tp), tp.list) {
+			unregister_fprobe(&tf->fp);
+			if (tf->tuser) {
+				tracepoint_user_put(tf->tuser);
+				tf->tuser = NULL;
+			}
+		}
+	}
+
+ out:
+	if (file)
+		/*
+		 * Synchronization is done in below function. For perf event,
+		 * file == NULL and perf_trace_event_unreg() calls
+		 * tracepoint_synchronize_unregister() to ensure synchronize
+		 * event. We don't need to care about it.
+		 */
+		trace_probe_remove_file(tp, file);
 
 	return 0;
 }
@@ -1336,6 +1577,9 @@ static __init int init_fprobe_trace_early(void)
 
 #ifdef CONFIG_MODULES
 	ret = register_tracepoint_module_notifier(&tracepoint_module_nb);
+	if (ret)
+		return ret;
+	ret = register_module_notifier(&tprobe_event_module_nb);
 	if (ret)
 		return ret;
 #endif

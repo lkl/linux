@@ -7,7 +7,6 @@ source "arch/powerpc/platforms/chrp/Kconfig"
 source "arch/powerpc/platforms/512x/Kconfig"
 source "arch/powerpc/platforms/52xx/Kconfig"
 source "arch/powerpc/platforms/powermac/Kconfig"
-source "arch/powerpc/platforms/maple/Kconfig"
 source "arch/powerpc/platforms/pasemi/Kconfig"
 source "arch/powerpc/platforms/ps3/Kconfig"
 source "arch/powerpc/platforms/cell/Kconfig"
@@ -70,10 +69,6 @@ config PPC_DT_CPU_FTRS
 	  binding if the firmware provides it. Currently only the skiboot
 	  firmware provides this binding.
 	  If you're not sure say Y.
-
-config UDBG_RTAS_CONSOLE
-	bool "RTAS based debug console"
-	depends on PPC_RTAS
 
 config PPC_SMP_MUXED_IPI
 	bool
@@ -187,12 +182,6 @@ config PPC_INDIRECT_PIO
 	bool
 	select GENERIC_IOMAP
 
-config PPC_INDIRECT_MMIO
-	bool
-
-config PPC_IO_WORKAROUNDS
-	bool
-
 source "drivers/cpufreq/Kconfig"
 
 menu "CPUIdle driver"
@@ -243,7 +232,6 @@ config QE_GPIO
 	bool "QE GPIO support"
 	depends on QUICC_ENGINE
 	select GPIOLIB
-	select OF_GPIO_MM_GPIOCHIP
 	help
 	  Say Y here if you're going to use hardware that connects to the
 	  QE GPIOs.
@@ -254,7 +242,6 @@ config CPM2
 	select CPM
 	select HAVE_PCI
 	select GPIOLIB
-	select OF_GPIO_MM_GPIOCHIP
 	help
 	  The CPM2 (Communications Processor Module) is a coprocessor on
 	  embedded CPUs made by Freescale.  Selecting this option means that

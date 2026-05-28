@@ -339,6 +339,48 @@ static int tl_calc_and_print_sl_counters(struct adf_accel_dev *accel_dev,
 	return 0;
 }
 
+static int tl_print_cmdq_counter(struct adf_telemetry *telemetry,
+				 const struct adf_tl_dbg_counter *ctr,
+				 struct seq_file *s, u8 cnt_id, u8 counter)
+{
+	size_t cmdq_regs_sz = GET_TL_DATA(telemetry->accel_dev).cmdq_reg_sz;
+	size_t offset_inc = cnt_id * cmdq_regs_sz;
+	struct adf_tl_dbg_counter slice_ctr;
+	char cnt_name[MAX_COUNT_NAME_SIZE];
+
+	slice_ctr = *(ctr + counter);
+	slice_ctr.offset1 += offset_inc;
+	snprintf(cnt_name, MAX_COUNT_NAME_SIZE, "%s%d", slice_ctr.name, cnt_id);
+
+	return tl_calc_and_print_counter(telemetry, s, &slice_ctr, cnt_name);
+}
+
+static int tl_calc_and_print_cmdq_counters(struct adf_accel_dev *accel_dev,
+					   struct seq_file *s, u8 cnt_type,
+					   u8 cnt_id)
+{
+	struct adf_tl_hw_data *tl_data = &GET_TL_DATA(accel_dev);
+	struct adf_telemetry *telemetry = accel_dev->telemetry;
+	const struct adf_tl_dbg_counter **cmdq_tl_counters;
+	const struct adf_tl_dbg_counter *ctr;
+	u8 counter;
+	int ret;
+
+	cmdq_tl_counters = tl_data->cmdq_counters;
+	ctr = cmdq_tl_counters[cnt_type];
+
+	for (counter = 0; counter < tl_data->num_cmdq_counters; counter++) {
+		ret = tl_print_cmdq_counter(telemetry, ctr, s, cnt_id, counter);
+		if (ret) {
+			dev_notice(&GET_DEV(accel_dev),
+				   "invalid slice utilization counter type\n");
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
 static void tl_print_msg_cnt(struct seq_file *s, u32 msg_cnt)
 {
 	seq_printf(s, "%-*s", TL_KEY_MIN_PADDING, SNAPSHOT_CNT_MSG);
@@ -352,6 +394,7 @@ static int tl_print_dev_data(struct adf_accel_dev *accel_dev,
 	struct adf_telemetry *telemetry = accel_dev->telemetry;
 	const struct adf_tl_dbg_counter *dev_tl_counters;
 	u8 num_dev_counters = tl_data->num_dev_counters;
+	u8 *cmdq_cnt = (u8 *)&telemetry->cmdq_cnt;
 	u8 *sl_cnt = (u8 *)&telemetry->slice_cnt;
 	const struct adf_tl_dbg_counter *ctr;
 	unsigned int i;
@@ -382,6 +425,15 @@ static int tl_print_dev_data(struct adf_accel_dev *accel_dev,
 	for (i = 0; i < ADF_TL_SL_CNT_COUNT; i++) {
 		for (j = 0; j < sl_cnt[i]; j++) {
 			ret = tl_calc_and_print_sl_counters(accel_dev, s, i, j);
+			if (ret)
+				return ret;
+		}
+	}
+
+	/* Print per command queue telemetry. */
+	for (i = 0; i < ADF_TL_SL_CNT_COUNT; i++) {
+		for (j = 0; j < cmdq_cnt[i]; j++) {
+			ret = tl_calc_and_print_cmdq_counters(accel_dev, s, i, j);
 			if (ret)
 				return ret;
 		}
@@ -473,22 +525,6 @@ unlock_and_exit:
 }
 DEFINE_SHOW_STORE_ATTRIBUTE(tl_control);
 
-static int get_rp_index_from_file(const struct file *f, u8 *rp_id, u8 rp_num)
-{
-	char alpha;
-	u8 index;
-	int ret;
-
-	ret = sscanf(f->f_path.dentry->d_name.name, ADF_TL_RP_REGS_FNAME, &alpha);
-	if (ret != 1)
-		return -EINVAL;
-
-	index = ADF_TL_DBG_RP_INDEX_ALPHA(alpha);
-	*rp_id = index;
-
-	return 0;
-}
-
 static int adf_tl_dbg_change_rp_index(struct adf_accel_dev *accel_dev,
 				      unsigned int new_rp_num,
 				      unsigned int rp_regs_index)
@@ -554,6 +590,9 @@ static void tl_print_rp_srv(struct adf_accel_dev *accel_dev, struct seq_file *s,
 	case ASYM:
 		seq_printf(s, "%*s\n", TL_VALUE_MIN_PADDING, ADF_CFG_ASYM);
 		break;
+	case DECOMP:
+		seq_printf(s, "%*s\n", TL_VALUE_MIN_PADDING, ADF_CFG_DECOMP);
+		break;
 	default:
 		seq_printf(s, "%*s\n", TL_VALUE_MIN_PADDING, TL_RP_SRV_UNKNOWN);
 		break;
@@ -611,18 +650,11 @@ static int tl_rp_data_show(struct seq_file *s, void *unused)
 {
 	struct adf_accel_dev *accel_dev = s->private;
 	u8 rp_regs_index;
-	u8 max_rp;
-	int ret;
 
 	if (!accel_dev)
 		return -EINVAL;
 
-	max_rp = GET_TL_DATA(accel_dev).max_rp;
-	ret = get_rp_index_from_file(s->file, &rp_regs_index, max_rp);
-	if (ret) {
-		dev_dbg(&GET_DEV(accel_dev), "invalid RP data file name\n");
-		return ret;
-	}
+	rp_regs_index = debugfs_get_aux_num(s->file);
 
 	return tl_print_rp_data(accel_dev, s, rp_regs_index);
 }
@@ -635,7 +667,6 @@ static ssize_t tl_rp_data_write(struct file *file, const char __user *userbuf,
 	struct adf_telemetry *telemetry;
 	unsigned int new_rp_num;
 	u8 rp_regs_index;
-	u8 max_rp;
 	int ret;
 
 	accel_dev = seq_f->private;
@@ -643,15 +674,10 @@ static ssize_t tl_rp_data_write(struct file *file, const char __user *userbuf,
 		return -EINVAL;
 
 	telemetry = accel_dev->telemetry;
-	max_rp = GET_TL_DATA(accel_dev).max_rp;
 
 	mutex_lock(&telemetry->wr_lock);
 
-	ret = get_rp_index_from_file(file, &rp_regs_index, max_rp);
-	if (ret) {
-		dev_dbg(&GET_DEV(accel_dev), "invalid RP data file name\n");
-		goto unlock_and_exit;
-	}
+	rp_regs_index = debugfs_get_aux_num(file);
 
 	ret = kstrtou32_from_user(userbuf, count, 10, &new_rp_num);
 	if (ret)
@@ -689,7 +715,8 @@ void adf_tl_dbgfs_add(struct adf_accel_dev *accel_dev)
 	for (i = 0; i < max_rp; i++) {
 		snprintf(name, sizeof(name), ADF_TL_RP_REGS_FNAME,
 			 ADF_TL_DBG_RP_ALPHA_INDEX(i));
-		debugfs_create_file(name, 0644, dir, accel_dev, &tl_rp_data_fops);
+		debugfs_create_file_aux_num(name, 0644, dir, accel_dev, i,
+					    &tl_rp_data_fops);
 	}
 }
 

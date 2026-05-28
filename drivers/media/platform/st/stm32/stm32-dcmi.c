@@ -388,9 +388,9 @@ static void dcmi_set_crop(struct stm32_dcmi *dcmi)
 		 ((dcmi->crop.left << 1));
 	reg_write(dcmi->regs, DCMI_CWSTRT, start);
 
-	dev_dbg(dcmi->dev, "Cropping to %ux%u@%u:%u\n",
-		dcmi->crop.width, dcmi->crop.height,
-		dcmi->crop.left, dcmi->crop.top);
+	dev_dbg(dcmi->dev, "Cropping to (%d,%d)/%ux%u\n",
+		dcmi->crop.left, dcmi->crop.top,
+		dcmi->crop.width, dcmi->crop.height);
 
 	/* Enable crop */
 	reg_set(dcmi->regs, DCMI_CR, CR_CROP);
@@ -898,8 +898,6 @@ static const struct vb2_ops dcmi_video_qops = {
 	.buf_queue		= dcmi_buf_queue,
 	.start_streaming	= dcmi_start_streaming,
 	.stop_streaming		= dcmi_stop_streaming,
-	.wait_prepare		= vb2_ops_wait_prepare,
-	.wait_finish		= vb2_ops_wait_finish,
 };
 
 static int dcmi_g_fmt_vid_cap(struct file *file, void *priv,
@@ -1294,8 +1292,8 @@ static int dcmi_s_selection(struct file *file, void *priv,
 		/* Crop if request is different than sensor resolution */
 		dcmi->do_crop = true;
 		dcmi->crop = r;
-		dev_dbg(dcmi->dev, "s_selection: crop %ux%u@(%u,%u) from %ux%u\n",
-			r.width, r.height, r.left, r.top,
+		dev_dbg(dcmi->dev, "s_selection: crop (%d,%d)/%ux%u from %ux%u\n",
+			r.left, r.top, r.width, r.height,
 			pix.width, pix.height);
 	} else {
 		/* Disable crop */
@@ -1684,18 +1682,14 @@ static int dcmi_formats_init(struct stm32_dcmi *dcmi)
 		return -ENXIO;
 
 	dcmi->num_of_sd_formats = num_fmts;
-	dcmi->sd_formats = devm_kcalloc(dcmi->dev,
-					num_fmts, sizeof(struct dcmi_format *),
-					GFP_KERNEL);
+	dcmi->sd_formats = devm_kmemdup_array(dcmi->dev, sd_fmts, num_fmts,
+					      sizeof(*sd_fmts), GFP_KERNEL);
 	if (!dcmi->sd_formats) {
 		dev_err(dcmi->dev, "Could not allocate memory\n");
 		return -ENOMEM;
 	}
 
-	memcpy(dcmi->sd_formats, sd_fmts,
-	       num_fmts * sizeof(struct dcmi_format *));
 	dcmi->sd_format = dcmi->sd_formats[0];
-
 	return 0;
 }
 
@@ -1707,8 +1701,8 @@ static int dcmi_framesizes_init(struct stm32_dcmi *dcmi)
 		.which = V4L2_SUBDEV_FORMAT_ACTIVE,
 		.code = dcmi->sd_format->mbus_code,
 	};
-	unsigned int ret;
 	unsigned int i;
+	int ret;
 
 	/* Allocate discrete framesizes array */
 	while (!v4l2_subdev_call(subdev, pad, enum_frame_size,
@@ -1814,8 +1808,8 @@ static int dcmi_graph_notify_bound(struct v4l2_async_notifier *notifier,
 				   struct v4l2_async_connection *asd)
 {
 	struct stm32_dcmi *dcmi = notifier_to_dcmi(notifier);
-	unsigned int ret;
 	int src_pad;
+	int ret;
 
 	dev_dbg(dcmi->dev, "Subdev \"%s\" bound\n", subdev->name);
 
@@ -2149,7 +2143,7 @@ static const struct dev_pm_ops dcmi_pm_ops = {
 
 static struct platform_driver stm32_dcmi_driver = {
 	.probe		= dcmi_probe,
-	.remove_new	= dcmi_remove,
+	.remove		= dcmi_remove,
 	.driver		= {
 		.name = DRV_NAME,
 		.of_match_table = of_match_ptr(stm32_dcmi_of_match),

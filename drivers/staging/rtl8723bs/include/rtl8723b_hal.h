@@ -15,7 +15,6 @@
 #include "rtl8723b_recv.h"
 #include "rtl8723b_xmit.h"
 #include "rtl8723b_cmd.h"
-#include "rtw_mp.h"
 #include "hal_pwr_seq.h"
 #include "Hal8192CPhyReg.h"
 #include "hal_phy_cfg.h"
@@ -211,8 +210,6 @@ void Hal_EfuseParseChnlPlan_8723B(struct adapter *padapter, u8 *hwinfo,
 				  bool AutoLoadFail);
 void Hal_EfuseParseCustomerID_8723B(struct adapter *padapter, u8 *hwinfo,
 				    bool AutoLoadFail);
-void Hal_EfuseParseAntennaDiversity_8723B(struct adapter *padapter, u8 *hwinfo,
-					  bool AutoLoadFail);
 void Hal_EfuseParseXtal_8723B(struct adapter *padapter, u8 *hwinfo,
 			      bool AutoLoadFail);
 void Hal_EfuseParseThermalMeter_8723B(struct adapter *padapter, u8 *hwinfo,
@@ -224,7 +221,6 @@ void Hal_EfuseParseVoltage_8723B(struct adapter *padapter, u8 *hwinfo,
 
 void C2HPacketHandler_8723B(struct adapter *padapter, u8 *pbuffer, u16 length);
 
-void rtl8723b_set_hal_ops(struct hal_ops *pHalFunc);
 void SetHwReg8723B(struct adapter *padapter, u8 variable, u8 *val);
 void GetHwReg8723B(struct adapter *padapter, u8 variable, u8 *val);
 u8 SetHalDefVar8723B(struct adapter *padapter, enum hal_def_variable variable,

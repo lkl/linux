@@ -1,3 +1,13 @@
+.. |threshold|  replace:: **-a/--auto**, **-i/--irq**, or **-T/--thread**
+.. |thresharg|  replace:: -T
+.. |tracer|     replace:: timerlat
+
+.. |actionsperf| replace::
+        For time-sensitive actions, it is recommended to run **rtla timerlat** with BPF
+        support and RT priority. Note that due to implementational limitations, actions
+        might be delayed up to one second after tracing is stopped if BPF mode is not
+        available or disabled.
+
 **-a**, **--auto** *us*
 
         Set the automatic trace mode. This mode sets some commonly used options
@@ -30,6 +40,14 @@
         Set the /dev/cpu_dma_latency to *us*, aiming to bound exit from idle latencies.
         *cyclictest* sets this value to *0* by default, use **--dma-latency** *0* to have
         similar results.
+
+**--deepest-idle-state** *n*
+        Disable idle states higher than *n* for cpus that are running timerlat threads to
+        reduce exit from idle latencies. If *n* is -1, all idle states are disabled.
+        On exit from timerlat, the idle state setting is restored to its original state
+        before running timerlat.
+
+        Requires rtla to be built with libcpupower.
 
 **-k**, **--kernel-threads**
 

@@ -58,8 +58,8 @@ void uverbs_uobject_put(struct ib_uobject *uobject)
 }
 EXPORT_SYMBOL(uverbs_uobject_put);
 
-static int uverbs_try_lock_object(struct ib_uobject *uobj,
-				  enum rdma_lookup_mode mode)
+int uverbs_try_lock_object(struct ib_uobject *uobj,
+			   enum rdma_lookup_mode mode)
 {
 	/*
 	 * When a shared access is required, we use a positive counter. Each
@@ -84,6 +84,7 @@ static int uverbs_try_lock_object(struct ib_uobject *uobj,
 	}
 	return 0;
 }
+EXPORT_SYMBOL(uverbs_try_lock_object);
 
 static void assert_uverbs_usecnt(struct ib_uobject *uobj,
 				 enum rdma_lookup_mode mode)
@@ -880,9 +881,14 @@ static void ufile_destroy_ucontext(struct ib_uverbs_file *ufile,
 static int __uverbs_cleanup_ufile(struct ib_uverbs_file *ufile,
 				  enum rdma_remove_reason reason)
 {
+	struct uverbs_attr_bundle attrs = { .ufile = ufile };
+	struct ib_ucontext *ucontext = ufile->ucontext;
+	struct ib_device *ib_dev = ucontext->device;
 	struct ib_uobject *obj, *next_obj;
 	int ret = -EINVAL;
-	struct uverbs_attr_bundle attrs = { .ufile = ufile };
+
+	if (ib_dev->ops.ufile_hw_cleanup)
+		ib_dev->ops.ufile_hw_cleanup(ufile);
 
 	/*
 	 * This shouldn't run while executing other commands on this
@@ -1013,3 +1019,32 @@ void uverbs_finalize_object(struct ib_uobject *uobj,
 		WARN_ON(true);
 	}
 }
+
+/**
+ * rdma_uattrs_has_raw_cap() - Returns whether a rdma device linked to the
+ *			       uverbs attributes file has CAP_NET_RAW
+ *			       capability or not.
+ *
+ * @attrs:       Pointer to uverbs attributes
+ *
+ * Returns true if a rdma device's owning user namespace has CAP_NET_RAW
+ * capability, otherwise false.
+ */
+bool rdma_uattrs_has_raw_cap(const struct uverbs_attr_bundle *attrs)
+{
+	struct ib_uverbs_file *ufile = attrs->ufile;
+	struct ib_ucontext *ucontext;
+	bool has_cap = false;
+	int srcu_key;
+
+	srcu_key = srcu_read_lock(&ufile->device->disassociate_srcu);
+	ucontext = ib_uverbs_get_ucontext_file(ufile);
+	if (IS_ERR(ucontext))
+		goto out;
+	has_cap = rdma_dev_has_raw_cap(ucontext->device);
+
+out:
+	srcu_read_unlock(&ufile->device->disassociate_srcu, srcu_key);
+	return has_cap;
+}
+EXPORT_SYMBOL(rdma_uattrs_has_raw_cap);

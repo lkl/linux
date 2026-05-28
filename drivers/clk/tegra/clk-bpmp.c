@@ -174,7 +174,7 @@ static int tegra_bpmp_clk_determine_rate(struct clk_hw *hw,
 	unsigned long rate;
 	int err;
 
-	rate = min(max(rate_req->rate, rate_req->min_rate), rate_req->max_rate);
+	rate = clamp(rate_req->rate, rate_req->min_rate, rate_req->max_rate);
 
 	memset(&request, 0, sizeof(request));
 	request.rate = min_t(u64, rate, S64_MAX);
@@ -635,7 +635,7 @@ static int tegra_bpmp_register_clocks(struct tegra_bpmp *bpmp,
 
 	bpmp->num_clocks = count;
 
-	bpmp->clocks = devm_kcalloc(bpmp->dev, count, sizeof(struct tegra_bpmp_clk), GFP_KERNEL);
+	bpmp->clocks = devm_kcalloc(bpmp->dev, count, sizeof(*bpmp->clocks), GFP_KERNEL);
 	if (!bpmp->clocks)
 		return -ENOMEM;
 

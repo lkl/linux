@@ -656,11 +656,13 @@ static int rsi_config_power(struct ieee80211_hw *hw)
  *			   requests. The stack calls this function to
  *			   change hardware configuration, e.g., channel.
  * @hw: Pointer to the ieee80211_hw structure.
+ * @radio_idx: Radio index.
  * @changed: Changed flags set.
  *
  * Return: 0 on success, negative error code on failure.
  */
 static int rsi_mac80211_config(struct ieee80211_hw *hw,
+			       int radio_idx,
 			       u32 changed)
 {
 	struct rsi_hw *adapter = hw->priv;
@@ -1201,12 +1203,13 @@ unlock:
 /**
  * rsi_mac80211_set_rts_threshold() - This function sets rts threshold value.
  * @hw: Pointer to the ieee80211_hw structure.
+ * @radio_idx: Radio index.
  * @value: Rts threshold value.
  *
  * Return: 0 on success.
  */
 static int rsi_mac80211_set_rts_threshold(struct ieee80211_hw *hw,
-					  u32 value)
+					  int radio_idx, u32 value)
 {
 	struct rsi_hw *adapter = hw->priv;
 	struct rsi_common *common = adapter->priv;
@@ -1583,12 +1586,14 @@ static int rsi_mac80211_sta_remove(struct ieee80211_hw *hw,
  * rsi_mac80211_set_antenna() - This function is used to configure
  *				tx and rx antennas.
  * @hw: Pointer to the ieee80211_hw structure.
+ * @radio_idx: Radio index
  * @tx_ant: Bitmap for tx antenna
  * @rx_ant: Bitmap for rx antenna
  *
  * Return: 0 on success, Negative error code on failure.
  */
 static int rsi_mac80211_set_antenna(struct ieee80211_hw *hw,
+				    int radio_idx,
 				    u32 tx_ant, u32 rx_ant)
 {
 	struct rsi_hw *adapter = hw->priv;
@@ -1634,12 +1639,14 @@ fail_set_antenna:
  * 				tx and rx antennas.
  *
  * @hw: Pointer to the ieee80211_hw structure.
+ * @radio_idx: Radio index
  * @tx_ant: Bitmap for tx antenna
  * @rx_ant: Bitmap for rx antenna
  * 
  * Return: 0 on success, negative error codes on failure.
  */
 static int rsi_mac80211_get_antenna(struct ieee80211_hw *hw,
+				    int radio_idx,
 				    u32 *tx_ant, u32 *rx_ant)
 {
 	struct rsi_hw *adapter = hw->priv;
@@ -1746,7 +1753,7 @@ static void rsi_resume_conn_channel(struct rsi_common *common)
 
 void rsi_roc_timeout(struct timer_list *t)
 {
-	struct rsi_common *common = from_timer(common, t, roc_timer);
+	struct rsi_common *common = timer_container_of(common, t, roc_timer);
 
 	rsi_dbg(INFO_ZONE, "Remain on channel expired\n");
 
@@ -1754,7 +1761,7 @@ void rsi_roc_timeout(struct timer_list *t)
 	ieee80211_remain_on_channel_expired(common->priv->hw);
 
 	if (timer_pending(&common->roc_timer))
-		del_timer(&common->roc_timer);
+		timer_delete(&common->roc_timer);
 
 	rsi_resume_conn_channel(common);
 	mutex_unlock(&common->mutex);
@@ -1776,7 +1783,7 @@ static int rsi_mac80211_roc(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 
 	if (timer_pending(&common->roc_timer)) {
 		rsi_dbg(INFO_ZONE, "Stop on-going ROC\n");
-		del_timer(&common->roc_timer);
+		timer_delete(&common->roc_timer);
 	}
 	common->roc_timer.expires = msecs_to_jiffies(duration) + jiffies;
 	add_timer(&common->roc_timer);
@@ -1820,7 +1827,7 @@ static int rsi_mac80211_cancel_roc(struct ieee80211_hw *hw,
 		return 0;
 	}
 
-	del_timer(&common->roc_timer);
+	timer_delete(&common->roc_timer);
 
 	rsi_resume_conn_channel(common);
 	mutex_unlock(&common->mutex);

@@ -75,18 +75,6 @@ Module Initialization
 .. kernel-doc:: include/drm/drm_module.h
    :doc: overview
 
-Managing Ownership of the Framebuffer Aperture
-----------------------------------------------
-
-.. kernel-doc:: drivers/gpu/drm/drm_aperture.c
-   :doc: overview
-
-.. kernel-doc:: include/drm/drm_aperture.h
-   :internal:
-
-.. kernel-doc:: drivers/gpu/drm/drm_aperture.c
-   :export:
-
 Device Instance and Driver Handling
 -----------------------------------
 
@@ -220,6 +208,13 @@ follows:
 	``CONFIG_VIRTIO_UML`` and ``CONFIG_UML_PCI_OVER_VIRTIO`` are not
 	included in it because they are only required for User Mode Linux.
 
+KUnit Coverage Rules
+~~~~~~~~~~~~~~~~~~~~
+
+KUnit support is gradually added to the DRM framework and helpers. There's no
+general requirement for the framework and helpers to have KUnit tests at the
+moment. However, patches that are affecting a function or helper already
+covered by KUnit tests must provide tests if the change calls for one.
 
 Legacy Support Code
 ===================

@@ -10,10 +10,11 @@ struct fscrypt_str;
 struct btrfs_fs_info;
 struct btrfs_key;
 struct btrfs_path;
+struct btrfs_inode;
 struct btrfs_root;
 struct btrfs_trans_handle;
 
-int btrfs_check_dir_item_collision(struct btrfs_root *root, u64 dir,
+int btrfs_check_dir_item_collision(struct btrfs_root *root, u64 dir_ino,
 			  const struct fscrypt_str *name);
 int btrfs_insert_dir_item(struct btrfs_trans_handle *trans,
 			  const struct fscrypt_str *name, struct btrfs_inode *dir,
@@ -44,8 +45,7 @@ struct btrfs_dir_item *btrfs_lookup_xattr(struct btrfs_trans_handle *trans,
 					  struct btrfs_path *path, u64 dir,
 					  const char *name, u16 name_len,
 					  int mod);
-struct btrfs_dir_item *btrfs_match_dir_item_name(struct btrfs_fs_info *fs_info,
-						 const struct btrfs_path *path,
+struct btrfs_dir_item *btrfs_match_dir_item_name(const struct btrfs_path *path,
 						 const char *name,
 						 int name_len);
 

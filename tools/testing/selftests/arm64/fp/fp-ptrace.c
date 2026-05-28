@@ -31,6 +31,14 @@
 
 #include "fp-ptrace.h"
 
+#include <linux/bits.h>
+
+#define FPMR_LSCALE2_MASK                               GENMASK(37, 32)
+#define FPMR_NSCALE_MASK                                GENMASK(31, 24)
+#define FPMR_LSCALE_MASK                                GENMASK(22, 16)
+#define FPMR_OSC_MASK                                   GENMASK(15, 15)
+#define FPMR_OSM_MASK                                   GENMASK(14, 14)
+
 /* <linux/elf.h> and <sys/auxv.h> don't like each other, so: */
 #ifndef NT_ARM_SVE
 #define NT_ARM_SVE 0x405
@@ -48,10 +56,21 @@
 #define NT_ARM_ZT 0x40d
 #endif
 
+#ifndef NT_ARM_FPMR
+#define NT_ARM_FPMR 0x40e
+#endif
+
 #define ARCH_VQ_MAX 256
 
 /* VL 128..2048 in powers of 2 */
 #define MAX_NUM_VLS 5
+
+/*
+ * FPMR bits we can set without doing feature checks to see if values
+ * are valid.
+ */
+#define FPMR_SAFE_BITS (FPMR_LSCALE2_MASK | FPMR_NSCALE_MASK | \
+			FPMR_LSCALE_MASK | FPMR_OSC_MASK | FPMR_OSM_MASK)
 
 #define NUM_FPR 32
 __uint128_t v_in[NUM_FPR];
@@ -78,11 +97,13 @@ char zt_in[ZT_SIG_REG_BYTES];
 char zt_expected[ZT_SIG_REG_BYTES];
 char zt_out[ZT_SIG_REG_BYTES];
 
+uint64_t fpmr_in, fpmr_expected, fpmr_out;
+
 uint64_t sve_vl_out;
 uint64_t sme_vl_out;
 uint64_t svcr_in, svcr_expected, svcr_out;
 
-void load_and_save(int sve, int sme, int sme2, int fa64);
+void load_and_save(int flags);
 
 static bool got_alarm;
 
@@ -126,6 +147,11 @@ static bool sme2_supported(void)
 static bool fa64_supported(void)
 {
 	return getauxval(AT_HWCAP2) & HWCAP2_SME_FA64;
+}
+
+static bool fpmr_supported(void)
+{
+	return getauxval(AT_HWCAP2) & HWCAP2_FPMR;
 }
 
 static bool compare_buffer(const char *name, void *out,
@@ -198,7 +224,7 @@ static int vl_expected(struct test_config *config)
 
 static void run_child(struct test_config *config)
 {
-	int ret;
+	int ret, flags;
 
 	/* Let the parent attach to us */
 	ret = ptrace(PTRACE_TRACEME, 0, 0, 0);
@@ -224,8 +250,19 @@ static void run_child(struct test_config *config)
 	}
 
 	/* Load values and wait for the parent */
-	load_and_save(sve_supported(), sme_supported(),
-		      sme2_supported(), fa64_supported());
+	flags = 0;
+	if (sve_supported())
+		flags |= HAVE_SVE;
+	if (sme_supported())
+		flags |= HAVE_SME;
+	if (sme2_supported())
+		flags |= HAVE_SME2;
+	if (fa64_supported())
+		flags |= HAVE_FA64;
+	if (fpmr_supported())
+		flags |= HAVE_FPMR;
+
+	load_and_save(flags);
 
 	exit(0);
 }
@@ -312,6 +349,14 @@ static void read_child_regs(pid_t child)
 		iov_child.iov_len = sizeof(zt_out);
 		read_one_child_regs(child, "ZT", &iov_parent, &iov_child);
 	}
+
+	if (fpmr_supported()) {
+		iov_parent.iov_base = &fpmr_out;
+		iov_parent.iov_len = sizeof(fpmr_out);
+		iov_child.iov_base = &fpmr_out;
+		iov_child.iov_len = sizeof(fpmr_out);
+		read_one_child_regs(child, "FPMR", &iov_parent, &iov_child);
+	}
 }
 
 static bool continue_breakpoint(pid_t child,
@@ -394,10 +439,17 @@ static bool check_ptrace_values_sve(pid_t child, struct test_config *config)
 		pass = false;
 	}
 
-	if (sve->size != SVE_PT_SIZE(vq, sve->flags)) {
-		ksft_print_msg("Mismatch in SVE header size: %d != %lu\n",
-			       sve->size, SVE_PT_SIZE(vq, sve->flags));
-		pass = false;
+	if (svcr_in & SVCR_SM) {
+		if (sve->size != sizeof(sve)) {
+			ksft_print_msg("NT_ARM_SVE reports data with PSTATE.SM\n");
+			pass = false;
+		}
+	} else {
+		if (sve->size != SVE_PT_SIZE(vq, sve->flags)) {
+			ksft_print_msg("Mismatch in SVE header size: %d != %lu\n",
+				       sve->size, SVE_PT_SIZE(vq, sve->flags));
+			pass = false;
+		}
 	}
 
 	/* The registers might be in completely different formats! */
@@ -470,10 +522,17 @@ static bool check_ptrace_values_ssve(pid_t child, struct test_config *config)
 		pass = false;
 	}
 
-	if (sve->size != SVE_PT_SIZE(vq, sve->flags)) {
-		ksft_print_msg("Mismatch in SSVE header size: %d != %lu\n",
-			       sve->size, SVE_PT_SIZE(vq, sve->flags));
-		pass = false;
+	if (!(svcr_in & SVCR_SM)) {
+		if (sve->size != sizeof(sve)) {
+			ksft_print_msg("NT_ARM_SSVE reports data without PSTATE.SM\n");
+			pass = false;
+		}
+	} else {
+		if (sve->size != SVE_PT_SIZE(vq, sve->flags)) {
+			ksft_print_msg("Mismatch in SSVE header size: %d != %lu\n",
+				       sve->size, SVE_PT_SIZE(vq, sve->flags));
+			pass = false;
+		}
 	}
 
 	/* The registers might be in completely different formats! */
@@ -586,6 +645,26 @@ static bool check_ptrace_values_zt(pid_t child, struct test_config *config)
 	return compare_buffer("initial ZT", buf, zt_in, ZT_SIG_REG_BYTES);
 }
 
+static bool check_ptrace_values_fpmr(pid_t child, struct test_config *config)
+{
+	uint64_t val;
+	struct iovec iov;
+	int ret;
+
+	if (!fpmr_supported())
+		return true;
+
+	iov.iov_base = &val;
+	iov.iov_len = sizeof(val);
+	ret = ptrace(PTRACE_GETREGSET, child, NT_ARM_FPMR, &iov);
+	if (ret != 0) {
+		ksft_print_msg("Failed to read initial FPMR: %s (%d)\n",
+			       strerror(errno), errno);
+		return false;
+	}
+
+	return compare_buffer("initial FPMR", &val, &fpmr_in, sizeof(val));
+}
 
 static bool check_ptrace_values(pid_t child, struct test_config *config)
 {
@@ -618,6 +697,9 @@ static bool check_ptrace_values(pid_t child, struct test_config *config)
 		pass = false;
 
 	if (!check_ptrace_values_zt(child, config))
+		pass = false;
+
+	if (!check_ptrace_values_fpmr(child, config))
 		pass = false;
 
 	return pass;
@@ -874,6 +956,16 @@ static void set_initial_values(struct test_config *config)
 			memset(zt_expected, 0, ZT_SIG_REG_BYTES);
 		memset(zt_out, 0, sizeof(zt_out));
 	}
+
+	if (fpmr_supported()) {
+		fill_random(&fpmr_in, sizeof(fpmr_in));
+		fpmr_in &= FPMR_SAFE_BITS;
+		fpmr_expected = fpmr_in;
+	} else {
+		fpmr_in = 0;
+		fpmr_expected = 0;
+		fpmr_out = 0;
+	}
 }
 
 static bool check_memory_values(struct test_config *config)
@@ -924,6 +1016,12 @@ static bool check_memory_values(struct test_config *config)
 	if (!compare_buffer("saved ZT", zt_out, zt_expected, ZT_SIG_REG_BYTES))
 		pass = false;
 
+	if (fpmr_out != fpmr_expected) {
+		ksft_print_msg("Mismatch in saved FPMR: %lx != %lx\n",
+			       fpmr_out, fpmr_expected);
+		pass = false;
+	}
+
 	return pass;
 }
 
@@ -963,7 +1061,27 @@ static bool sve_write_supported(struct test_config *config)
 		if (config->sme_vl_in != config->sme_vl_expected) {
 			return false;
 		}
+
+		if (!sve_supported())
+			return false;
 	}
+
+	return true;
+}
+
+static bool sve_write_fpsimd_supported(struct test_config *config)
+{
+	if (!sve_supported())
+		return false;
+
+	if ((config->svcr_in & SVCR_ZA) != (config->svcr_expected & SVCR_ZA))
+		return false;
+
+	if (config->svcr_expected & SVCR_SM)
+		return false;
+
+	if (config->sme_vl_in != config->sme_vl_expected)
+		return false;
 
 	return true;
 }
@@ -1001,10 +1119,43 @@ static void fpsimd_write(pid_t child, struct test_config *test_config)
 			       strerror(errno), errno);
 }
 
+static bool fpmr_write_supported(struct test_config *config)
+{
+	if (!fpmr_supported())
+		return false;
+
+	if (!sve_sme_same(config))
+		return false;
+
+	return true;
+}
+
+static void fpmr_write_expected(struct test_config *config)
+{
+	fill_random(&fpmr_expected, sizeof(fpmr_expected));
+	fpmr_expected &= FPMR_SAFE_BITS;
+}
+
+static void fpmr_write(pid_t child, struct test_config *config)
+{
+	struct iovec iov;
+	int ret;
+
+	iov.iov_len = sizeof(fpmr_expected);
+	iov.iov_base = &fpmr_expected;
+	ret = ptrace(PTRACE_SETREGSET, child, NT_ARM_FPMR, &iov);
+	if (ret != 0)
+		ksft_print_msg("Failed to write FPMR: %s (%d)\n",
+			       strerror(errno), errno);
+}
+
 static void sve_write_expected(struct test_config *config)
 {
 	int vl = vl_expected(config);
 	int sme_vq = __sve_vq_from_vl(config->sme_vl_expected);
+
+	if (!vl)
+		return;
 
 	fill_random(z_expected, __SVE_ZREGS_SIZE(__sve_vq_from_vl(vl)));
 	fill_random(p_expected, __SVE_PREGS_SIZE(__sve_vq_from_vl(vl)));
@@ -1024,7 +1175,7 @@ static void sve_write_expected(struct test_config *config)
 	}
 }
 
-static void sve_write(pid_t child, struct test_config *config)
+static void sve_write_sve(pid_t child, struct test_config *config)
 {
 	struct user_sve_header *sve;
 	struct iovec iov;
@@ -1033,7 +1184,10 @@ static void sve_write(pid_t child, struct test_config *config)
 	vl = vl_expected(config);
 	vq = __sve_vq_from_vl(vl);
 
-	iov.iov_len = SVE_PT_SVE_OFFSET + SVE_PT_SVE_SIZE(vq, SVE_PT_REGS_SVE);
+	if (!vl)
+		return;
+
+	iov.iov_len = SVE_PT_SIZE(vq, SVE_PT_REGS_SVE);
 	iov.iov_base = malloc(iov.iov_len);
 	if (!iov.iov_base) {
 		ksft_print_msg("Failed allocating %lu byte SVE write buffer\n",
@@ -1067,21 +1221,47 @@ static void sve_write(pid_t child, struct test_config *config)
 	free(iov.iov_base);
 }
 
+static void sve_write_fpsimd(pid_t child, struct test_config *config)
+{
+	struct user_sve_header *sve;
+	struct user_fpsimd_state *fpsimd;
+	struct iovec iov;
+	int ret, vl, vq;
+
+	vl = vl_expected(config);
+	vq = __sve_vq_from_vl(vl);
+
+	if (!vl)
+		return;
+
+	iov.iov_len = SVE_PT_SIZE(vq, SVE_PT_REGS_FPSIMD);
+	iov.iov_base = malloc(iov.iov_len);
+	if (!iov.iov_base) {
+		ksft_print_msg("Failed allocating %lu byte SVE write buffer\n",
+			       iov.iov_len);
+		return;
+	}
+	memset(iov.iov_base, 0, iov.iov_len);
+
+	sve = iov.iov_base;
+	sve->size = iov.iov_len;
+	sve->flags = SVE_PT_REGS_FPSIMD;
+	sve->vl = vl;
+
+	fpsimd = iov.iov_base + SVE_PT_REGS_OFFSET;
+	memcpy(&fpsimd->vregs, v_expected, sizeof(v_expected));
+
+	ret = ptrace(PTRACE_SETREGSET, child, NT_ARM_SVE, &iov);
+	if (ret != 0)
+		ksft_print_msg("Failed to write SVE: %s (%d)\n",
+			       strerror(errno), errno);
+
+	free(iov.iov_base);
+}
+
 static bool za_write_supported(struct test_config *config)
 {
-	if (config->svcr_expected & SVCR_SM) {
-		if (!(config->svcr_in & SVCR_SM))
-			return false;
-
-		/* Changing the SME VL exits streaming mode */
-		if (config->sme_vl_in != config->sme_vl_expected) {
-			return false;
-		}
-	}
-
-	/* Can't disable SM outside a VL change */
-	if ((config->svcr_in & SVCR_SM) &&
-	    !(config->svcr_expected & SVCR_SM))
+	if ((config->svcr_in & SVCR_SM) != (config->svcr_expected & SVCR_SM))
 		return false;
 
 	return true;
@@ -1100,10 +1280,8 @@ static void za_write_expected(struct test_config *config)
 		memset(zt_expected, 0, sizeof(zt_expected));
 	}
 
-	/* Changing the SME VL flushes ZT, SVE state and exits SM */
+	/* Changing the SME VL flushes ZT, SVE state */
 	if (config->sme_vl_in != config->sme_vl_expected) {
-		svcr_expected &= ~SVCR_SM;
-
 		sve_vq = __sve_vq_from_vl(vl_expected(config));
 		memset(z_expected, 0, __SVE_ZREGS_SIZE(sve_vq));
 		memset(p_expected, 0, __SVE_PREGS_SIZE(sve_vq));
@@ -1259,6 +1437,12 @@ static struct test_definition base_test_defs[] = {
 		.set_expected_values = fpsimd_write_expected,
 		.modify_values = fpsimd_write,
 	},
+	{
+		.name = "FPMR write",
+		.supported = fpmr_write_supported,
+		.set_expected_values = fpmr_write_expected,
+		.modify_values = fpmr_write,
+	},
 };
 
 static struct test_definition sve_test_defs[] = {
@@ -1266,7 +1450,13 @@ static struct test_definition sve_test_defs[] = {
 		.name = "SVE write",
 		.supported = sve_write_supported,
 		.set_expected_values = sve_write_expected,
-		.modify_values = sve_write,
+		.modify_values = sve_write_sve,
+	},
+	{
+		.name = "SVE write FPSIMD format",
+		.supported = sve_write_fpsimd_supported,
+		.set_expected_values = fpsimd_write_expected,
+		.modify_values = sve_write_fpsimd,
 	},
 };
 
@@ -1378,7 +1568,6 @@ static void run_sve_tests(void)
 					  &test_config);
 		}
 	}
-
 }
 
 static void run_sme_tests(void)
@@ -1468,6 +1657,9 @@ int main(void)
 	if (fa64_supported())
 		ksft_print_msg("FA64 supported\n");
 
+	if (fpmr_supported())
+		ksft_print_msg("FPMR supported\n");
+
 	ksft_set_plan(tests);
 
 	/* Get signal handers ready before we start any children */
@@ -1484,7 +1676,7 @@ int main(void)
 	 * Run the test set if there is no SVE or SME, with those we
 	 * have to pick a VL for each run.
 	 */
-	if (!sve_supported()) {
+	if (!sve_supported() && !sme_supported()) {
 		test_config.sve_vl_in = 0;
 		test_config.sve_vl_expected = 0;
 		test_config.sme_vl_in = 0;

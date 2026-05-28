@@ -305,13 +305,26 @@ Kernel Mode Driver
 ------------------
 
 The KMD is responsible for checking if the device needs a reset, and to perform
-it as needed. Usually a hang is detected when a job gets stuck executing. KMD
-should keep track of resets, because userspace can query any time about the
-reset status for a specific context. This is needed to propagate to the rest of
-the stack that a reset has happened. Currently, this is implemented by each
-driver separately, with no common DRM interface. Ideally this should be properly
-integrated at DRM scheduler to provide a common ground for all drivers. After a
-reset, KMD should reject new command submissions for affected contexts.
+it as needed. Usually a hang is detected when a job gets stuck executing.
+
+Propagation of errors to userspace has proven to be tricky since it goes in
+the opposite direction of the usual flow of commands. Because of this vendor
+independent error handling was added to the &dma_fence object, this way drivers
+can add an error code to their fences before signaling them. See function
+dma_fence_set_error() on how to do this and for examples of error codes to use.
+
+The DRM scheduler also allows setting error codes on all pending fences when
+hardware submissions are restarted after an reset. Error codes are also
+forwarded from the hardware fence to the scheduler fence to bubble up errors
+to the higher levels of the stack and eventually userspace.
+
+Fence errors can be queried by userspace through the generic SYNC_IOC_FILE_INFO
+IOCTL as well as through driver specific interfaces.
+
+Additional to setting fence errors drivers should also keep track of resets per
+context, the DRM scheduler provides the drm_sched_entity_error() function as
+helper for this use case. After a reset, KMD should reject new command
+submissions for affected contexts.
 
 User Mode Driver
 ----------------
@@ -358,9 +371,169 @@ Reporting causes of resets
 
 Apart from propagating the reset through the stack so apps can recover, it's
 really useful for driver developers to learn more about what caused the reset in
-the first place. DRM devices should make use of devcoredump to store relevant
-information about the reset, so this information can be added to user bug
-reports.
+the first place. For this, drivers can make use of devcoredump to store relevant
+information about the reset and send device wedged event with ``none`` recovery
+method (as explained in "Device Wedging" chapter) to notify userspace, so this
+information can be collected and added to user bug reports.
+
+Device Wedging
+==============
+
+Drivers can optionally make use of device wedged event (implemented as
+drm_dev_wedged_event() in DRM subsystem), which notifies userspace of 'wedged'
+(hanged/unusable) state of the DRM device through a uevent. This is useful
+especially in cases where the device is no longer operating as expected and has
+become unrecoverable from driver context. Purpose of this implementation is to
+provide drivers a generic way to recover the device with the help of userspace
+intervention, without taking any drastic measures (like resetting or
+re-enumerating the full bus, on which the underlying physical device is sitting)
+in the driver.
+
+A 'wedged' device is basically a device that is declared dead by the driver
+after exhausting all possible attempts to recover it from driver context. The
+uevent is the notification that is sent to userspace along with a hint about
+what could possibly be attempted to recover the device from userspace and bring
+it back to usable state. Different drivers may have different ideas of a
+'wedged' device depending on hardware implementation of the underlying physical
+device, and hence the vendor agnostic nature of the event. It is up to the
+drivers to decide when they see the need for device recovery and how they want
+to recover from the available methods.
+
+Driver prerequisites
+--------------------
+
+The driver, before opting for recovery, needs to make sure that the 'wedged'
+device doesn't harm the system as a whole by taking care of the prerequisites.
+Necessary actions must include disabling DMA to system memory as well as any
+communication channels with other devices. Further, the driver must ensure
+that all dma_fences are signalled and any device state that the core kernel
+might depend on is cleaned up. All existing mmaps should be invalidated and
+page faults should be redirected to a dummy page. Once the event is sent, the
+device must be kept in 'wedged' state until the recovery is performed. New
+accesses to the device (IOCTLs) should be rejected, preferably with an error
+code that resembles the type of failure the device has encountered. This will
+signify the reason for wedging, which can be reported to the application if
+needed.
+
+Recovery
+--------
+
+Current implementation defines four recovery methods, out of which, drivers
+can use any one, multiple or none. Method(s) of choice will be sent in the
+uevent environment as ``WEDGED=<method1>[,..,<methodN>]`` in order of less to
+more side-effects. See the section `Vendor Specific Recovery`_
+for ``WEDGED=vendor-specific``. If driver is unsure about recovery or
+method is unknown, ``WEDGED=unknown`` will be sent instead.
+
+Userspace consumers can parse this event and attempt recovery as per the
+following expectations.
+
+    =============== ========================================
+    Recovery method Consumer expectations
+    =============== ========================================
+    none            optional telemetry collection
+    rebind          unbind + bind driver
+    bus-reset       unbind + bus reset/re-enumeration + bind
+    vendor-specific vendor specific recovery method
+    unknown         consumer policy
+    =============== ========================================
+
+The only exception to this is ``WEDGED=none``, which signifies that the device
+was temporarily 'wedged' at some point but was recovered from driver context
+using device specific methods like reset. No explicit recovery is expected from
+the consumer in this case, but it can still take additional steps like gathering
+telemetry information (devcoredump, syslog). This is useful because the first
+hang is usually the most critical one which can result in consequential hangs or
+complete wedging.
+
+
+Vendor Specific Recovery
+------------------------
+
+When ``WEDGED=vendor-specific`` is sent, it indicates that the device requires
+a recovery procedure specific to the hardware vendor and is not one of the
+standardized approaches.
+
+``WEDGED=vendor-specific`` may be used to indicate different cases within a
+single vendor driver, each requiring a distinct recovery procedure.
+In such scenarios, the vendor driver must provide comprehensive documentation
+that describes each case, include additional hints to identify specific case and
+outline the corresponding recovery procedure. The documentation includes:
+
+Case - A list of all cases that sends the ``WEDGED=vendor-specific`` recovery method.
+
+Hints - Additional Information to assist the userspace consumer in identifying and
+differentiating between different cases. This can be exposed through sysfs, debugfs,
+traces, dmesg etc.
+
+Recovery Procedure - Clear instructions and guidance for recovering each case.
+This may include userspace scripts, tools needed for the recovery procedure.
+
+It is the responsibility of the admin/userspace consumer to identify the case and
+verify additional identification hints before attempting a recovery procedure.
+
+Example: If the device uses the Xe driver, then userspace consumer should refer to
+:ref:`Xe Device Wedging <xe-device-wedging>` for the detailed documentation.
+
+Task information
+----------------
+
+The information about which application (if any) was involved in the device
+wedging is useful for userspace if they want to notify the user about what
+happened (e.g. the compositor display a message to the user "The <task name>
+caused a graphical error and the system recovered") or to implement policies
+(e.g. the daemon may "ban" an task that keeps resetting the device). If the task
+information is available, the uevent will display as ``PID=<pid>`` and
+``TASK=<task name>``. Otherwise, ``PID`` and ``TASK`` will not appear in the
+event string.
+
+The reliability of this information is driver and hardware specific, and should
+be taken with a caution regarding it's precision. To have a big picture of what
+really happened, the devcoredump file provides much more detailed information
+about the device state and about the event.
+
+Consumer prerequisites
+----------------------
+
+It is the responsibility of the consumer to make sure that the device or its
+resources are not in use by any process before attempting recovery. With IOCTLs
+erroring out, all device memory should be unmapped and file descriptors should
+be closed to prevent leaks or undefined behaviour. The idea here is to clear the
+device of all user context beforehand and set the stage for a clean recovery.
+
+For ``WEDGED=vendor-specific`` recovery method, it is the responsibility of the
+consumer to check the driver documentation and the usecase before attempting
+a recovery.
+
+Example - rebind
+----------------
+
+Udev rule::
+
+    SUBSYSTEM=="drm", ENV{WEDGED}=="rebind", DEVPATH=="*/drm/card[0-9]",
+    RUN+="/path/to/rebind.sh $env{DEVPATH}"
+
+Recovery script::
+
+    #!/bin/sh
+
+    DEVPATH=$(readlink -f /sys/$1/device)
+    DEVICE=$(basename $DEVPATH)
+    DRIVER=$(readlink -f $DEVPATH/driver)
+
+    echo -n $DEVICE > $DRIVER/unbind
+    echo -n $DEVICE > $DRIVER/bind
+
+Customization
+-------------
+
+Although basic recovery is possible with a simple script, consumers can define
+custom policies around recovery. For example, if the driver supports multiple
+recovery methods, consumers can opt for the suitable one depending on scenarios
+like repeat offences or vendor specific failures. Consumers can also choose to
+have the device available for debugging or telemetry collection and base their
+recovery decision on the findings. This is useful especially when the driver is
+unsure about recovery or method is unknown.
 
 .. _drm_driver_ioctl:
 
@@ -570,3 +743,22 @@ dma-buf interoperability
 
 Please see Documentation/userspace-api/dma-buf-alloc-exchange.rst for
 information on how dma-buf is integrated and exposed within DRM.
+
+
+Trace events
+============
+
+See Documentation/trace/tracepoints.rst for information about using
+Linux Kernel Tracepoints.
+In the DRM subsystem, some events are considered stable uAPI to avoid
+breaking tools (e.g.: GPUVis, umr) relying on them. Stable means that fields
+cannot be removed, nor their formatting updated. Adding new fields is
+possible, under the normal uAPI requirements.
+
+Stable uAPI events
+------------------
+
+From ``drivers/gpu/drm/scheduler/gpu_scheduler_trace.h``
+
+.. kernel-doc::  drivers/gpu/drm/scheduler/gpu_scheduler_trace.h
+   :doc: uAPI trace events

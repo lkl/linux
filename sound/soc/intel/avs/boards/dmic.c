@@ -10,33 +10,10 @@
 #include <linux/module.h>
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
+#include "../utils.h"
 
 SND_SOC_DAILINK_DEF(dmic_pin, DAILINK_COMP_ARRAY(COMP_CPU("DMIC Pin")));
 SND_SOC_DAILINK_DEF(dmic_wov_pin, DAILINK_COMP_ARRAY(COMP_CPU("DMIC WoV Pin")));
-SND_SOC_DAILINK_DEF(dmic_codec, DAILINK_COMP_ARRAY(COMP_CODEC("dmic-codec", "dmic-hifi")));
-/* Name overridden on probe */
-SND_SOC_DAILINK_DEF(platform, DAILINK_COMP_ARRAY(COMP_PLATFORM("")));
-
-static struct snd_soc_dai_link card_dai_links[] = {
-	/* Back ends */
-	{
-		.name = "DMIC",
-		.id = 0,
-		.dpcm_capture = 1,
-		.nonatomic = 1,
-		.no_pcm = 1,
-		SND_SOC_DAILINK_REG(dmic_pin, dmic_codec, platform),
-	},
-	{
-		.name = "DMIC WoV",
-		.id = 1,
-		.dpcm_capture = 1,
-		.nonatomic = 1,
-		.no_pcm = 1,
-		.ignore_suspend = 1,
-		SND_SOC_DAILINK_REG(dmic_wov_pin, dmic_codec, platform),
-	},
-};
 
 static const struct snd_soc_dapm_widget card_widgets[] = {
 	SND_SOC_DAPM_MIC("SoC DMIC", NULL),
@@ -46,35 +23,84 @@ static const struct snd_soc_dapm_route card_routes[] = {
 	{"DMic", NULL, "SoC DMIC"},
 };
 
+static int avs_create_dai_links(struct device *dev, const char *codec_name,
+				struct snd_soc_dai_link **links, int *num_links)
+{
+	struct snd_soc_dai_link_component *platform;
+	struct snd_soc_dai_link *dl;
+	const int num_dl = 2;
+
+	dl = devm_kcalloc(dev, num_dl, sizeof(*dl), GFP_KERNEL);
+	platform = devm_kzalloc(dev, sizeof(*platform), GFP_KERNEL);
+	if (!dl || !platform)
+		return -ENOMEM;
+
+	dl->codecs = devm_kzalloc(dev, sizeof(*dl->codecs), GFP_KERNEL);
+	if (!dl->codecs)
+		return -ENOMEM;
+
+	dl->codecs->name = devm_kstrdup(dev, codec_name, GFP_KERNEL);
+	dl->codecs->dai_name = devm_kasprintf(dev, GFP_KERNEL, "dmic-hifi");
+	if (!dl->codecs->name || !dl->codecs->dai_name)
+		return -ENOMEM;
+
+	platform->name = dev_name(dev);
+	dl[0].num_cpus = 1;
+	dl[0].num_codecs = 1;
+	dl[0].platforms = platform;
+	dl[0].num_platforms = 1;
+	dl[0].nonatomic = 1;
+	dl[0].no_pcm = 1;
+	dl[0].capture_only = 1;
+	memcpy(&dl[1], &dl[0], sizeof(*dl));
+
+	dl[0].name = "DMIC";
+	dl[0].cpus = dmic_pin;
+	dl[0].id = 0;
+	dl[1].name = "DMIC WoV";
+	dl[1].cpus = dmic_wov_pin;
+	dl[1].id = 1;
+	dl[1].ignore_suspend = 1;
+
+	*links = dl;
+	*num_links = num_dl;
+	return 0;
+}
+
 static int avs_dmic_probe(struct platform_device *pdev)
 {
-	struct snd_soc_acpi_mach *mach;
-	struct snd_soc_card *card;
 	struct device *dev = &pdev->dev;
+	struct snd_soc_acpi_mach *mach;
+	struct avs_mach_pdata *pdata;
+	struct snd_soc_card *card;
 	int ret;
 
 	mach = dev_get_platdata(dev);
+	pdata = mach->pdata;
 
 	card = devm_kzalloc(dev, sizeof(*card), GFP_KERNEL);
 	if (!card)
 		return -ENOMEM;
 
-	card->name = "avs_dmic";
+	ret = avs_create_dai_links(dev, pdata->codec_name, &card->dai_link, &card->num_links);
+	if (ret)
+		return ret;
+
+	if (pdata->obsolete_card_names) {
+		card->name = "avs_dmic";
+	} else {
+		card->driver_name = "avs_dmic";
+		card->long_name = card->name = "AVS DMIC";
+	}
 	card->dev = dev;
 	card->owner = THIS_MODULE;
-	card->dai_link = card_dai_links;
-	card->num_links = ARRAY_SIZE(card_dai_links);
 	card->dapm_widgets = card_widgets;
 	card->num_dapm_widgets = ARRAY_SIZE(card_widgets);
 	card->dapm_routes = card_routes;
 	card->num_dapm_routes = ARRAY_SIZE(card_routes);
 	card->fully_routed = true;
 
-	ret = snd_soc_fixup_dai_links_platform_name(card, mach->mach_params.platform);
-	if (ret)
-		return ret;
-
-	return devm_snd_soc_register_card(dev, card);
+	return devm_snd_soc_register_deferrable_card(dev, card);
 }
 
 static const struct platform_device_id avs_dmic_driver_ids[] = {

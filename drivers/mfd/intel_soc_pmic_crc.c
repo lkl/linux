@@ -113,7 +113,6 @@ static const struct regmap_config crystal_cove_regmap_config = {
 	.val_bits = 8,
 
 	.max_register = CRYSTAL_COVE_MAX_REGISTER,
-	.cache_type = REGCACHE_NONE,
 };
 
 static const struct regmap_irq crystal_cove_irqs[] = {
@@ -259,12 +258,19 @@ static const struct acpi_device_id crystal_cove_acpi_match[] = {
 };
 MODULE_DEVICE_TABLE(acpi, crystal_cove_acpi_match);
 
+static const struct i2c_device_id crystal_cove_i2c_match[] = {
+	{ "intel_soc_pmic_crc" },
+	{ }
+};
+MODULE_DEVICE_TABLE(i2c, crystal_cove_i2c_match);
+
 static struct i2c_driver crystal_cove_i2c_driver = {
 	.driver = {
-		.name = "crystal_cove_i2c",
+		.name = "intel_soc_pmic_crc",
 		.pm = pm_sleep_ptr(&crystal_cove_pm_ops),
 		.acpi_match_table = crystal_cove_acpi_match,
 	},
+	.id_table = crystal_cove_i2c_match,
 	.probe = crystal_cove_i2c_probe,
 	.remove = crystal_cove_i2c_remove,
 	.shutdown = crystal_cove_shutdown,

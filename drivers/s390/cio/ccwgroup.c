@@ -7,6 +7,8 @@
  *  Author(s): Arnd Bergmann (arndb@de.ibm.com)
  *	       Cornelia Huck (cornelia.huck@de.ibm.com)
  */
+
+#include <linux/export.h>
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
@@ -147,7 +149,7 @@ static ssize_t ccwgroup_online_show(struct device *dev,
 
 	online = (gdev->state == CCWGROUP_ONLINE) ? 1 : 0;
 
-	return scnprintf(buf, PAGE_SIZE, "%d\n", online);
+	return sysfs_emit(buf, "%d\n", online);
 }
 
 /*

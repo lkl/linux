@@ -71,6 +71,24 @@ const char *sym_type_name(enum symbol_type type)
 }
 
 /**
+ * sym_get_prompt_menu - get the menu entry with a prompt
+ *
+ * @sym: a symbol pointer
+ *
+ * Return: the menu entry with a prompt.
+ */
+struct menu *sym_get_prompt_menu(const struct symbol *sym)
+{
+	struct menu *m;
+
+	list_for_each_entry(m, &sym->menus, link)
+		if (m->prompt)
+			return m;
+
+	return NULL;
+}
+
+/**
  * sym_get_choice_menu - get the parent choice menu if present
  *
  * @sym: a symbol pointer
@@ -80,18 +98,12 @@ const char *sym_type_name(enum symbol_type type)
 struct menu *sym_get_choice_menu(const struct symbol *sym)
 {
 	struct menu *menu = NULL;
-	struct menu *m;
 
 	/*
 	 * Choice members must have a prompt. Find a menu entry with a prompt,
 	 * and assume it resides inside a choice block.
 	 */
-	list_for_each_entry(m, &sym->menus, link)
-		if (m->prompt) {
-			menu = m;
-			break;
-		}
-
+	menu = sym_get_prompt_menu(sym);
 	if (!menu)
 		return NULL;
 
@@ -183,6 +195,10 @@ static void sym_set_changed(struct symbol *sym)
 
 	list_for_each_entry(menu, &sym->menus, link)
 		menu->flags |= MENU_CHANGED;
+
+	menu = sym_get_choice_menu(sym);
+	if (menu)
+		menu->flags |= MENU_CHANGED;
 }
 
 static void sym_set_all_changed(void)
@@ -197,6 +213,11 @@ static void sym_calc_visibility(struct symbol *sym)
 {
 	struct property *prop;
 	tristate tri;
+
+	if (sym->flags & SYMBOL_TRANS) {
+		sym->visible = yes;
+		return;
+	}
 
 	/* any prompt visible? */
 	tri = no;
@@ -376,6 +397,7 @@ static void sym_warn_unmet_dep(const struct symbol *sym)
 			       "  Selected by [m]:\n");
 
 	fputs(str_get(&gs), stderr);
+	str_free(&gs);
 	sym_warnings++;
 }
 
@@ -389,7 +411,7 @@ bool sym_dep_errors(void)
 void sym_calc_value(struct symbol *sym)
 {
 	struct symbol_value newval, oldval;
-	struct property *prop;
+	struct property *prop = NULL;
 	struct menu *choice_menu;
 
 	if (!sym)
@@ -498,6 +520,19 @@ void sym_calc_value(struct symbol *sym)
 		;
 	}
 
+	/*
+	 * If the symbol lacks a user value but its value comes from a
+	 * single transitional symbol with an existing user value, mark
+	 * this symbol as having a user value to avoid prompting.
+	 */
+	if (prop && !sym_has_value(sym)) {
+		struct symbol *ds = prop_get_symbol(prop);
+		if (ds && (ds->flags & SYMBOL_TRANS) && sym_has_value(ds)) {
+			sym->def[S_DEF_USER] = newval;
+			sym->flags |= SYMBOL_DEF_USER;
+		}
+	}
+
 	sym->curr = newval;
 	sym_validate_range(sym);
 
@@ -509,7 +544,7 @@ void sym_calc_value(struct symbol *sym)
 		}
 	}
 
-	if (sym_is_choice(sym))
+	if (sym_is_choice(sym) || sym->flags & SYMBOL_TRANS)
 		sym->flags &= ~SYMBOL_WRITE;
 }
 
@@ -866,7 +901,7 @@ const char *sym_get_string_value(struct symbol *sym)
 	default:
 		;
 	}
-	return (const char *)sym->curr.val;
+	return sym->curr.val;
 }
 
 bool sym_is_changeable(const struct symbol *sym)

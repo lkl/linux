@@ -1,5 +1,5 @@
 #!/bin/bash
-
+# perf_probe :: Reject invalid options (exclusive)
 # SPDX-License-Identifier: GPL-2.0
 
 #
@@ -12,16 +12,20 @@
 #		This test checks whether the invalid and incompatible options are reported
 #
 
-# include working environment
-. ../common/init.sh
-
+DIR_PATH="$(dirname $0)"
 TEST_RESULT=0
+
+# include working environment
+. "$DIR_PATH/../common/init.sh"
 
 if ! check_kprobes_available; then
 	print_overall_skipped
-	exit 0
+	exit 2
 fi
 
+# Check for presence of DWARF
+$CMD_PERF check feature -q dwarf
+[ $? -ne 0 ] && HINT_FAIL="Some of the tests need DWARF to run"
 
 ### missing argument
 
@@ -30,7 +34,9 @@ for opt in '-a' '-d' '-L' '-V'; do
 	! $CMD_PERF probe $opt 2> $LOGS_DIR/invalid_options_missing_argument$opt.err
 	PERF_EXIT_CODE=$?
 
-	../common/check_all_patterns_found.pl "Error: switch .* requires a value" < $LOGS_DIR/invalid_options_missing_argument$opt.err
+	"$DIR_PATH/../common/check_all_patterns_found.pl" \
+		"Error: switch .* requires a value" \
+		< $LOGS_DIR/invalid_options_missing_argument$opt.err
 	CHECK_EXIT_CODE=$?
 
 	print_results $PERF_EXIT_CODE $CHECK_EXIT_CODE "missing argument for $opt"
@@ -63,7 +69,8 @@ for opt in '-a xxx -d xxx' '-a xxx -L foo' '-a xxx -V foo' '-a xxx -l' '-a xxx -
 	! $CMD_PERF probe $opt > /dev/null 2> $LOGS_DIR/aux.log
 	PERF_EXIT_CODE=$?
 
-	../common/check_all_patterns_found.pl "Error: switch .+ cannot be used with switch .+" < $LOGS_DIR/aux.log
+	"$DIR_PATH/../common/check_all_patterns_found.pl" \
+		"Error: switch .+ cannot be used with switch .+" < $LOGS_DIR/aux.log
 	CHECK_EXIT_CODE=$?
 
 	print_results $PERF_EXIT_CODE $CHECK_EXIT_CODE "mutually exclusive options :: $opt"
@@ -75,5 +82,5 @@ done
 
 
 # print overall results
-print_overall_results "$TEST_RESULT"
+print_overall_results "$TEST_RESULT" $HINT_FAIL
 exit $?

@@ -7,6 +7,7 @@
 #include <linux/err.h>
 #include <linux/log2.h>
 #include <linux/regulator/consumer.h>
+#include <linux/workqueue.h>
 
 #include <linux/mmc/host.h>
 
@@ -226,6 +227,33 @@ int mmc_regulator_set_vqmmc(struct mmc_host *mmc, struct mmc_ios *ios)
 }
 EXPORT_SYMBOL_GPL(mmc_regulator_set_vqmmc);
 
+/**
+ * mmc_regulator_set_vqmmc2 - Set vqmmc2 as per the ios->vqmmc2_voltage
+ * @mmc: The mmc host to regulate
+ * @ios: The io bus settings
+ *
+ * Sets a new voltage level for the vqmmc2 regulator, which may correspond to
+ * the vdd2 regulator for an SD UHS-II interface. This function is expected to
+ * be called by mmc host drivers.
+ *
+ * Returns a negative error code on failure, zero if the voltage level was
+ * changed successfully or a positive value if the level didn't need to change.
+ */
+int mmc_regulator_set_vqmmc2(struct mmc_host *mmc, struct mmc_ios *ios)
+{
+	if (IS_ERR(mmc->supply.vqmmc2))
+		return -EINVAL;
+
+	switch (ios->vqmmc2_voltage) {
+	case MMC_VQMMC2_VOLTAGE_180:
+		return mmc_regulator_set_voltage_if_supported(
+			mmc->supply.vqmmc2, 1700000, 1800000, 1950000);
+	default:
+		return -EINVAL;
+	}
+}
+EXPORT_SYMBOL_GPL(mmc_regulator_set_vqmmc2);
+
 #else
 
 static inline int mmc_regulator_get_ocrmask(struct regulator *supply)
@@ -234,6 +262,82 @@ static inline int mmc_regulator_get_ocrmask(struct regulator *supply)
 }
 
 #endif /* CONFIG_REGULATOR */
+
+/* To be called from a high-priority workqueue */
+void mmc_undervoltage_workfn(struct work_struct *work)
+{
+	struct mmc_supply *supply;
+	struct mmc_host *host;
+
+	supply = container_of(work, struct mmc_supply, uv_work);
+	host = container_of(supply, struct mmc_host, supply);
+
+	mmc_handle_undervoltage(host);
+}
+
+static int mmc_handle_regulator_event(struct notifier_block *nb,
+				      unsigned long event, void *data)
+{
+	struct mmc_supply *supply = container_of(nb, struct mmc_supply,
+						 vmmc_nb);
+	struct mmc_host *host = container_of(supply, struct mmc_host, supply);
+	unsigned long flags;
+
+	switch (event) {
+	case REGULATOR_EVENT_UNDER_VOLTAGE:
+		spin_lock_irqsave(&host->lock, flags);
+		if (host->undervoltage) {
+			spin_unlock_irqrestore(&host->lock, flags);
+			return NOTIFY_OK;
+		}
+
+		host->undervoltage = true;
+		spin_unlock_irqrestore(&host->lock, flags);
+
+		queue_work(system_highpri_wq, &host->supply.uv_work);
+		break;
+	default:
+		return NOTIFY_DONE;
+	}
+
+	return NOTIFY_OK;
+}
+
+/**
+ * mmc_regulator_register_undervoltage_notifier - Register for undervoltage
+ *						  events
+ * @host: MMC host
+ *
+ * To be called by a bus driver when a card supporting graceful shutdown
+ * is attached.
+ */
+void mmc_regulator_register_undervoltage_notifier(struct mmc_host *host)
+{
+	int ret;
+
+	if (IS_ERR_OR_NULL(host->supply.vmmc))
+		return;
+
+	host->supply.vmmc_nb.notifier_call = mmc_handle_regulator_event;
+	ret = regulator_register_notifier(host->supply.vmmc,
+					  &host->supply.vmmc_nb);
+	if (ret)
+		dev_warn(mmc_dev(host), "Failed to register vmmc notifier: %d\n", ret);
+}
+
+/**
+ * mmc_regulator_unregister_undervoltage_notifier - Unregister undervoltage
+ *						    notifier
+ * @host: MMC host
+ */
+void mmc_regulator_unregister_undervoltage_notifier(struct mmc_host *host)
+{
+	if (IS_ERR_OR_NULL(host->supply.vmmc))
+		return;
+
+	regulator_unregister_notifier(host->supply.vmmc, &host->supply.vmmc_nb);
+	cancel_work_sync(&host->supply.uv_work);
+}
 
 /**
  * mmc_regulator_get_supply - try to get VMMC and VQMMC regulators for a host
@@ -252,6 +356,7 @@ int mmc_regulator_get_supply(struct mmc_host *mmc)
 
 	mmc->supply.vmmc = devm_regulator_get_optional(dev, "vmmc");
 	mmc->supply.vqmmc = devm_regulator_get_optional(dev, "vqmmc");
+	mmc->supply.vqmmc2 = devm_regulator_get_optional(dev, "vqmmc2");
 
 	if (IS_ERR(mmc->supply.vmmc)) {
 		if (PTR_ERR(mmc->supply.vmmc) == -EPROBE_DEFER)
@@ -273,6 +378,12 @@ int mmc_regulator_get_supply(struct mmc_host *mmc)
 					     "vqmmc regulator not available\n");
 
 		dev_dbg(dev, "No vqmmc regulator found\n");
+	}
+
+	if (IS_ERR(mmc->supply.vqmmc2)) {
+		if (PTR_ERR(mmc->supply.vqmmc2) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
+		dev_dbg(dev, "No vqmmc2 regulator found\n");
 	}
 
 	return 0;

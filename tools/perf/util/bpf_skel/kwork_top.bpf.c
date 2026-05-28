@@ -18,7 +18,7 @@ enum kwork_class_type {
 };
 
 #define MAX_ENTRIES     102400
-#define MAX_NR_CPUS     2048
+#define MAX_NR_CPUS     4096
 #define PF_KTHREAD      0x00200000
 #define MAX_COMMAND_LEN 16
 

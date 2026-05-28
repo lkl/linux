@@ -304,8 +304,6 @@ err_clk_disable:
 	clk_disable_unprepare(pltfm_priv->clk);
 
 err_pltfm_free:
-	sdhci_pltfm_free(pdev);
-
 	dev_err(dev, "Probing of sdhci-pltfm failed: %d\n", ret);
 	return ret;
 }
@@ -328,7 +326,7 @@ static struct platform_driver sdhci_bcm_kona_driver = {
 		.of_match_table = sdhci_bcm_kona_of_match,
 	},
 	.probe		= sdhci_bcm_kona_probe,
-	.remove_new	= sdhci_bcm_kona_remove,
+	.remove		= sdhci_bcm_kona_remove,
 };
 module_platform_driver(sdhci_bcm_kona_driver);
 

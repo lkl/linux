@@ -287,8 +287,7 @@ mt76x02_vif_init(struct mt76x02_dev *dev, struct ieee80211_vif *vif,
 
 	mvif->idx = idx;
 	mvif->group_wcid.idx = MT_VIF_WCID(idx);
-	mvif->group_wcid.hw_key_idx = -1;
-	mt76_wcid_init(&mvif->group_wcid);
+	mt76_wcid_init(&mvif->group_wcid, 0);
 
 	mtxq = (struct mt76_txq *)vif->txq->drv_priv;
 	rcu_assign_pointer(dev->mt76.wcid[MT_VIF_WCID(idx)], &mvif->group_wcid);
@@ -549,7 +548,7 @@ void mt76x02_set_tx_ackto(struct mt76x02_dev *dev)
 EXPORT_SYMBOL_GPL(mt76x02_set_tx_ackto);
 
 void mt76x02_set_coverage_class(struct ieee80211_hw *hw,
-				s16 coverage_class)
+				int radio_idx, s16 coverage_class)
 {
 	struct mt76x02_dev *dev = hw->priv;
 
@@ -560,7 +559,7 @@ void mt76x02_set_coverage_class(struct ieee80211_hw *hw,
 }
 EXPORT_SYMBOL_GPL(mt76x02_set_coverage_class);
 
-int mt76x02_set_rts_threshold(struct ieee80211_hw *hw, u32 val)
+int mt76x02_set_rts_threshold(struct ieee80211_hw *hw, int radio_idx, u32 val)
 {
 	struct mt76x02_dev *dev = hw->priv;
 

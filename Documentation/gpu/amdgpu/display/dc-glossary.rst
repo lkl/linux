@@ -5,7 +5,7 @@ DC Glossary
 On this page, we try to keep track of acronyms related to the display
 component. If you do not find what you are looking for, look at the
 'Documentation/gpu/amdgpu/amdgpu-glossary.rst'; if you cannot find it anywhere,
-consider asking in the amdgfx and update this page.
+consider asking on the amd-gfx mailing list and update this page.
 
 .. glossary::
 
@@ -167,9 +167,6 @@ consider asking in the amdgfx and update this page.
     MALL
       Memory Access at Last Level
 
-    MC
-      Memory Controller
-
     MPC/MPCC
       Multiple pipes and plane combine
 
@@ -232,6 +229,3 @@ consider asking in the amdgfx and update this page.
 
     VRR
       Variable Refresh Rate
-
-    UVD
-      Unified Video Decoder

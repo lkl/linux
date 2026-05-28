@@ -284,8 +284,8 @@ static void run_spu_dma(struct work_struct *work)
 
 static void aica_period_elapsed(struct timer_list *t)
 {
-	struct snd_card_aica *dreamcastcard = from_timer(dreamcastcard,
-							      t, timer);
+	struct snd_card_aica *dreamcastcard = timer_container_of(dreamcastcard,
+								 t, timer);
 	struct snd_pcm_substream *substream = dreamcastcard->substream;
 	/*timer function - so cannot sleep */
 	int play_period;
@@ -315,8 +315,6 @@ static void aica_period_elapsed(struct timer_list *t)
 static void spu_begin_dma(struct snd_pcm_substream *substream)
 {
 	struct snd_card_aica *dreamcastcard;
-	struct snd_pcm_runtime *runtime;
-	runtime = substream->runtime;
 	dreamcastcard = substream->pcm->private_data;
 	/*get the queue to do the work */
 	schedule_work(&(dreamcastcard->spu_dma_work));
@@ -356,7 +354,7 @@ static int snd_aicapcm_pcm_sync_stop(struct snd_pcm_substream *substream)
 {
 	struct snd_card_aica *dreamcastcard = substream->pcm->private_data;
 
-	del_timer_sync(&dreamcastcard->timer);
+	timer_delete_sync(&dreamcastcard->timer);
 	cancel_work_sync(&dreamcastcard->spu_dma_work);
 	return 0;
 }
@@ -426,7 +424,7 @@ static int __init snd_aicapcmchip(struct snd_card_aica
 	if (unlikely(err < 0))
 		return err;
 	pcm->private_data = dreamcastcard;
-	strcpy(pcm->name, "AICA PCM");
+	strscpy(pcm->name, "AICA PCM");
 	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK,
 			&snd_aicapcm_playback_ops);
 	/* Allocate the DMA buffers */
@@ -471,8 +469,8 @@ static int aica_pcmvolume_info(struct snd_kcontrol *kcontrol,
 static int aica_pcmvolume_get(struct snd_kcontrol *kcontrol,
 			      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_card_aica *dreamcastcard;
-	dreamcastcard = kcontrol->private_data;
+	struct snd_card_aica *dreamcastcard = snd_kcontrol_chip(kcontrol);
+
 	if (unlikely(!dreamcastcard->channel))
 		return -ETXTBSY;	/* we've not yet been set up */
 	ucontrol->value.integer.value[0] = dreamcastcard->channel->vol;
@@ -482,9 +480,9 @@ static int aica_pcmvolume_get(struct snd_kcontrol *kcontrol,
 static int aica_pcmvolume_put(struct snd_kcontrol *kcontrol,
 			      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_card_aica *dreamcastcard;
+	struct snd_card_aica *dreamcastcard = snd_kcontrol_chip(kcontrol);
 	unsigned int vol;
-	dreamcastcard = kcontrol->private_data;
+
 	if (unlikely(!dreamcastcard->channel))
 		return -ETXTBSY;
 	vol = ucontrol->value.integer.value[0];
@@ -570,9 +568,9 @@ static int snd_aica_probe(struct platform_device *devptr)
 		kfree(dreamcastcard);
 		return err;
 	}
-	strcpy(dreamcastcard->card->driver, "snd_aica");
-	strcpy(dreamcastcard->card->shortname, SND_AICA_DRIVER);
-	strcpy(dreamcastcard->card->longname,
+	strscpy(dreamcastcard->card->driver, "snd_aica");
+	strscpy(dreamcastcard->card->shortname, SND_AICA_DRIVER);
+	strscpy(dreamcastcard->card->longname,
 	       "Yamaha AICA Super Intelligent Sound Processor for SEGA Dreamcast");
 	/* Prepare to use the queue */
 	INIT_WORK(&(dreamcastcard->spu_dma_work), run_spu_dma);
@@ -601,7 +599,7 @@ static int snd_aica_probe(struct platform_device *devptr)
 
 static struct platform_driver snd_aica_driver = {
 	.probe = snd_aica_probe,
-	.remove_new = snd_aica_remove,
+	.remove = snd_aica_remove,
 	.driver = {
 		.name = SND_AICA_DRIVER,
 	},

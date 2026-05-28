@@ -36,11 +36,15 @@ struct  rt712_sdca_priv {
 	unsigned int scp_sdca_stat2;
 	unsigned int hw_id;
 	unsigned int version_id;
+	bool dmic_function_found;
 	bool fu0f_dapm_mute;
 	bool fu0f_mixer_l_mute;
 	bool fu0f_mixer_r_mute;
 	bool fu1e_dapm_mute;
 	bool fu1e_mixer_mute[4];
+	bool fu05_dapm_mute;
+	bool fu05_mixer_l_mute;
+	bool fu05_mixer_r_mute;
 };
 
 struct rt712_dmic_kctrl_priv {

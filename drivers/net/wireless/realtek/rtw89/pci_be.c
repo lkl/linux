@@ -175,10 +175,10 @@ static void rtw89_pci_clr_idx_all_be(struct rtw89_dev *rtwdev)
 	rtw89_write32(rtwdev, R_BE_RXBD_RWPTR_CLR1_V1,
 		      B_BE_CLR_RXQ0_IDX | B_BE_CLR_RPQ0_IDX);
 
-	rx_ring = &rtwpci->rx_rings[RTW89_RXCH_RXQ];
+	rx_ring = &rtwpci->rx.rings[RTW89_RXCH_RXQ];
 	rtw89_write16(rtwdev, R_BE_RXQ0_RXBD_IDX_V1, rx_ring->bd_ring.len - 1);
 
-	rx_ring = &rtwpci->rx_rings[RTW89_RXCH_RPQ];
+	rx_ring = &rtwpci->rx.rings[RTW89_RXCH_RPQ];
 	rtw89_write16(rtwdev, R_BE_RPQ0_RXBD_IDX_V1, rx_ring->bd_ring.len - 1);
 }
 
@@ -550,6 +550,79 @@ static int rtw89_pci_lv1rst_start_dma_be(struct rtw89_dev *rtwdev)
 	return 0;
 }
 
+static void rtw89_pci_disable_eq_be(struct rtw89_dev *rtwdev)
+{
+	u32 backup_aspm, phy_offset;
+	u16 oobs_val, offset_cal;
+	u16 g1_oobs, g2_oobs;
+	u8 gen;
+
+	if (rtwdev->chip->chip_id != RTL8922A)
+		return;
+
+	g1_oobs = rtw89_read16_mask(rtwdev, R_RAC_DIRECT_OFFSET_BE_LANE0_G1 +
+					    RAC_ANA09 * RAC_MULT, BAC_OOBS_SEL);
+	g2_oobs = rtw89_read16_mask(rtwdev, R_RAC_DIRECT_OFFSET_BE_LANE0_G2 +
+					    RAC_ANA09 * RAC_MULT, BAC_OOBS_SEL);
+	if (g1_oobs && g2_oobs)
+		return;
+
+	backup_aspm = rtw89_read32(rtwdev, R_BE_PCIE_MIX_CFG);
+	rtw89_write32_clr(rtwdev, R_BE_PCIE_MIX_CFG, B_BE_RTK_ASPM_CTRL_MASK);
+
+	/* offset K */
+	for (gen = 1; gen <= 2; gen++) {
+		phy_offset = gen == 1 ? R_RAC_DIRECT_OFFSET_BE_LANE0_G1 :
+					R_RAC_DIRECT_OFFSET_BE_LANE0_G2;
+
+		rtw89_write16_clr(rtwdev, phy_offset + RAC_ANA19 * RAC_MULT,
+				  B_PCIE_BIT_RD_SEL);
+	}
+
+	offset_cal = rtw89_read16_mask(rtwdev, R_RAC_DIRECT_OFFSET_BE_LANE0_G1 +
+					       RAC_ANA1F * RAC_MULT, OFFSET_CAL_MASK);
+
+	for (gen = 1; gen <= 2; gen++) {
+		phy_offset = gen == 1 ? R_RAC_DIRECT_OFFSET_BE_LANE0_G1 :
+					R_RAC_DIRECT_OFFSET_BE_LANE0_G2;
+
+		rtw89_write16_mask(rtwdev, phy_offset + RAC_ANA0B * RAC_MULT,
+				   MANUAL_LVL_MASK, offset_cal);
+		rtw89_write16_clr(rtwdev, phy_offset + RAC_ANA0D * RAC_MULT,
+				  OFFSET_CAL_MODE);
+	}
+
+	/* OOBS */
+	for (gen = 1; gen <= 2; gen++) {
+		phy_offset = gen == 1 ? R_RAC_DIRECT_OFFSET_BE_LANE0_G1 :
+					R_RAC_DIRECT_OFFSET_BE_LANE0_G2;
+
+		rtw89_write16_set(rtwdev, phy_offset + RAC_ANA0D * RAC_MULT,
+				  BAC_RX_TEST_EN);
+		rtw89_write16_mask(rtwdev, phy_offset + RAC_ANA10 * RAC_MULT,
+				   ADDR_SEL_MASK, ADDR_SEL_VAL);
+		rtw89_write16_clr(rtwdev, phy_offset + RAC_ANA10 * RAC_MULT,
+				  B_PCIE_BIT_PINOUT_DIS);
+		rtw89_write16_set(rtwdev, phy_offset + RAC_ANA19 * RAC_MULT,
+				  B_PCIE_BIT_RD_SEL);
+	}
+
+	oobs_val = rtw89_read16_mask(rtwdev, R_RAC_DIRECT_OFFSET_BE_LANE0_G1 +
+					     RAC_ANA1F * RAC_MULT, OOBS_LEVEL_MASK);
+
+	for (gen = 1; gen <= 2; gen++) {
+		phy_offset = gen == 1 ? R_RAC_DIRECT_OFFSET_BE_LANE0_G1 :
+					R_RAC_DIRECT_OFFSET_BE_LANE0_G2;
+
+		rtw89_write16_mask(rtwdev, phy_offset + RAC_ANA03 * RAC_MULT,
+				   OOBS_SEN_MASK, oobs_val);
+		rtw89_write16_set(rtwdev, phy_offset + RAC_ANA09 * RAC_MULT,
+				  BAC_OOBS_SEL);
+	}
+
+	rtw89_write32(rtwdev, R_BE_PCIE_MIX_CFG, backup_aspm);
+}
+
 static int __maybe_unused rtw89_pci_suspend_be(struct device *dev)
 {
 	struct ieee80211_hw *hw = dev_get_drvdata(dev);
@@ -584,19 +657,33 @@ static int __maybe_unused rtw89_pci_resume_be(struct device *dev)
 	rtw89_write32_set(rtwdev, R_BE_SER_PL1_CTRL, B_BE_PL1_SER_PL1_EN);
 	rtw89_write32_set(rtwdev, R_BE_REG_PL1_MASK, B_BE_SER_PM_MASTER_IMR);
 
+	rtw89_pci_basic_cfg(rtwdev, true);
+
 	return 0;
 }
 
 SIMPLE_DEV_PM_OPS(rtw89_pm_ops_be, rtw89_pci_suspend_be, rtw89_pci_resume_be);
 EXPORT_SYMBOL(rtw89_pm_ops_be);
 
-const struct rtw89_pci_gen_def rtw89_pci_gen_be = {
-	.isr_rdu = B_BE_RDU_CH1_INT | B_BE_RDU_CH0_INT,
+const struct rtw89_pci_isr_def rtw89_pci_isr_be = {
+	.isr_rdu = B_BE_RDU_CH1_INT_V1 | B_BE_RDU_CH0_INT_V1,
 	.isr_halt_c2h = B_BE_HALT_C2H_INT,
 	.isr_wdt_timeout = B_BE_WDT_TIMEOUT_INT,
 	.isr_clear_rpq = {R_BE_PCIE_DMA_ISR, B_BE_PCIE_RX_RPQ0_ISR_V1},
 	.isr_clear_rxq = {R_BE_PCIE_DMA_ISR, B_BE_PCIE_RX_RX0P2_ISR_V1},
+};
+EXPORT_SYMBOL(rtw89_pci_isr_be);
 
+const struct rtw89_pci_isr_def rtw89_pci_isr_be_v1 = {
+	.isr_rdu = B_BE_PCIE_RDU_CH1_INT | B_BE_PCIE_RDU_CH0_INT,
+	.isr_halt_c2h = B_BE_HALT_C2H_INT,
+	.isr_wdt_timeout = B_BE_WDT_TIMEOUT_INT,
+	.isr_clear_rpq = {R_BE_PCIE_DMA_ISR, B_BE_PCIE_RX_RPQ0_ISR_V1},
+	.isr_clear_rxq = {R_BE_PCIE_DMA_ISR, B_BE_PCIE_RX_RX0P2_ISR_V1},
+};
+EXPORT_SYMBOL(rtw89_pci_isr_be_v1);
+
+const struct rtw89_pci_gen_def rtw89_pci_gen_be = {
 	.mac_pre_init = rtw89_pci_ops_mac_pre_init_be,
 	.mac_pre_deinit = rtw89_pci_ops_mac_pre_deinit_be,
 	.mac_post_init = rtw89_pci_ops_mac_post_init_be,
@@ -614,5 +701,8 @@ const struct rtw89_pci_gen_def rtw89_pci_gen_be = {
 	.aspm_set = rtw89_pci_aspm_set_be,
 	.clkreq_set = rtw89_pci_clkreq_set_be,
 	.l1ss_set = rtw89_pci_l1ss_set_be,
+
+	.disable_eq = rtw89_pci_disable_eq_be,
+	.power_wake = _patch_pcie_power_wake_be,
 };
 EXPORT_SYMBOL(rtw89_pci_gen_be);

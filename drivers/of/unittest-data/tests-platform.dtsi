@@ -33,6 +33,34 @@
 					reg = <0x100>;
 				};
 			};
+
+			test-device@2 {
+				compatible = "test,rust-device";
+				reg = <0x2>;
+
+				test,u32-prop = <0xdeadbeef>;
+				test,i16-array = /bits/ 16 <1 2 (-3) (-4)>;
+
+				ref_child_0: child-0 {
+					test,ref-arg = <&ref_child_1 0x20 0x32>;
+				};
+				ref_child_1: child-1 {
+					test,ref-arg = <&ref_child_0 0x10 0x64>;
+				};
+			};
+		};
+
+		platform-tests-2 {
+			// No #address-cells or #size-cells
+			node {
+				#address-cells = <1>;
+				#size-cells = <1>;
+
+				test-device@100 {
+					compatible = "test-sub-device";
+					reg = <0x100 1>;
+				};
+			};
 		};
 	};
 };

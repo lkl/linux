@@ -34,20 +34,21 @@
 #define AXP806_REG_ADDR_EXT_ADDR_SLAVE_MODE	BIT(4)
 
 static const char * const axp20x_model_names[] = {
-	"AXP152",
-	"AXP192",
-	"AXP202",
-	"AXP209",
-	"AXP221",
-	"AXP223",
-	"AXP288",
-	"AXP313a",
-	"AXP717",
-	"AXP803",
-	"AXP806",
-	"AXP809",
-	"AXP813",
-	"AXP15060",
+	[AXP152_ID] = "AXP152",
+	[AXP192_ID] = "AXP192",
+	[AXP202_ID] = "AXP202",
+	[AXP209_ID] = "AXP209",
+	[AXP221_ID] = "AXP221",
+	[AXP223_ID] = "AXP223",
+	[AXP288_ID] = "AXP288",
+	[AXP313A_ID] = "AXP313a",
+	[AXP323_ID] = "AXP323",
+	[AXP717_ID] = "AXP717",
+	[AXP803_ID] = "AXP803",
+	[AXP806_ID] = "AXP806",
+	[AXP809_ID] = "AXP809",
+	[AXP813_ID] = "AXP813",
+	[AXP15060_ID] = "AXP15060",
 };
 
 static const struct regmap_range axp152_writeable_ranges[] = {
@@ -193,6 +194,10 @@ static const struct regmap_range axp313a_writeable_ranges[] = {
 	regmap_reg_range(AXP313A_ON_INDICATE, AXP313A_IRQ_STATE),
 };
 
+static const struct regmap_range axp323_writeable_ranges[] = {
+	regmap_reg_range(AXP313A_ON_INDICATE, AXP323_DCDC_MODE_CTRL2),
+};
+
 static const struct regmap_range axp313a_volatile_ranges[] = {
 	regmap_reg_range(AXP313A_SHUTDOWN_CTRL, AXP313A_SHUTDOWN_CTRL),
 	regmap_reg_range(AXP313A_IRQ_STATE, AXP313A_IRQ_STATE),
@@ -201,6 +206,11 @@ static const struct regmap_range axp313a_volatile_ranges[] = {
 static const struct regmap_access_table axp313a_writeable_table = {
 	.yes_ranges = axp313a_writeable_ranges,
 	.n_yes_ranges = ARRAY_SIZE(axp313a_writeable_ranges),
+};
+
+static const struct regmap_access_table axp323_writeable_table = {
+	.yes_ranges = axp323_writeable_ranges,
+	.n_yes_ranges = ARRAY_SIZE(axp323_writeable_ranges),
 };
 
 static const struct regmap_access_table axp313a_volatile_table = {
@@ -214,6 +224,7 @@ static const struct regmap_range axp717_writeable_ranges[] = {
 	regmap_reg_range(AXP717_VSYS_V_POWEROFF, AXP717_VSYS_V_POWEROFF),
 	regmap_reg_range(AXP717_IRQ0_EN, AXP717_IRQ4_EN),
 	regmap_reg_range(AXP717_IRQ0_STATE, AXP717_IRQ4_STATE),
+	regmap_reg_range(AXP717_TS_PIN_CFG, AXP717_TS_PIN_CFG),
 	regmap_reg_range(AXP717_ICC_CHG_SET, AXP717_CV_CHG_SET),
 	regmap_reg_range(AXP717_DCDC_OUTPUT_CONTROL, AXP717_CPUSLDO_CONTROL),
 	regmap_reg_range(AXP717_ADC_CH_EN_CONTROL, AXP717_ADC_CH_EN_CONTROL),
@@ -430,6 +441,15 @@ static const struct regmap_config axp313a_regmap_config = {
 	.wr_table = &axp313a_writeable_table,
 	.volatile_table = &axp313a_volatile_table,
 	.max_register = AXP313A_IRQ_STATE,
+	.cache_type = REGCACHE_MAPLE,
+};
+
+static const struct regmap_config axp323_regmap_config = {
+	.reg_bits = 8,
+	.val_bits = 8,
+	.wr_table = &axp323_writeable_table,
+	.volatile_table = &axp313a_volatile_table,
+	.max_register = AXP323_DCDC_MODE_CTRL2,
 	.cache_type = REGCACHE_MAPLE,
 };
 
@@ -1033,7 +1053,8 @@ static const struct mfd_cell axp152_cells[] = {
 };
 
 static struct mfd_cell axp313a_cells[] = {
-	MFD_CELL_NAME("axp20x-regulator"),
+	/* AXP323 is sometimes paired with AXP717 as sub-PMIC */
+	MFD_CELL_BASIC("axp20x-regulator", NULL, NULL, 0, 1),
 	MFD_CELL_RES("axp313a-pek", axp313a_pek_resources),
 };
 
@@ -1210,9 +1231,8 @@ static const struct mfd_cell axp15060_cells[] = {
 
 /* For boards that don't have IRQ line connected to SOC. */
 static const struct mfd_cell axp_regulator_only_cells[] = {
-	{
-		.name		= "axp20x-regulator",
-	},
+	/* PMIC without IRQ line may be secondary PMIC */
+	MFD_CELL_BASIC("axp20x-regulator", NULL, NULL, 0, 1),
 };
 
 static int axp20x_power_off(struct sys_off_data *data)
@@ -1221,6 +1241,7 @@ static int axp20x_power_off(struct sys_off_data *data)
 	unsigned int shutdown_reg;
 
 	switch (axp20x->variant) {
+	case AXP323_ID:
 	case AXP313A_ID:
 		shutdown_reg = AXP313A_SHUTDOWN_CTRL;
 		break;
@@ -1289,6 +1310,12 @@ int axp20x_match_device(struct axp20x_dev *axp20x)
 		axp20x->regmap_cfg = &axp313a_regmap_config;
 		axp20x->regmap_irq_chip = &axp313a_regmap_irq_chip;
 		break;
+	case AXP323_ID:
+		axp20x->nr_cells = ARRAY_SIZE(axp313a_cells);
+		axp20x->cells = axp313a_cells;
+		axp20x->regmap_cfg = &axp323_regmap_config;
+		axp20x->regmap_irq_chip = &axp313a_regmap_irq_chip;
+		break;
 	case AXP717_ID:
 		axp20x->nr_cells = ARRAY_SIZE(axp717_cells);
 		axp20x->cells = axp717_cells;
@@ -1345,7 +1372,7 @@ int axp20x_match_device(struct axp20x_dev *axp20x)
 		axp20x->regmap_irq_chip = &axp15060_regmap_irq_chip;
 		break;
 	default:
-		dev_err(dev, "unsupported AXP20X ID %lu\n", axp20x->variant);
+		dev_err(dev, "unsupported AXP20X ID %u\n", axp20x->variant);
 		return -EINVAL;
 	}
 
@@ -1419,7 +1446,7 @@ int axp20x_device_probe(struct axp20x_dev *axp20x)
 		}
 	}
 
-	ret = mfd_add_devices(axp20x->dev, -1, axp20x->cells,
+	ret = mfd_add_devices(axp20x->dev, PLATFORM_DEVID_NONE, axp20x->cells,
 			      axp20x->nr_cells, NULL, 0, NULL);
 
 	if (ret) {
@@ -1429,10 +1456,7 @@ int axp20x_device_probe(struct axp20x_dev *axp20x)
 	}
 
 	if (axp20x->variant != AXP288_ID)
-		devm_register_sys_off_handler(axp20x->dev,
-					      SYS_OFF_MODE_POWER_OFF,
-					      SYS_OFF_PRIO_DEFAULT,
-					      axp20x_power_off, axp20x);
+		devm_register_power_off_handler(axp20x->dev, axp20x_power_off, axp20x);
 
 	dev_info(axp20x->dev, "AXP20X driver loaded\n");
 

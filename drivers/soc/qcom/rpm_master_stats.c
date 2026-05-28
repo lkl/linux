@@ -78,7 +78,7 @@ static int master_stats_probe(struct platform_device *pdev)
 	if (count < 0)
 		return count;
 
-	data = devm_kzalloc(dev, count * sizeof(*data), GFP_KERNEL);
+	data = devm_kcalloc(dev, count, sizeof(*data), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 
@@ -155,7 +155,7 @@ static const struct of_device_id rpm_master_table[] = {
 
 static struct platform_driver master_stats_driver = {
 	.probe = master_stats_probe,
-	.remove_new = master_stats_remove,
+	.remove = master_stats_remove,
 	.driver = {
 		.name = "qcom_rpm_master_stats",
 		.of_match_table = rpm_master_table,

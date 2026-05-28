@@ -48,7 +48,7 @@ static int kirkwood_get_temp(struct thermal_zone_device *thermal,
 	return 0;
 }
 
-static struct thermal_zone_device_ops ops = {
+static const struct thermal_zone_device_ops ops = {
 	.get_temp = kirkwood_get_temp,
 };
 
@@ -102,7 +102,7 @@ MODULE_DEVICE_TABLE(of, kirkwood_thermal_id_table);
 
 static struct platform_driver kirkwood_thermal_driver = {
 	.probe = kirkwood_thermal_probe,
-	.remove_new = kirkwood_thermal_exit,
+	.remove = kirkwood_thermal_exit,
 	.driver = {
 		.name = "kirkwood_thermal",
 		.of_match_table = kirkwood_thermal_id_table,

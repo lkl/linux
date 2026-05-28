@@ -9,6 +9,7 @@ config PPC_POWERNV
 	select PPC_P7_NAP
 	select FORCE_PCI
 	select PCI_MSI
+	select IRQ_MSI_LIB
 	select EPAPR_BOOT
 	select PPC_INDIRECT_PIO
 	select PPC_UDBG_16550
@@ -17,6 +18,7 @@ config PPC_POWERNV
 	select MMU_NOTIFIER
 	select FORCE_SMP
 	select ARCH_SUPPORTS_PER_VMA_LOCK
+	select PPC_RADIX_BROADCAST_TLBIE if PPC_RADIX_MMU
 	default y
 
 config OPAL_PRD

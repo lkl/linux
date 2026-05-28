@@ -1160,6 +1160,8 @@ struct rtsx_cr_option {
 	bool ocp_en;
 	u8 sd_400mA_ocp_thd;
 	u8 sd_800mA_ocp_thd;
+	u8 sd_cd_reverse_en;
+	u8 sd_wp_reverse_en;
 };
 
 /*
@@ -1312,8 +1314,6 @@ void rtsx_pci_add_cmd(struct rtsx_pcr *pcr,
 		u8 cmd_type, u16 reg_addr, u8 mask, u8 data);
 void rtsx_pci_send_cmd_no_wait(struct rtsx_pcr *pcr);
 int rtsx_pci_send_cmd(struct rtsx_pcr *pcr, int timeout);
-int rtsx_pci_transfer_data(struct rtsx_pcr *pcr, struct scatterlist *sglist,
-		int num_sg, bool read, int timeout);
 int rtsx_pci_dma_map_sg(struct rtsx_pcr *pcr, struct scatterlist *sglist,
 		int num_sg, bool read);
 void rtsx_pci_dma_unmap_sg(struct rtsx_pcr *pcr, struct scatterlist *sglist,

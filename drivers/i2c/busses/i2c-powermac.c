@@ -349,7 +349,7 @@ static void i2c_powermac_register_devices(struct i2c_adapter *adap,
 		/* Fill out the rest of the info structure */
 		info.addr = addr;
 		info.irq = irq_of_parse_and_map(node, 0);
-		info.of_node = of_node_get(node);
+		info.fwnode = of_fwnode_handle(of_node_get(node));
 
 		newdev = i2c_new_client_device(adap, &info);
 		if (IS_ERR(newdev)) {
@@ -437,7 +437,7 @@ static int i2c_powermac_probe(struct platform_device *dev)
 
 static struct platform_driver i2c_powermac_driver = {
 	.probe = i2c_powermac_probe,
-	.remove_new = i2c_powermac_remove,
+	.remove = i2c_powermac_remove,
 	.driver = {
 		.name = "i2c-powermac",
 		.bus = &platform_bus_type,

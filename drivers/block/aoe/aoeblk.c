@@ -269,9 +269,9 @@ static blk_status_t aoeblk_queue_rq(struct blk_mq_hw_ctx *hctx,
 }
 
 static int
-aoeblk_getgeo(struct block_device *bdev, struct hd_geometry *geo)
+aoeblk_getgeo(struct gendisk *disk, struct hd_geometry *geo)
 {
-	struct aoedev *d = bdev->bd_disk->private_data;
+	struct aoedev *d = disk->private_data;
 
 	if ((d->flags & DEVFL_UP) == 0) {
 		printk(KERN_ERR "aoe: disk not up\n");
@@ -368,7 +368,6 @@ aoeblk_gdalloc(void *vp)
 	set->nr_hw_queues = 1;
 	set->queue_depth = 128;
 	set->numa_node = NUMA_NO_NODE;
-	set->flags = BLK_MQ_F_SHOULD_MERGE;
 	err = blk_mq_alloc_tag_set(set);
 	if (err) {
 		pr_err("aoe: cannot allocate tag set for %ld.%d\n",

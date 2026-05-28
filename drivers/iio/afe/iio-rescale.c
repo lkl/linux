@@ -107,7 +107,7 @@ int rescale_process_scale(struct rescale *rescale, int scale_type,
 		return -EOPNOTSUPP;
 	}
 }
-EXPORT_SYMBOL_NS_GPL(rescale_process_scale, IIO_RESCALE);
+EXPORT_SYMBOL_NS_GPL(rescale_process_scale, "IIO_RESCALE");
 
 int rescale_process_offset(struct rescale *rescale, int scale_type,
 			   int scale, int scale2, int schan_off,
@@ -141,7 +141,7 @@ int rescale_process_offset(struct rescale *rescale, int scale_type,
 		return -EOPNOTSUPP;
 	}
 }
-EXPORT_SYMBOL_NS_GPL(rescale_process_offset, IIO_RESCALE);
+EXPORT_SYMBOL_NS_GPL(rescale_process_offset, "IIO_RESCALE");
 
 static int rescale_read_raw(struct iio_dev *indio_dev,
 			    struct iio_chan_spec const *chan,
@@ -514,7 +514,7 @@ static const struct of_device_id rescale_match[] = {
 	  .data = &rescale_cfg[TEMP_SENSE_RTD], },
 	{ .compatible = "temperature-transducer",
 	  .data = &rescale_cfg[TEMP_TRANSDUCER], },
-	{ /* sentinel */ }
+	{ }
 };
 MODULE_DEVICE_TABLE(of, rescale_match);
 

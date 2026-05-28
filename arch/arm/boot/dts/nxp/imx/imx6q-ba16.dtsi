@@ -222,6 +222,8 @@
 		pinctrl-0 = <&pinctrl_pmic>;
 		interrupt-parent = <&gpio7>;
 		interrupts = <13 IRQ_TYPE_LEVEL_LOW>;
+		interrupt-controller;
+		#interrupt-cells = <2>;
 
 		onkey {
 			compatible = "dlg,da9063-onkey";
@@ -623,7 +625,7 @@
 		>;
 	};
 
-	pinctrl_usdhc3_reset: usdhc3grp-reset {
+	pinctrl_usdhc3_reset: usdhc3-resetgrp {
 		fsl,pins = <
 			MX6QDL_PAD_SD3_RST__SD3_RESET   0x170F9
 		>;

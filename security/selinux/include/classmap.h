@@ -1,8 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 
-#include <linux/capability.h>
-#include <linux/socket.h>
-
 #define COMMON_FILE_SOCK_PERMS                                            \
 	"ioctl", "read", "write", "create", "getattr", "setattr", "lock", \
 		"relabelfrom", "relabelto", "append", "map"
@@ -11,7 +8,7 @@
 	COMMON_FILE_SOCK_PERMS, "unlink", "link", "rename", "execute",   \
 		"quotaon", "mounton", "audit_access", "open", "execmod", \
 		"watch", "watch_mount", "watch_sb", "watch_with_perm",   \
-		"watch_reads"
+		"watch_reads", "watch_mountns"
 
 #define COMMON_SOCK_PERMS                                              \
 	COMMON_FILE_SOCK_PERMS, "bind", "connect", "listen", "accept", \
@@ -36,8 +33,12 @@
 	"mac_override", "mac_admin", "syslog", "wake_alarm", "block_suspend", \
 		"audit_read", "perfmon", "bpf", "checkpoint_restore"
 
+#ifdef __KERNEL__ /* avoid this check when building host programs */
+#include <linux/capability.h>
+
 #if CAP_LAST_CAP > CAP_CHECKPOINT_RESTORE
 #error New capability defined, please update COMMON_CAP2_PERMS.
+#endif
 #endif
 
 /*
@@ -62,7 +63,9 @@ const struct security_class_mapping secclass_map[] = {
 	{ "process2", { "nnp_transition", "nosuid_transition", NULL } },
 	{ "system",
 	  { "ipc_info", "syslog_read", "syslog_mod", "syslog_console",
-	    "module_request", "module_load", NULL } },
+	    "module_request", "module_load", "firmware_load",
+	    "kexec_image_load", "kexec_initramfs_load", "policy_load",
+	    "x509_certificate_load", NULL } },
 	{ "capability", { COMMON_CAP_PERMS, NULL } },
 	{ "filesystem",
 	  { "mount", "remount", "unmount", "getattr", "relabelfrom",
@@ -96,17 +99,17 @@ const struct security_class_mapping secclass_map[] = {
 	{ "shm", { COMMON_IPC_PERMS, "lock", NULL } },
 	{ "ipc", { COMMON_IPC_PERMS, NULL } },
 	{ "netlink_route_socket",
-	  { COMMON_SOCK_PERMS, "nlmsg_read", "nlmsg_write", NULL } },
+	  { COMMON_SOCK_PERMS, "nlmsg_read", "nlmsg_write", "nlmsg", NULL } },
 	{ "netlink_tcpdiag_socket",
-	  { COMMON_SOCK_PERMS, "nlmsg_read", "nlmsg_write", NULL } },
+	  { COMMON_SOCK_PERMS, "nlmsg_read", "nlmsg_write", "nlmsg", NULL } },
 	{ "netlink_nflog_socket", { COMMON_SOCK_PERMS, NULL } },
 	{ "netlink_xfrm_socket",
-	  { COMMON_SOCK_PERMS, "nlmsg_read", "nlmsg_write", NULL } },
+	  { COMMON_SOCK_PERMS, "nlmsg_read", "nlmsg_write", "nlmsg", NULL } },
 	{ "netlink_selinux_socket", { COMMON_SOCK_PERMS, NULL } },
 	{ "netlink_iscsi_socket", { COMMON_SOCK_PERMS, NULL } },
 	{ "netlink_audit_socket",
 	  { COMMON_SOCK_PERMS, "nlmsg_read", "nlmsg_write", "nlmsg_relay",
-	    "nlmsg_readpriv", "nlmsg_tty_audit", NULL } },
+	    "nlmsg_readpriv", "nlmsg_tty_audit", "nlmsg", NULL } },
 	{ "netlink_fib_lookup_socket", { COMMON_SOCK_PERMS, NULL } },
 	{ "netlink_connector_socket", { COMMON_SOCK_PERMS, NULL } },
 	{ "netlink_netfilter_socket", { COMMON_SOCK_PERMS, NULL } },
@@ -124,8 +127,6 @@ const struct security_class_mapping secclass_map[] = {
 	{ "key",
 	  { "view", "read", "write", "search", "link", "setattr", "create",
 	    NULL } },
-	{ "dccp_socket",
-	  { COMMON_SOCK_PERMS, "node_bind", "name_connect", NULL } },
 	{ "memprotect", { "mmap_zero", NULL } },
 	{ "peer", { "recv", NULL } },
 	{ "capability2", { COMMON_CAP2_PERMS, NULL } },
@@ -176,11 +177,15 @@ const struct security_class_mapping secclass_map[] = {
 	{ "perf_event",
 	  { "open", "cpu", "kernel", "tracepoint", "read", "write", NULL } },
 	{ "anon_inode", { COMMON_FILE_PERMS, NULL } },
-	{ "io_uring", { "override_creds", "sqpoll", "cmd", NULL } },
+	{ "io_uring", { "override_creds", "sqpoll", "cmd", "allowed", NULL } },
 	{ "user_namespace", { "create", NULL } },
-	{ NULL }
+	/* last one */ { NULL, {} }
 };
+
+#ifdef __KERNEL__ /* avoid this check when building host programs */
+#include <linux/socket.h>
 
 #if PF_MAX > 46
 #error New address family defined, please update secclass_map.
+#endif
 #endif

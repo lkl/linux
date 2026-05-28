@@ -49,6 +49,7 @@
 #include <asm/cacheflush.h>
 #include <asm/exec.h>
 #include <asm/fpsimd.h>
+#include <asm/gcs.h>
 #include <asm/mmu_context.h>
 #include <asm/mte.h>
 #include <asm/processor.h>
@@ -227,7 +228,7 @@ void __show_regs(struct pt_regs *regs)
 	printk("sp : %016llx\n", sp);
 
 	if (system_uses_irq_prio_masking())
-		printk("pmr_save: %08llx\n", regs->pmr_save);
+		printk("pmr: %08x\n", regs->pmr);
 
 	i = top_reg;
 
@@ -280,6 +281,53 @@ static void flush_poe(void)
 	write_sysreg_s(POR_EL0_INIT, SYS_POR_EL0);
 }
 
+#ifdef CONFIG_ARM64_GCS
+
+static void flush_gcs(void)
+{
+	if (!system_supports_gcs())
+		return;
+
+	current->thread.gcspr_el0 = 0;
+	current->thread.gcs_base = 0;
+	current->thread.gcs_size = 0;
+	current->thread.gcs_el0_mode = 0;
+	write_sysreg_s(GCSCRE0_EL1_nTR, SYS_GCSCRE0_EL1);
+	write_sysreg_s(0, SYS_GCSPR_EL0);
+}
+
+static int copy_thread_gcs(struct task_struct *p,
+			   const struct kernel_clone_args *args)
+{
+	unsigned long gcs;
+
+	if (!system_supports_gcs())
+		return 0;
+
+	p->thread.gcs_base = 0;
+	p->thread.gcs_size = 0;
+
+	p->thread.gcs_el0_mode = current->thread.gcs_el0_mode;
+	p->thread.gcs_el0_locked = current->thread.gcs_el0_locked;
+
+	gcs = gcs_alloc_thread_stack(p, args);
+	if (IS_ERR_VALUE(gcs))
+		return PTR_ERR((void *)gcs);
+
+	return 0;
+}
+
+#else
+
+static void flush_gcs(void) { }
+static int copy_thread_gcs(struct task_struct *p,
+			   const struct kernel_clone_args *args)
+{
+	return 0;
+}
+
+#endif
+
 void flush_thread(void)
 {
 	fpsimd_flush_thread();
@@ -287,6 +335,7 @@ void flush_thread(void)
 	flush_ptrace_hw_breakpoint(current);
 	flush_tagged_addr_state();
 	flush_poe();
+	flush_gcs();
 }
 
 void arch_release_task_struct(struct task_struct *tsk)
@@ -296,53 +345,62 @@ void arch_release_task_struct(struct task_struct *tsk)
 
 int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 {
-	if (current->mm)
-		fpsimd_preserve_current_state();
+	/*
+	 * The current/src task's FPSIMD state may or may not be live, and may
+	 * have been altered by ptrace after entry to the kernel. Save the
+	 * effective FPSIMD state so that this will be copied into dst.
+	 */
+	fpsimd_save_and_flush_current_state();
+	fpsimd_sync_from_effective_state(src);
+
 	*dst = *src;
 
 	/*
-	 * Detach src's sve_state (if any) from dst so that it does not
-	 * get erroneously used or freed prematurely.  dst's copies
-	 * will be allocated on demand later on if dst uses SVE.
-	 * For consistency, also clear TIF_SVE here: this could be done
-	 * later in copy_process(), but to avoid tripping up future
-	 * maintainers it is best not to leave TIF flags and buffers in
-	 * an inconsistent state, even temporarily.
+	 * Drop stale reference to src's sve_state and convert dst to
+	 * non-streaming FPSIMD mode.
 	 */
+	dst->thread.fp_type = FP_STATE_FPSIMD;
 	dst->thread.sve_state = NULL;
 	clear_tsk_thread_flag(dst, TIF_SVE);
+	task_smstop_sm(dst);
 
 	/*
-	 * In the unlikely event that we create a new thread with ZA
-	 * enabled we should retain the ZA and ZT state so duplicate
-	 * it here.  This may be shortly freed if we exec() or if
-	 * CLONE_SETTLS but it's simpler to do it here. To avoid
-	 * confusing the rest of the code ensure that we have a
-	 * sve_state allocated whenever sme_state is allocated.
+	 * Drop stale reference to src's sme_state and ensure dst has ZA
+	 * disabled.
+	 *
+	 * When necessary, ZA will be inherited later in copy_thread_za().
 	 */
-	if (thread_za_enabled(&src->thread)) {
-		dst->thread.sve_state = kzalloc(sve_state_size(src),
-						GFP_KERNEL);
-		if (!dst->thread.sve_state)
-			return -ENOMEM;
-
-		dst->thread.sme_state = kmemdup(src->thread.sme_state,
-						sme_state_size(src),
-						GFP_KERNEL);
-		if (!dst->thread.sme_state) {
-			kfree(dst->thread.sve_state);
-			dst->thread.sve_state = NULL;
-			return -ENOMEM;
-		}
-	} else {
-		dst->thread.sme_state = NULL;
-		clear_tsk_thread_flag(dst, TIF_SME);
-	}
-
-	dst->thread.fp_type = FP_STATE_FPSIMD;
+	dst->thread.sme_state = NULL;
+	clear_tsk_thread_flag(dst, TIF_SME);
+	dst->thread.svcr &= ~SVCR_ZA_MASK;
 
 	/* clear any pending asynchronous tag fault raised by the parent */
 	clear_tsk_thread_flag(dst, TIF_MTE_ASYNC_FAULT);
+
+	return 0;
+}
+
+static int copy_thread_za(struct task_struct *dst, struct task_struct *src)
+{
+	if (!thread_za_enabled(&src->thread))
+		return 0;
+
+	dst->thread.sve_state = kzalloc(sve_state_size(src),
+					GFP_KERNEL);
+	if (!dst->thread.sve_state)
+		return -ENOMEM;
+
+	dst->thread.sme_state = kmemdup(src->thread.sme_state,
+					sme_state_size(src),
+					GFP_KERNEL);
+	if (!dst->thread.sme_state) {
+		kfree(dst->thread.sve_state);
+		dst->thread.sve_state = NULL;
+		return -ENOMEM;
+	}
+
+	set_tsk_thread_flag(dst, TIF_SME);
+	dst->thread.svcr |= SVCR_ZA_MASK;
 
 	return 0;
 }
@@ -351,10 +409,11 @@ asmlinkage void ret_from_fork(void) asm("ret_from_fork");
 
 int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 {
-	unsigned long clone_flags = args->flags;
+	u64 clone_flags = args->flags;
 	unsigned long stack_start = args->stack;
 	unsigned long tls = args->tls;
 	struct pt_regs *childregs = task_pt_regs(p);
+	int ret;
 
 	memset(&p->thread.cpu_context, 0, sizeof(struct cpu_context));
 
@@ -378,8 +437,6 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 		 * out-of-sync with the saved value.
 		 */
 		*task_user_tls(p) = read_sysreg(tpidr_el0);
-		if (system_supports_tpidr2())
-			p->thread.tpidr2_el0 = read_sysreg_s(SYS_TPIDR2_EL0);
 
 		if (system_supports_poe())
 			p->thread.por_el0 = read_sysreg_s(SYS_POR_EL0);
@@ -392,13 +449,43 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 		}
 
 		/*
-		 * If a TLS pointer was passed to clone, use it for the new
-		 * thread.  We also reset TPIDR2 if it's in use.
+		 * Due to the AAPCS64 "ZA lazy saving scheme", PSTATE.ZA and
+		 * TPIDR2 need to be manipulated as a pair, and either both
+		 * need to be inherited or both need to be reset.
+		 *
+		 * Within a process, child threads must not inherit their
+		 * parent's TPIDR2 value or they may clobber their parent's
+		 * stack at some later point.
+		 *
+		 * When a process is fork()'d, the child must inherit ZA and
+		 * TPIDR2 from its parent in case there was dormant ZA state.
+		 *
+		 * Use CLONE_VM to determine when the child will share the
+		 * address space with the parent, and cannot safely inherit the
+		 * state.
 		 */
-		if (clone_flags & CLONE_SETTLS) {
-			p->thread.uw.tp_value = tls;
-			p->thread.tpidr2_el0 = 0;
+		if (system_supports_sme()) {
+			if (!(clone_flags & CLONE_VM)) {
+				p->thread.tpidr2_el0 = read_sysreg_s(SYS_TPIDR2_EL0);
+				ret = copy_thread_za(p, current);
+				if (ret)
+					return ret;
+			} else {
+				p->thread.tpidr2_el0 = 0;
+				WARN_ON_ONCE(p->thread.svcr & SVCR_ZA_MASK);
+			}
 		}
+
+		/*
+		 * If a TLS pointer was passed to clone, use it for the new
+		 * thread.
+		 */
+		if (clone_flags & CLONE_SETTLS)
+			p->thread.uw.tp_value = tls;
+
+		ret = copy_thread_gcs(p, args);
+		if (ret != 0)
+			return ret;
 	} else {
 		/*
 		 * A kthread has no context to ERET to, so ensure any buggy
@@ -409,6 +496,7 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 		 */
 		memset(childregs, 0, sizeof(struct pt_regs));
 		childregs->pstate = PSR_MODE_EL1h | PSR_IL_BIT;
+		childregs->stackframe.type = FRAME_META_TYPE_FINAL;
 
 		p->thread.cpu_context.x19 = (unsigned long)args->fn;
 		p->thread.cpu_context.x20 = (unsigned long)args->fn_arg;
@@ -422,7 +510,7 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 	 * For the benefit of the unwinder, set up childregs->stackframe
 	 * as the final frame for the new task.
 	 */
-	p->thread.cpu_context.fp = (unsigned long)childregs->stackframe;
+	p->thread.cpu_context.fp = (unsigned long)&childregs->stackframe;
 
 	ptrace_hw_copy_thread(p);
 
@@ -442,7 +530,7 @@ static void tls_thread_switch(struct task_struct *next)
 
 	if (is_compat_thread(task_thread_info(next)))
 		write_sysreg(next->thread.uw.tp_value, tpidrro_el0);
-	else if (!arm64_kernel_unmapped_at_el0())
+	else
 		write_sysreg(0, tpidrro_el0);
 
 	write_sysreg(*task_user_tls(next), tpidr_el0);
@@ -486,6 +574,46 @@ static void entry_task_switch(struct task_struct *next)
 {
 	__this_cpu_write(__entry_task, next);
 }
+
+#ifdef CONFIG_ARM64_GCS
+
+void gcs_preserve_current_state(void)
+{
+	current->thread.gcspr_el0 = read_sysreg_s(SYS_GCSPR_EL0);
+}
+
+static void gcs_thread_switch(struct task_struct *next)
+{
+	if (!system_supports_gcs())
+		return;
+
+	/* GCSPR_EL0 is always readable */
+	gcs_preserve_current_state();
+	write_sysreg_s(next->thread.gcspr_el0, SYS_GCSPR_EL0);
+
+	if (current->thread.gcs_el0_mode != next->thread.gcs_el0_mode)
+		gcs_set_el0_mode(next);
+
+	/*
+	 * Ensure that GCS memory effects of the 'prev' thread are
+	 * ordered before other memory accesses with release semantics
+	 * (or preceded by a DMB) on the current PE. In addition, any
+	 * memory accesses with acquire semantics (or succeeded by a
+	 * DMB) are ordered before GCS memory effects of the 'next'
+	 * thread. This will ensure that the GCS memory effects are
+	 * visible to other PEs in case of migration.
+	 */
+	if (task_gcs_el0_enabled(current) || task_gcs_el0_enabled(next))
+		gcsb_dsync();
+}
+
+#else
+
+static void gcs_thread_switch(struct task_struct *next)
+{
+}
+
+#endif
 
 /*
  * Handle sysreg updates for ARM erratum 1418040 which affects the 32bit view of
@@ -544,6 +672,11 @@ static void permission_overlay_switch(struct task_struct *next)
 	current->thread.por_el0 = read_sysreg_s(SYS_POR_EL0);
 	if (current->thread.por_el0 != next->thread.por_el0) {
 		write_sysreg_s(next->thread.por_el0, SYS_POR_EL0);
+		/*
+		 * No ISB required as we can tolerate spurious Overlay faults -
+		 * the fault handler will check again based on the new value
+		 * of POR_EL0.
+		 */
 	}
 }
 
@@ -583,12 +716,14 @@ struct task_struct *__switch_to(struct task_struct *prev,
 	cntkctl_thread_switch(prev, next);
 	ptrauth_thread_switch_user(next);
 	permission_overlay_switch(next);
+	gcs_thread_switch(next);
 
 	/*
-	 * Complete any pending TLB or cache maintenance on this CPU in case
-	 * the thread migrates to a different CPU.
-	 * This full barrier is also required by the membarrier system
-	 * call.
+	 * Complete any pending TLB or cache maintenance on this CPU in case the
+	 * thread migrates to a different CPU. This full barrier is also
+	 * required by the membarrier system call. Additionally it makes any
+	 * in-progress pgtable writes visible to the table walker; See
+	 * emit_pte_barriers().
 	 */
 	dsb(ish);
 
@@ -720,9 +855,13 @@ long set_tagged_addr_ctrl(struct task_struct *task, unsigned long arg)
 	if (is_compat_thread(ti))
 		return -EINVAL;
 
-	if (system_supports_mte())
+	if (system_supports_mte()) {
 		valid_mask |= PR_MTE_TCF_SYNC | PR_MTE_TCF_ASYNC \
 			| PR_MTE_TAG_MASK;
+
+		if (cpus_have_cap(ARM64_MTE_STORE_ONLY))
+			valid_mask |= PR_MTE_STORE_ONLY;
+	}
 
 	if (arg & ~valid_mask)
 		return -EINVAL;
@@ -764,7 +903,7 @@ long get_tagged_addr_ctrl(struct task_struct *task)
  * disable it for tasks that already opted in to the relaxed ABI.
  */
 
-static struct ctl_table tagged_addr_sysctl_table[] = {
+static const struct ctl_table tagged_addr_sysctl_table[] = {
 	{
 		.procname	= "tagged_addr_disabled",
 		.mode		= 0644,

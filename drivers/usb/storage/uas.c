@@ -698,6 +698,10 @@ static int uas_queuecommand_lck(struct scsi_cmnd *cmnd)
 	 * of queueing, no matter how fatal the error
 	 */
 	if (err == -ENODEV) {
+		if (cmdinfo->state & (COMMAND_INFLIGHT | DATA_IN_URB_INFLIGHT |
+				DATA_OUT_URB_INFLIGHT))
+			goto out;
+
 		set_host_byte(cmnd, DID_NO_CONNECT);
 		scsi_done(cmnd);
 		goto zombie;
@@ -711,6 +715,7 @@ static int uas_queuecommand_lck(struct scsi_cmnd *cmnd)
 		uas_add_work(cmnd);
 	}
 
+out:
 	devinfo->cmnd[idx] = cmnd;
 zombie:
 	spin_unlock_irqrestore(&devinfo->lock, flags);
@@ -817,7 +822,7 @@ static int uas_target_alloc(struct scsi_target *starget)
 	return 0;
 }
 
-static int uas_slave_alloc(struct scsi_device *sdev)
+static int uas_sdev_init(struct scsi_device *sdev)
 {
 	struct uas_dev_info *devinfo =
 		(struct uas_dev_info *)sdev->host->hostdata;
@@ -832,8 +837,8 @@ static int uas_slave_alloc(struct scsi_device *sdev)
 	return 0;
 }
 
-static int uas_device_configure(struct scsi_device *sdev,
-		struct queue_limits *lim)
+static int uas_sdev_configure(struct scsi_device *sdev,
+			      struct queue_limits *lim)
 {
 	struct uas_dev_info *devinfo = sdev->hostdata;
 
@@ -905,8 +910,8 @@ static const struct scsi_host_template uas_host_template = {
 	.name = "uas",
 	.queuecommand = uas_queuecommand,
 	.target_alloc = uas_target_alloc,
-	.slave_alloc = uas_slave_alloc,
-	.device_configure = uas_device_configure,
+	.sdev_init = uas_sdev_init,
+	.sdev_configure = uas_sdev_configure,
 	.eh_abort_handler = uas_eh_abort_handler,
 	.eh_device_reset_handler = uas_eh_device_reset_handler,
 	.this_id = -1,
@@ -1289,6 +1294,6 @@ module_exit(uas_exit);
 
 MODULE_DESCRIPTION("USB Attached SCSI driver");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(USB_STORAGE);
+MODULE_IMPORT_NS("USB_STORAGE");
 MODULE_AUTHOR(
 	"Hans de Goede <hdegoede@redhat.com>, Matthew Wilcox and Sarah Sharp");

@@ -115,12 +115,14 @@ static const char stat_gstrings[][ETH_GSTRING_LEN] = {
 static void gfar_gstrings(struct net_device *dev, u32 stringset, u8 * buf)
 {
 	struct gfar_private *priv = netdev_priv(dev);
+	int i;
 
 	if (priv->device_flags & FSL_GIANFAR_DEV_HAS_RMON)
-		memcpy(buf, stat_gstrings, GFAR_STATS_LEN * ETH_GSTRING_LEN);
+		for (i = 0; i < GFAR_STATS_LEN; i++)
+			ethtool_puts(&buf, stat_gstrings[i]);
 	else
-		memcpy(buf, stat_gstrings,
-		       GFAR_EXTRA_STATS_LEN * ETH_GSTRING_LEN);
+		for (i = 0; i < GFAR_EXTRA_STATS_LEN; i++)
+			ethtool_puts(&buf, stat_gstrings[i]);
 }
 
 /* Fill in an array of 64-bit statistics from various sources.
@@ -779,14 +781,26 @@ err:
 	return ret;
 }
 
-static int gfar_set_hash_opts(struct gfar_private *priv,
-			      struct ethtool_rxnfc *cmd)
+static int gfar_set_rxfh_fields(struct net_device *dev,
+				const struct ethtool_rxfh_fields *cmd,
+				struct netlink_ext_ack *extack)
 {
+	struct gfar_private *priv = netdev_priv(dev);
+	int ret;
+
+	if (test_bit(GFAR_RESETTING, &priv->state))
+		return -EBUSY;
+
+	mutex_lock(&priv->rx_queue_access);
+
+	ret = 0;
 	/* write the filer rules here */
 	if (!gfar_ethflow_to_filer_table(priv, cmd->data, cmd->flow_type))
-		return -EINVAL;
+		ret = -EINVAL;
 
-	return 0;
+	mutex_unlock(&priv->rx_queue_access);
+
+	return ret;
 }
 
 static int gfar_check_filer_hardware(struct gfar_private *priv)
@@ -1396,9 +1410,6 @@ static int gfar_set_nfc(struct net_device *dev, struct ethtool_rxnfc *cmd)
 	mutex_lock(&priv->rx_queue_access);
 
 	switch (cmd->cmd) {
-	case ETHTOOL_SRXFH:
-		ret = gfar_set_hash_opts(priv, cmd);
-		break;
 	case ETHTOOL_SRXCLSRLINS:
 		if ((cmd->fs.ring_cookie != RX_CLS_FLOW_DISC &&
 		     cmd->fs.ring_cookie >= priv->num_rx_queues) ||
@@ -1464,8 +1475,10 @@ static int gfar_get_ts_info(struct net_device *dev,
 	if (ptp_node) {
 		ptp_dev = of_find_device_by_node(ptp_node);
 		of_node_put(ptp_node);
-		if (ptp_dev)
+		if (ptp_dev) {
 			ptp = platform_get_drvdata(ptp_dev);
+			put_device(&ptp_dev->dev);
+		}
 	}
 
 	if (ptp)
@@ -1506,6 +1519,7 @@ const struct ethtool_ops gfar_ethtool_ops = {
 #endif
 	.set_rxnfc = gfar_set_nfc,
 	.get_rxnfc = gfar_get_nfc,
+	.set_rxfh_fields = gfar_set_rxfh_fields,
 	.get_ts_info = gfar_get_ts_info,
 	.get_link_ksettings = phy_ethtool_get_link_ksettings,
 	.set_link_ksettings = phy_ethtool_set_link_ksettings,

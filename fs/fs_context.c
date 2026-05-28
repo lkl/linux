@@ -161,25 +161,24 @@ int vfs_parse_fs_param(struct fs_context *fc, struct fs_parameter *param)
 EXPORT_SYMBOL(vfs_parse_fs_param);
 
 /**
- * vfs_parse_fs_string - Convenience function to just parse a string.
+ * vfs_parse_fs_qstr - Convenience function to just parse a string.
  * @fc: Filesystem context.
  * @key: Parameter name.
  * @value: Default value.
- * @v_size: Maximum number of bytes in the value.
  */
-int vfs_parse_fs_string(struct fs_context *fc, const char *key,
-			const char *value, size_t v_size)
+int vfs_parse_fs_qstr(struct fs_context *fc, const char *key,
+			const struct qstr *value)
 {
 	int ret;
 
 	struct fs_parameter param = {
 		.key	= key,
 		.type	= fs_value_is_flag,
-		.size	= v_size,
+		.size	= value ? value->len : 0,
 	};
 
 	if (value) {
-		param.string = kmemdup_nul(value, v_size, GFP_KERNEL);
+		param.string = kmemdup_nul(value->name, value->len, GFP_KERNEL);
 		if (!param.string)
 			return -ENOMEM;
 		param.type = fs_value_is_string;
@@ -189,7 +188,7 @@ int vfs_parse_fs_string(struct fs_context *fc, const char *key,
 	kfree(param.string);
 	return ret;
 }
-EXPORT_SYMBOL(vfs_parse_fs_string);
+EXPORT_SYMBOL(vfs_parse_fs_qstr);
 
 /**
  * vfs_parse_monolithic_sep - Parse key[=val][,key[=val]]* mount data
@@ -218,16 +217,14 @@ int vfs_parse_monolithic_sep(struct fs_context *fc, void *data,
 
 	while ((key = sep(&options)) != NULL) {
 		if (*key) {
-			size_t v_len = 0;
 			char *value = strchr(key, '=');
 
 			if (value) {
-				if (value == key)
+				if (unlikely(value == key))
 					continue;
 				*value++ = 0;
-				v_len = strlen(value);
 			}
-			ret = vfs_parse_fs_string(fc, key, value, v_len);
+			ret = vfs_parse_fs_string(fc, key, value);
 			if (ret < 0)
 				break;
 		}
@@ -449,6 +446,10 @@ void logfc(struct fc_log *log, const char *prefix, char level, const char *fmt, 
 			printk(KERN_ERR "%s%s%pV\n", prefix ? prefix : "",
 						prefix ? ": " : "", &vaf);
 			break;
+		case 'i':
+			printk(KERN_INFO "%s%s%pV\n", prefix ? prefix : "",
+						prefix ? ": " : "", &vaf);
+			break;
 		default:
 			printk(KERN_NOTICE "%s%s%pV\n", prefix ? prefix : "",
 						prefix ? ": " : "", &vaf);
@@ -493,7 +494,7 @@ static void put_fc_log(struct fs_context *fc)
 	if (log) {
 		if (refcount_dec_and_test(&log->usage)) {
 			fc->log.log = NULL;
-			for (i = 0; i <= 7; i++)
+			for (i = 0; i < ARRAY_SIZE(log->buffer) ; i++)
 				if (log->need_free & (1 << i))
 					kfree(log->buffer[i]);
 			kfree(log);

@@ -12,9 +12,6 @@
 
 #include <linux/io.h>
 
-/* Handy logging macro to save on line length */
-#define DBG(x, ...) pr_devel("%s: " x "\n", __func__, ##__VA_ARGS__)
-
 /* 32-bit word aware bit and mask macros */
 #define W0_MASK(h, l)  GENMASK((h) - 0,  (l) - 0)
 #define W1_MASK(h, l)  GENMASK((h) - 32, (l) - 32)
@@ -94,8 +91,7 @@ struct hci_xfer {
 		};
 		struct {
 			/* DMA specific */
-			dma_addr_t data_dma;
-			void *bounce_buf;
+			struct i3c_dma *dma;
 			int ring_number;
 			int ring_entry;
 		};
@@ -115,7 +111,7 @@ static inline void hci_free_xfer(struct hci_xfer *xfer, unsigned int n)
 
 /* This abstracts PIO vs DMA operations */
 struct hci_io_ops {
-	bool (*irq_handler)(struct i3c_hci *hci, unsigned int mask);
+	bool (*irq_handler)(struct i3c_hci *hci);
 	int (*queue_xfer)(struct i3c_hci *hci, struct hci_xfer *xfer, int n);
 	bool (*dequeue_xfer)(struct i3c_hci *hci, struct hci_xfer *xfer, int n);
 	int (*request_ibi)(struct i3c_hci *hci, struct i3c_dev_desc *dev,

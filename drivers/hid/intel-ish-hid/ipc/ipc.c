@@ -498,6 +498,7 @@ static int ish_fw_reset_handler(struct ishtp_device *dev)
 {
 	uint32_t	reset_id;
 	unsigned long	flags;
+	int ret;
 
 	/* Read reset ID */
 	reset_id = ish_reg_read(dev, IPC_REG_ISH2HOST_MSG) & 0xFFFF;
@@ -510,13 +511,16 @@ static int ish_fw_reset_handler(struct ishtp_device *dev)
 	/* ISHTP notification in IPC_RESET */
 	ishtp_reset_handler(dev);
 
-	if (!ish_is_input_ready(dev))
-		timed_wait_for_timeout(dev, WAIT_FOR_INPUT_RDY,
-			TIME_SLICE_FOR_INPUT_RDY_MS, TIMEOUT_FOR_INPUT_RDY_MS);
-
+	ret = timed_wait_for_timeout(dev, WAIT_FOR_INPUT_RDY,
+				     TIME_SLICE_FOR_INPUT_RDY_MS,
+				     TIMEOUT_FOR_INPUT_RDY_MS);
 	/* ISH FW is dead */
-	if (!ish_is_input_ready(dev))
+	if (ret)
 		return	-EPIPE;
+
+	/* Send clock sync at once after reset */
+	ishtp_dev->prev_sync = 0;
+
 	/*
 	 * Set HOST2ISH.ILUP. Apparently we need this BEFORE sending
 	 * RESET_NOTIFY_ACK - FW will be checking for it
@@ -527,9 +531,10 @@ static int ish_fw_reset_handler(struct ishtp_device *dev)
 			 sizeof(uint32_t));
 
 	/* Wait for ISH FW'es ILUP and ISHTP_READY */
-	timed_wait_for_timeout(dev, WAIT_FOR_FW_RDY,
-			TIME_SLICE_FOR_FW_RDY_MS, TIMEOUT_FOR_FW_RDY_MS);
-	if (!ishtp_fw_is_ready(dev)) {
+	ret = timed_wait_for_timeout(dev, WAIT_FOR_FW_RDY,
+				     TIME_SLICE_FOR_FW_RDY_MS,
+				     TIMEOUT_FOR_FW_RDY_MS);
+	if (ret) {
 		/* ISH FW is dead */
 		uint32_t	ish_status;
 
@@ -577,15 +582,14 @@ static void fw_reset_work_fn(struct work_struct *work)
  */
 static void _ish_sync_fw_clock(struct ishtp_device *dev)
 {
-	static unsigned long	prev_sync;
-	uint64_t	usec;
+	struct ipc_time_update_msg time = {};
 
-	if (prev_sync && time_before(jiffies, prev_sync + 20 * HZ))
+	if (dev->prev_sync && time_before(jiffies, dev->prev_sync + 20 * HZ))
 		return;
 
-	prev_sync = jiffies;
-	usec = ktime_to_us(ktime_get_boottime());
-	ipc_send_mng_msg(dev, MNG_SYNC_FW_CLOCK, &usec, sizeof(uint64_t));
+	dev->prev_sync = jiffies;
+	/* The fields of time would be updated while sending message */
+	ipc_send_mng_msg(dev, MNG_SYNC_FW_CLOCK, &time, sizeof(time));
 }
 
 /**

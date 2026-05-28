@@ -31,13 +31,12 @@
         printk("%s:%d: bad pgd %p(%08lx).\n", __FILE__, __LINE__, &(e), \
 	       pgd_val(e))
 
-static inline int pgd_newpage(pgd_t pgd)	{ return 0; }
+static inline int pgd_needsync(pgd_t pgd)	{ return 0; }
 static inline void pgd_mkuptodate(pgd_t pgd)	{ }
 
 #define set_pmd(pmdptr, pmdval) (*(pmdptr) = (pmdval))
 
 #define pte_pfn(x) phys_to_pfn(pte_val(x))
-#define pfn_pte(pfn, prot) __pte(pfn_to_phys(pfn) | pgprot_val(prot))
 #define pfn_pmd(pfn, prot) __pmd(pfn_to_phys(pfn) | pgprot_val(prot))
 
 #endif

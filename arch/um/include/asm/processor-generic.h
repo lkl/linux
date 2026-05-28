@@ -20,10 +20,7 @@ struct task_struct;
 struct mm_struct;
 
 struct thread_struct {
-	struct pt_regs regs;
 	struct pt_regs *segv_regs;
-	void *fault_addr;
-	jmp_buf *fault_catcher;
 	struct task_struct *prev_sched;
 	struct arch_thread arch;
 	jmp_buf switch_buf;
@@ -33,12 +30,16 @@ struct thread_struct {
 			void *arg;
 		} thread;
 	} request;
+
+	void *segv_continue;
+
+	/* Contains variable sized FP registers */
+	struct pt_regs regs;
 };
 
 #define INIT_THREAD \
 { \
 	.regs		   	= EMPTY_REGS,	\
-	.fault_addr		= NULL, \
 	.prev_sched		= NULL, \
 	.arch			= INIT_ARCH_THREAD, \
 	.request		= { } \
@@ -70,7 +71,6 @@ extern void start_thread(struct pt_regs *regs, unsigned long entry,
 
 struct cpuinfo_um {
 	unsigned long loops_per_jiffy;
-	int ipi_pipe[2];
 	int cache_alignment;
 	union {
 		__u32		x86_capability[NCAPINTS + NBUGINTS];
@@ -80,8 +80,6 @@ struct cpuinfo_um {
 
 extern struct cpuinfo_um boot_cpu_data;
 
-#define cpu_data(cpu)    boot_cpu_data
-#define current_cpu_data boot_cpu_data
 #define cache_line_size()	(boot_cpu_data.cache_alignment)
 
 #define KSTK_REG(tsk, reg) get_thread_reg(reg, &tsk->thread.switch_buf)

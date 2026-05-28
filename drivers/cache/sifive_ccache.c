@@ -118,6 +118,8 @@ static void ccache_config_read(void)
 }
 
 static const struct of_device_id sifive_ccache_ids[] = {
+	{ .compatible = "eswin,eic7700-l3-cache",
+	  .data = (void *)(QUIRK_NONSTANDARD_CACHE_OPS) },
 	{ .compatible = "sifive,fu540-c000-ccache" },
 	{ .compatible = "sifive,fu740-c000-ccache" },
 	{ .compatible = "starfive,jh7100-ccache",
@@ -149,16 +151,16 @@ static void ccache_flush_range(phys_addr_t start, size_t len)
 	if (!len)
 		return;
 
-	mb();
+	mb(); /* complete earlier memory accesses before the cache flush */
 	for (line = ALIGN_DOWN(start, SIFIVE_CCACHE_LINE_SIZE); line < end;
 			line += SIFIVE_CCACHE_LINE_SIZE) {
 #ifdef CONFIG_32BIT
-		writel(line >> 4, ccache_base + SIFIVE_CCACHE_FLUSH32);
+		writel_relaxed(line >> 4, ccache_base + SIFIVE_CCACHE_FLUSH32);
 #else
-		writeq(line, ccache_base + SIFIVE_CCACHE_FLUSH64);
+		writeq_relaxed(line, ccache_base + SIFIVE_CCACHE_FLUSH64);
 #endif
-		mb();
 	}
+	mb(); /* issue later memory accesses after the cache flush */
 }
 
 static const struct riscv_nonstd_cache_ops ccache_mgmt_ops __initconst = {

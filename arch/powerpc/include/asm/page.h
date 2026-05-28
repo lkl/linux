@@ -6,7 +6,7 @@
  * Copyright (C) 2001,2005 IBM Corporation.
  */
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/bug.h>
@@ -21,10 +21,9 @@
  * page size. When using 64K pages however, whether we are really supporting
  * 64K pages in HW or not is irrelevant to those definitions.
  */
-#define PAGE_SHIFT		CONFIG_PAGE_SHIFT
-#define PAGE_SIZE		(ASM_CONST(1) << PAGE_SHIFT)
+#include <vdso/page.h>
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 #ifndef CONFIG_HUGETLB_PAGE
 #define HPAGE_SHIFT PAGE_SHIFT
 #elif defined(CONFIG_PPC_BOOK3S_64)
@@ -40,13 +39,6 @@ extern unsigned int hpage_shift;
 #define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
 #define HUGE_MAX_HSTATE		(MMU_PAGE_COUNT-1)
 #endif
-
-/*
- * Subtle: (1 << PAGE_SHIFT) is an int, not an unsigned long. So if we
- * assign PAGE_MASK to a larger type it gets extended the way we want
- * (i.e. with 1s in the high bits)
- */
-#define PAGE_MASK      (~((1 << PAGE_SHIFT) - 1))
 
 /*
  * KERNELBASE is the virtual address of the start of the kernel, it's often
@@ -83,7 +75,7 @@ extern unsigned int hpage_shift;
 #define LOAD_OFFSET	ASM_CONST((CONFIG_KERNEL_START-CONFIG_PHYSICAL_START))
 
 #if defined(CONFIG_NONSTATIC_KERNEL)
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 extern phys_addr_t memstart_addr;
 extern phys_addr_t kernstart_addr;
@@ -92,7 +84,7 @@ extern phys_addr_t kernstart_addr;
 extern long long virt_phys_offset;
 #endif
 
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 #define PHYSICAL_START	kernstart_addr
 
 #else	/* !CONFIG_NONSTATIC_KERNEL */
@@ -224,7 +216,7 @@ extern long long virt_phys_offset;
 #endif
 #endif
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 static inline unsigned long virt_to_pfn(const void *kaddr)
 {
 	return __pa(kaddr) >> PAGE_SHIFT;
@@ -269,7 +261,7 @@ static inline const void *pfn_to_kaddr(unsigned long pfn)
 #define is_kernel_addr(x)	((x) >= TASK_SIZE)
 #endif
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #ifdef CONFIG_PPC_BOOK3S_64
 #include <asm/pgtable-be-types.h>
@@ -298,6 +290,6 @@ static inline unsigned long kaslr_offset(void)
 }
 
 #include <asm-generic/memory_model.h>
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 
 #endif /* _ASM_POWERPC_PAGE_H */

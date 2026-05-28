@@ -19,6 +19,7 @@
 #include "priv_prog.skel.h"
 #include "dummy_st_ops_success.skel.h"
 #include "token_lsm.skel.h"
+#include "priv_freplace_prog.skel.h"
 
 static inline int sys_mount(const char *dev_name, const char *dir_name,
 			    const char *type, unsigned long flags,
@@ -114,7 +115,7 @@ static int create_bpffs_fd(void)
 
 static int materialize_bpffs_fd(int fs_fd, struct bpffs_opts *opts)
 {
-	int mnt_fd, err;
+	int err;
 
 	/* set up token delegation mount options */
 	err = set_delegate_mask(fs_fd, "delegate_cmds", opts->cmds, opts->cmds_str);
@@ -135,12 +136,7 @@ static int materialize_bpffs_fd(int fs_fd, struct bpffs_opts *opts)
 	if (err < 0)
 		return -errno;
 
-	/* create O_PATH fd for detached mount */
-	mnt_fd = sys_fsmount(fs_fd, 0, 0);
-	if (err < 0)
-		return -errno;
-
-	return mnt_fd;
+	return 0;
 }
 
 /* send FD over Unix domain (AF_UNIX) socket */
@@ -286,6 +282,7 @@ static void child(int sock_fd, struct bpffs_opts *opts, child_callback_fn callba
 {
 	int mnt_fd = -1, fs_fd = -1, err = 0, bpffs_fd = -1, token_fd = -1;
 	struct token_lsm *lsm_skel = NULL;
+	char one;
 
 	/* load and attach LSM "policy" before we go into unpriv userns */
 	lsm_skel = token_lsm__open_and_load();
@@ -332,13 +329,19 @@ static void child(int sock_fd, struct bpffs_opts *opts, child_callback_fn callba
 	err = sendfd(sock_fd, fs_fd);
 	if (!ASSERT_OK(err, "send_fs_fd"))
 		goto cleanup;
-	zclose(fs_fd);
+
+	/* wait that the parent reads the fd, does the fsconfig() calls
+	 * and send us a signal that it is done
+	 */
+	err = read(sock_fd, &one, sizeof(one));
+	if (!ASSERT_GE(err, 0, "read_one"))
+		goto cleanup;
 
 	/* avoid mucking around with mount namespaces and mounting at
-	 * well-known path, just get detach-mounted BPF FS fd back from parent
+	 * well-known path, just create O_PATH fd for detached mount
 	 */
-	err = recvfd(sock_fd, &mnt_fd);
-	if (!ASSERT_OK(err, "recv_mnt_fd"))
+	mnt_fd = sys_fsmount(fs_fd, 0, 0);
+	if (!ASSERT_OK_FD(mnt_fd, "mnt_fd"))
 		goto cleanup;
 
 	/* try to fspick() BPF FS and try to add some delegation options */
@@ -428,24 +431,24 @@ again:
 
 static void parent(int child_pid, struct bpffs_opts *bpffs_opts, int sock_fd)
 {
-	int fs_fd = -1, mnt_fd = -1, token_fd = -1, err;
+	int fs_fd = -1, token_fd = -1, err;
+	char one = 1;
 
 	err = recvfd(sock_fd, &fs_fd);
 	if (!ASSERT_OK(err, "recv_bpffs_fd"))
 		goto cleanup;
 
-	mnt_fd = materialize_bpffs_fd(fs_fd, bpffs_opts);
-	if (!ASSERT_GE(mnt_fd, 0, "materialize_bpffs_fd")) {
+	err = materialize_bpffs_fd(fs_fd, bpffs_opts);
+	if (!ASSERT_GE(err, 0, "materialize_bpffs_fd")) {
 		err = -EINVAL;
 		goto cleanup;
 	}
-	zclose(fs_fd);
 
-	/* pass BPF FS context object to parent */
-	err = sendfd(sock_fd, mnt_fd);
-	if (!ASSERT_OK(err, "send_mnt_fd"))
+	/* notify the child that we did the fsconfig() calls and it can proceed. */
+	err = write(sock_fd, &one, sizeof(one));
+	if (!ASSERT_EQ(err, sizeof(one), "send_one"))
 		goto cleanup;
-	zclose(mnt_fd);
+	zclose(fs_fd);
 
 	/* receive BPF token FD back from child for some extra tests */
 	err = recvfd(sock_fd, &token_fd);
@@ -458,7 +461,6 @@ static void parent(int child_pid, struct bpffs_opts *bpffs_opts, int sock_fd)
 cleanup:
 	zclose(sock_fd);
 	zclose(fs_fd);
-	zclose(mnt_fd);
 	zclose(token_fd);
 
 	if (child_pid > 0)
@@ -788,6 +790,84 @@ static int userns_obj_priv_prog(int mnt_fd, struct token_lsm *lsm_skel)
 	return 0;
 }
 
+static int userns_obj_priv_freplace_setup(int mnt_fd, struct priv_freplace_prog **fr_skel,
+					  struct priv_prog **skel, int *tgt_fd)
+{
+	LIBBPF_OPTS(bpf_object_open_opts, opts);
+	int err;
+	char buf[256];
+
+	/* use bpf_token_path to provide BPF FS path */
+	snprintf(buf, sizeof(buf), "/proc/self/fd/%d", mnt_fd);
+	opts.bpf_token_path = buf;
+	*skel = priv_prog__open_opts(&opts);
+	if (!ASSERT_OK_PTR(*skel, "priv_prog__open_opts"))
+		return -EINVAL;
+	err = priv_prog__load(*skel);
+	if (!ASSERT_OK(err, "priv_prog__load"))
+		return -EINVAL;
+
+	*fr_skel = priv_freplace_prog__open_opts(&opts);
+	if (!ASSERT_OK_PTR(*skel, "priv_freplace_prog__open_opts"))
+		return -EINVAL;
+
+	*tgt_fd = bpf_program__fd((*skel)->progs.xdp_prog1);
+	return 0;
+}
+
+/* Verify that freplace works from user namespace, because bpf token is loaded
+ * in bpf_object__prepare
+ */
+static int userns_obj_priv_freplace_prog(int mnt_fd, struct token_lsm *lsm_skel)
+{
+	struct priv_freplace_prog *fr_skel = NULL;
+	struct priv_prog *skel = NULL;
+	int err, tgt_fd;
+
+	err = userns_obj_priv_freplace_setup(mnt_fd, &fr_skel, &skel, &tgt_fd);
+	if (!ASSERT_OK(err, "setup"))
+		goto out;
+
+	err = bpf_object__prepare(fr_skel->obj);
+	if (!ASSERT_OK(err, "freplace__prepare"))
+		goto out;
+
+	err = bpf_program__set_attach_target(fr_skel->progs.new_xdp_prog2, tgt_fd, "xdp_prog1");
+	if (!ASSERT_OK(err, "set_attach_target"))
+		goto out;
+
+	err = priv_freplace_prog__load(fr_skel);
+	ASSERT_OK(err, "priv_freplace_prog__load");
+
+out:
+	priv_freplace_prog__destroy(fr_skel);
+	priv_prog__destroy(skel);
+	return err;
+}
+
+/* Verify that replace fails to set attach target from user namespace without bpf token */
+static int userns_obj_priv_freplace_prog_fail(int mnt_fd, struct token_lsm *lsm_skel)
+{
+	struct priv_freplace_prog *fr_skel = NULL;
+	struct priv_prog *skel = NULL;
+	int err, tgt_fd;
+
+	err = userns_obj_priv_freplace_setup(mnt_fd, &fr_skel, &skel, &tgt_fd);
+	if (!ASSERT_OK(err, "setup"))
+		goto out;
+
+	err = bpf_program__set_attach_target(fr_skel->progs.new_xdp_prog2, tgt_fd, "xdp_prog1");
+	if (ASSERT_ERR(err, "attach fails"))
+		err = 0;
+	else
+		err = -EINVAL;
+
+out:
+	priv_freplace_prog__destroy(fr_skel);
+	priv_prog__destroy(skel);
+	return err;
+}
+
 /* this test is called with BPF FS that doesn't delegate BPF_BTF_LOAD command,
  * which should cause struct_ops application to fail, as BTF won't be uploaded
  * into the kernel, even if STRUCT_OPS programs themselves are allowed
@@ -828,8 +908,12 @@ static int userns_obj_priv_btf_success(int mnt_fd, struct token_lsm *lsm_skel)
 	return validate_struct_ops_load(mnt_fd, true /* should succeed */);
 }
 
+static const char *token_bpffs_custom_dir()
+{
+	return getenv("BPF_SELFTESTS_BPF_TOKEN_DIR") ?: "/tmp/bpf-token-fs";
+}
+
 #define TOKEN_ENVVAR "LIBBPF_BPF_TOKEN_PATH"
-#define TOKEN_BPFFS_CUSTOM "/bpf-token-fs"
 
 static int userns_obj_priv_implicit_token(int mnt_fd, struct token_lsm *lsm_skel)
 {
@@ -892,6 +976,7 @@ static int userns_obj_priv_implicit_token(int mnt_fd, struct token_lsm *lsm_skel
 
 static int userns_obj_priv_implicit_token_envvar(int mnt_fd, struct token_lsm *lsm_skel)
 {
+	const char *custom_dir = token_bpffs_custom_dir();
 	LIBBPF_OPTS(bpf_object_open_opts, opts);
 	struct dummy_st_ops_success *skel;
 	int err;
@@ -909,10 +994,10 @@ static int userns_obj_priv_implicit_token_envvar(int mnt_fd, struct token_lsm *l
 	 * BPF token implicitly, unless pointed to it through
 	 * LIBBPF_BPF_TOKEN_PATH envvar
 	 */
-	rmdir(TOKEN_BPFFS_CUSTOM);
-	if (!ASSERT_OK(mkdir(TOKEN_BPFFS_CUSTOM, 0777), "mkdir_bpffs_custom"))
+	rmdir(custom_dir);
+	if (!ASSERT_OK(mkdir(custom_dir, 0777), "mkdir_bpffs_custom"))
 		goto err_out;
-	err = sys_move_mount(mnt_fd, "", AT_FDCWD, TOKEN_BPFFS_CUSTOM, MOVE_MOUNT_F_EMPTY_PATH);
+	err = sys_move_mount(mnt_fd, "", AT_FDCWD, custom_dir, MOVE_MOUNT_F_EMPTY_PATH);
 	if (!ASSERT_OK(err, "move_mount_bpffs"))
 		goto err_out;
 
@@ -925,7 +1010,7 @@ static int userns_obj_priv_implicit_token_envvar(int mnt_fd, struct token_lsm *l
 		goto err_out;
 	}
 
-	err = setenv(TOKEN_ENVVAR, TOKEN_BPFFS_CUSTOM, 1 /*overwrite*/);
+	err = setenv(TOKEN_ENVVAR, custom_dir, 1 /*overwrite*/);
 	if (!ASSERT_OK(err, "setenv_token_path"))
 		goto err_out;
 
@@ -951,16 +1036,51 @@ static int userns_obj_priv_implicit_token_envvar(int mnt_fd, struct token_lsm *l
 	if (!ASSERT_ERR(err, "obj_empty_token_path_load"))
 		goto err_out;
 
-	rmdir(TOKEN_BPFFS_CUSTOM);
+	rmdir(custom_dir);
 	unsetenv(TOKEN_ENVVAR);
 	return 0;
 err_out:
-	rmdir(TOKEN_BPFFS_CUSTOM);
+	rmdir(custom_dir);
 	unsetenv(TOKEN_ENVVAR);
 	return -EINVAL;
 }
 
 #define bit(n) (1ULL << (n))
+
+static int userns_bpf_token_info(int mnt_fd, struct token_lsm *lsm_skel)
+{
+	int err, token_fd = -1;
+	struct bpf_token_info info;
+	u32 len = sizeof(struct bpf_token_info);
+
+	/* create BPF token from BPF FS mount */
+	token_fd = bpf_token_create(mnt_fd, NULL);
+	if (!ASSERT_GT(token_fd, 0, "token_create")) {
+		err = -EINVAL;
+		goto cleanup;
+	}
+
+	memset(&info, 0, len);
+	err = bpf_obj_get_info_by_fd(token_fd, &info, &len);
+	if (!ASSERT_ERR(err, "bpf_obj_get_token_info"))
+		goto cleanup;
+	if (!ASSERT_EQ(info.allowed_cmds, bit(BPF_MAP_CREATE), "token_info_cmds_map_create")) {
+		err = -EINVAL;
+		goto cleanup;
+	}
+	if (!ASSERT_EQ(info.allowed_progs, bit(BPF_PROG_TYPE_XDP), "token_info_progs_xdp")) {
+		err = -EINVAL;
+		goto cleanup;
+	}
+
+	/* The BPF_PROG_TYPE_EXT is not set in token */
+	if (ASSERT_EQ(info.allowed_progs, bit(BPF_PROG_TYPE_EXT), "token_info_progs_ext"))
+		err = -EINVAL;
+
+cleanup:
+	zclose(token_fd);
+	return err;
+}
 
 void test_token(void)
 {
@@ -999,11 +1119,27 @@ void test_token(void)
 	if (test__start_subtest("obj_priv_prog")) {
 		struct bpffs_opts opts = {
 			.cmds = bit(BPF_PROG_LOAD),
-			.progs = bit(BPF_PROG_TYPE_KPROBE),
+			.progs = bit(BPF_PROG_TYPE_XDP),
 			.attachs = ~0ULL,
 		};
 
 		subtest_userns(&opts, userns_obj_priv_prog);
+	}
+	if (test__start_subtest("obj_priv_freplace_prog")) {
+		struct bpffs_opts opts = {
+			.cmds = bit(BPF_BTF_LOAD) | bit(BPF_PROG_LOAD) | bit(BPF_BTF_GET_FD_BY_ID),
+			.progs = bit(BPF_PROG_TYPE_EXT) | bit(BPF_PROG_TYPE_XDP),
+			.attachs = ~0ULL,
+		};
+		subtest_userns(&opts, userns_obj_priv_freplace_prog);
+	}
+	if (test__start_subtest("obj_priv_freplace_prog_fail")) {
+		struct bpffs_opts opts = {
+			.cmds = bit(BPF_BTF_LOAD) | bit(BPF_PROG_LOAD) | bit(BPF_BTF_GET_FD_BY_ID),
+			.progs = bit(BPF_PROG_TYPE_EXT) | bit(BPF_PROG_TYPE_XDP),
+			.attachs = ~0ULL,
+		};
+		subtest_userns(&opts, userns_obj_priv_freplace_prog_fail);
 	}
 	if (test__start_subtest("obj_priv_btf_fail")) {
 		struct bpffs_opts opts = {
@@ -1048,5 +1184,14 @@ void test_token(void)
 		};
 
 		subtest_userns(&opts, userns_obj_priv_implicit_token_envvar);
+	}
+	if (test__start_subtest("bpf_token_info")) {
+		struct bpffs_opts opts = {
+			.cmds = bit(BPF_MAP_CREATE),
+			.progs = bit(BPF_PROG_TYPE_XDP),
+			.attachs = ~0ULL,
+		};
+
+		subtest_userns(&opts, userns_bpf_token_info);
 	}
 }

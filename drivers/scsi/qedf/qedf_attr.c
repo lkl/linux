@@ -104,7 +104,7 @@ void qedf_capture_grc_dump(struct qedf_ctx *qedf)
 
 static ssize_t
 qedf_sysfs_read_grcdump(struct file *filep, struct kobject *kobj,
-			struct bin_attribute *ba, char *buf, loff_t off,
+			const struct bin_attribute *ba, char *buf, loff_t off,
 			size_t count)
 {
 	ssize_t ret = 0;
@@ -124,7 +124,7 @@ qedf_sysfs_read_grcdump(struct file *filep, struct kobject *kobj,
 
 static ssize_t
 qedf_sysfs_write_grcdump(struct file *filep, struct kobject *kobj,
-			struct bin_attribute *ba, char *buf, loff_t off,
+			const struct bin_attribute *ba, char *buf, loff_t off,
 			size_t count)
 {
 	struct fc_lport *lport = NULL;
@@ -160,7 +160,7 @@ qedf_sysfs_write_grcdump(struct file *filep, struct kobject *kobj,
 	return count;
 }
 
-static struct bin_attribute sysfs_grcdump_attr = {
+static const struct bin_attribute sysfs_grcdump_attr = {
 	.attr = {
 		.name = "grcdump",
 		.mode = S_IRUSR | S_IWUSR,

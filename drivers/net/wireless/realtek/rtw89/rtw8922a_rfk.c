@@ -36,8 +36,7 @@ void rtw8922a_tssi_cont_en_phyidx(struct rtw89_dev *rtwdev, bool en, u8 phy_idx)
 
 static
 void rtw8922a_ctl_band_ch_bw(struct rtw89_dev *rtwdev, enum rtw89_phy_idx phy,
-			     u8 central_ch, enum rtw89_band band,
-			     enum rtw89_bandwidth bw)
+			     const struct rtw89_chan *chan)
 {
 	const u32 rf_addr[2] = {RR_CFGCH, RR_CFGCH_V1};
 	struct rtw89_hal *hal = &rtwdev->hal;
@@ -73,54 +72,9 @@ void rtw8922a_ctl_band_ch_bw(struct rtw89_dev *rtwdev, enum rtw89_phy_idx phy,
 				return;
 			}
 
-			rf_reg[path][i] &= ~(RR_CFGCH_BAND1 | RR_CFGCH_BW |
+			rf_reg[path][i] &= ~(RR_CFGCH_BAND1 | RR_CFGCH_BW_V2 |
 					     RR_CFGCH_BAND0 | RR_CFGCH_CH);
-			rf_reg[path][i] |= u32_encode_bits(central_ch, RR_CFGCH_CH);
-
-			if (band == RTW89_BAND_2G)
-				rtw89_write_rf(rtwdev, path, RR_SMD, RR_VCO2, 0x0);
-			else
-				rtw89_write_rf(rtwdev, path, RR_SMD, RR_VCO2, 0x1);
-
-			switch (band) {
-			case RTW89_BAND_2G:
-			default:
-				break;
-			case RTW89_BAND_5G:
-				rf_reg[path][i] |=
-					u32_encode_bits(CFGCH_BAND1_5G, RR_CFGCH_BAND1) |
-					u32_encode_bits(CFGCH_BAND0_5G, RR_CFGCH_BAND0);
-				break;
-			case RTW89_BAND_6G:
-				rf_reg[path][i] |=
-					u32_encode_bits(CFGCH_BAND1_6G, RR_CFGCH_BAND1) |
-					u32_encode_bits(CFGCH_BAND0_6G, RR_CFGCH_BAND0);
-				break;
-			}
-
-			switch (bw) {
-			case RTW89_CHANNEL_WIDTH_5:
-			case RTW89_CHANNEL_WIDTH_10:
-			case RTW89_CHANNEL_WIDTH_20:
-			default:
-				break;
-			case RTW89_CHANNEL_WIDTH_40:
-				rf_reg[path][i] |=
-					u32_encode_bits(CFGCH_BW_V2_40M, RR_CFGCH_BW_V2);
-				break;
-			case RTW89_CHANNEL_WIDTH_80:
-				rf_reg[path][i] |=
-					u32_encode_bits(CFGCH_BW_V2_80M, RR_CFGCH_BW_V2);
-				break;
-			case RTW89_CHANNEL_WIDTH_160:
-				rf_reg[path][i] |=
-					u32_encode_bits(CFGCH_BW_V2_160M, RR_CFGCH_BW_V2);
-				break;
-			case RTW89_CHANNEL_WIDTH_320:
-				rf_reg[path][i] |=
-					u32_encode_bits(CFGCH_BW_V2_320M, RR_CFGCH_BW_V2);
-				break;
-			}
+			rf_reg[path][i] |= rtw89_chip_chan_to_rf18_val(rtwdev, chan);
 
 			rtw89_write_rf(rtwdev, path, rf_addr[i],
 				       RFREG_MASK, rf_reg[path][i]);
@@ -131,7 +85,7 @@ void rtw8922a_ctl_band_ch_bw(struct rtw89_dev *rtwdev, enum rtw89_phy_idx phy,
 	if (hal->cv != CHIP_CAV)
 		return;
 
-	if (band == RTW89_BAND_2G) {
+	if (chan->band_type == RTW89_BAND_2G) {
 		rtw89_write_rf(rtwdev, RF_PATH_A, RR_LUTWE, RFREG_MASK, 0x80000);
 		rtw89_write_rf(rtwdev, RF_PATH_A, RR_LUTWA, RFREG_MASK, 0x00003);
 		rtw89_write_rf(rtwdev, RF_PATH_A, RR_LUTWD1, RFREG_MASK, 0x0c990);
@@ -150,8 +104,7 @@ void rtw8922a_set_channel_rf(struct rtw89_dev *rtwdev,
 			     const struct rtw89_chan *chan,
 			     enum rtw89_phy_idx phy_idx)
 {
-	rtw8922a_ctl_band_ch_bw(rtwdev, phy_idx, chan->channel, chan->band_type,
-				chan->band_width);
+	rtw8922a_ctl_band_ch_bw(rtwdev, phy_idx, chan);
 }
 
 enum _rf_syn_pow {
@@ -252,49 +205,58 @@ static void rtw8922a_chlk_ktbl_sel(struct rtw89_dev *rtwdev, u8 kpath, u8 idx)
 	}
 }
 
-static void rtw8922a_chlk_reload(struct rtw89_dev *rtwdev)
+static u8 rtw8922a_chlk_reload_sel_tbl(struct rtw89_dev *rtwdev,
+				       const struct rtw89_chan *chan, u8 path)
 {
 	struct rtw89_rfk_mcc_info *rfk_mcc = &rtwdev->rfk_mcc;
 	struct rtw89_rfk_chan_desc desc[__RTW89_RFK_CHS_NR_V1] = {};
-	enum rtw89_chanctx_idx chanctx_idx;
-	const struct rtw89_chan *chan;
-	enum rtw89_entity_mode mode;
-	u8 s0_tbl, s1_tbl;
 	u8 tbl_sel;
-
-	mode = rtw89_get_entity_mode(rtwdev);
-	switch (mode) {
-	case RTW89_ENTITY_MODE_MCC_PREPARE:
-		chanctx_idx = RTW89_CHANCTX_1;
-		break;
-	default:
-		chanctx_idx = RTW89_CHANCTX_0;
-		break;
-	}
-
-	chan = rtw89_chan_get(rtwdev, chanctx_idx);
 
 	for (tbl_sel = 0; tbl_sel < ARRAY_SIZE(desc); tbl_sel++) {
 		struct rtw89_rfk_chan_desc *p = &desc[tbl_sel];
 
-		p->ch = rfk_mcc->ch[tbl_sel];
+		p->ch = rfk_mcc->data[path].ch[tbl_sel];
 
 		p->has_band = true;
-		p->band = rfk_mcc->band[tbl_sel];
+		p->band = rfk_mcc->data[path].band[tbl_sel];
 
 		p->has_bw = true;
-		p->bw = rfk_mcc->bw[tbl_sel];
+		p->bw = rfk_mcc->data[path].bw[tbl_sel];
 	}
 
 	tbl_sel = rtw89_rfk_chan_lookup(rtwdev, desc, ARRAY_SIZE(desc), chan);
 
-	rfk_mcc->ch[tbl_sel] = chan->channel;
-	rfk_mcc->band[tbl_sel] = chan->band_type;
-	rfk_mcc->bw[tbl_sel] = chan->band_width;
-	rfk_mcc->table_idx = tbl_sel;
+	rfk_mcc->data[path].ch[tbl_sel] = chan->channel;
+	rfk_mcc->data[path].band[tbl_sel] = chan->band_type;
+	rfk_mcc->data[path].bw[tbl_sel] = chan->band_width;
+	rfk_mcc->data[path].table_idx = tbl_sel;
 
-	s0_tbl = tbl_sel;
-	s1_tbl = tbl_sel;
+	return tbl_sel;
+}
+
+static void rtw8922a_chlk_reload(struct rtw89_dev *rtwdev)
+{
+	const struct rtw89_chan *chan0, *chan1;
+	u8 s0_tbl, s1_tbl;
+
+	switch (rtwdev->mlo_dbcc_mode) {
+	default:
+	case MLO_2_PLUS_0_1RF:
+		chan0 = rtw89_mgnt_chan_get(rtwdev, 0);
+		chan1 = chan0;
+		break;
+	case MLO_0_PLUS_2_1RF:
+		chan1 = rtw89_mgnt_chan_get(rtwdev, 1);
+		chan0 = chan1;
+		break;
+	case MLO_1_PLUS_1_1RF:
+		chan0 = rtw89_mgnt_chan_get(rtwdev, 0);
+		chan1 = rtw89_mgnt_chan_get(rtwdev, 1);
+		break;
+	}
+
+	s0_tbl = rtw8922a_chlk_reload_sel_tbl(rtwdev, chan0, 0);
+	s1_tbl = rtw8922a_chlk_reload_sel_tbl(rtwdev, chan1, 1);
 
 	rtw8922a_chlk_ktbl_sel(rtwdev, RF_A, s0_tbl);
 	rtw8922a_chlk_ktbl_sel(rtwdev, RF_B, s1_tbl);

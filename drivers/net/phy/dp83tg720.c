@@ -4,11 +4,101 @@
  */
 #include <linux/bitfield.h>
 #include <linux/ethtool_netlink.h>
+#include <linux/jiffies.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/phy.h>
+#include <linux/random.h>
 
 #include "open_alliance_helpers.h"
+
+/*
+ * DP83TG720 PHY Limitations and Workarounds
+ *
+ * The DP83TG720 1000BASE-T1 PHY has several limitations that require
+ * software-side mitigations. These workarounds are implemented throughout
+ * this driver. This section documents the known issues and their corresponding
+ * mitigation strategies.
+ *
+ * 1. Unreliable Link Detection and Synchronized Reset Deadlock
+ * ------------------------------------------------------------
+ * After a link loss or during link establishment, the DP83TG720 PHY may fail
+ * to detect or report link status correctly. As of June 2025, no public
+ * errata sheet for the DP83TG720 PHY documents this behavior.
+ * The "DP83TC81x, DP83TG72x Software Implementation Guide" application note
+ * (SNLA404, available at https://www.ti.com/lit/an/snla404/snla404.pdf)
+ * recommends performing a soft restart if polling for a link fails to establish
+ * a connection after 100ms. This procedure is adopted as the workaround for the
+ * observed link detection issue.
+ *
+ * However, in point-to-point setups where both link partners use the same
+ * driver (e.g. Linux on both sides), a synchronized reset pattern may emerge.
+ * This leads to a deadlock, where both PHYs reset at the same time and
+ * continuously miss each other during auto-negotiation.
+ *
+ * To address this, the reset procedure includes two components:
+ *
+ * - A **fixed minimum delay of 1ms** after a hardware reset. The datasheet
+ *   "DP83TG720S-Q1 1000BASE-T1 Automotive Ethernet PHY with SGMII and RGMII"
+ *   specifies this as the "Post reset stabilization-time prior to MDC preamble
+ *   for register access" (T6.2), ensuring the PHY is ready for MDIO
+ *   operations.
+ *
+ * - An **additional asymmetric delay**, empirically chosen based on
+ *   master/slave role. This reduces the risk of synchronized resets on both
+ *   link partners. Values are selected to avoid periodic overlap and ensure
+ *   the link is re-established within a few cycles.
+ *
+ * The functions that implement this logic are:
+ * - dp83tg720_soft_reset()
+ * - dp83tg720_get_next_update_time()
+ *
+ * 2. Polling-Based Link Detection and IRQ Support
+ * -----------------------------------------------
+ * Due to the PHY-specific limitation described in section 1, link-up events
+ * cannot be reliably detected via interrupts on the DP83TG720. Therefore,
+ * polling is required to detect transitions from link-down to link-up.
+ *
+ * While link-down events *can* be detected via IRQs on this PHY, this driver
+ * currently does **not** implement interrupt support. As a result, all link
+ * state changes must be detected using polling.
+ *
+ * Polling behavior:
+ * - When the link is up: slow polling (e.g. 1s).
+ * - When the link just went down: fast polling for a short time.
+ * - When the link stays down: fallback to slow polling.
+ *
+ * This design balances responsiveness and CPU usage. It sacrifices fast link-up
+ * times in cases where the link is expected to remain down for extended periods,
+ * assuming that such systems do not require immediate reactivity.
+ */
+
+/*
+ * DP83TG720S_POLL_ACTIVE_LINK - Polling interval in milliseconds when the link
+ *				 is active.
+ * DP83TG720S_POLL_NO_LINK     - Polling interval in milliseconds when the
+ *				 link is down.
+ * DP83TG720S_FAST_POLL_DURATION_MS - Timeout in milliseconds for no-link
+ *				 polling after which polling interval is
+ *				 increased.
+ * DP83TG720S_POLL_SLOW	       - Slow polling interval when there is no
+ *				 link for a prolongued period.
+ * DP83TG720S_RESET_DELAY_MS_MASTER - Delay after a reset before attempting
+ *				 to establish a link again for master phy.
+ * DP83TG720S_RESET_DELAY_MS_SLAVE  - Delay after a reset before attempting
+ *				 to establish a link again for slave phy.
+ *
+ * These values are not documented or officially recommended by the vendor but
+ * were determined through empirical testing. They achieve a good balance in
+ * minimizing the number of reset retries while ensuring reliable link recovery
+ * within a reasonable timeframe.
+ */
+#define DP83TG720S_POLL_ACTIVE_LINK		421
+#define DP83TG720S_POLL_NO_LINK			149
+#define DP83TG720S_FAST_POLL_DURATION_MS	6000
+#define DP83TG720S_POLL_SLOW			1117
+#define DP83TG720S_RESET_DELAY_MS_MASTER	97
+#define DP83TG720S_RESET_DELAY_MS_SLAVE		149
 
 #define DP83TG720S_PHY_ID			0x2000a284
 
@@ -51,6 +141,9 @@
 /* Register 0x0405: Unknown Register */
 #define DP83TG720S_UNKNOWN_0405			0x405
 
+#define DP83TG720S_LINK_QUAL_3			0x547
+#define DP83TG720S_LINK_LOSS_CNT_MASK		GENMASK(15, 10)
+
 /* Register 0x0576: TDR Master Link Down Control */
 #define DP83TG720S_TDR_MASTER_LINK_DOWN		0x576
 
@@ -60,6 +153,29 @@
 /* In RGMII mode, Enable or disable the internal delay for TXD */
 #define DP83TG720S_RGMII_TX_CLK_SEL		BIT(0)
 
+/*
+ * DP83TG720S_PKT_STAT_x registers correspond to similarly named registers
+ * in the datasheet (PKT_STAT_1 through PKT_STAT_6). These registers store
+ * 32-bit or 16-bit counters for TX and RX statistics and must be read in
+ * sequence to ensure the counters are cleared correctly.
+ *
+ * - DP83TG720S_PKT_STAT_1: Contains TX packet count bits [15:0].
+ * - DP83TG720S_PKT_STAT_2: Contains TX packet count bits [31:16].
+ * - DP83TG720S_PKT_STAT_3: Contains TX error packet count.
+ * - DP83TG720S_PKT_STAT_4: Contains RX packet count bits [15:0].
+ * - DP83TG720S_PKT_STAT_5: Contains RX packet count bits [31:16].
+ * - DP83TG720S_PKT_STAT_6: Contains RX error packet count.
+ *
+ * Keeping the register names as defined in the datasheet helps maintain
+ * clarity and alignment with the documentation.
+ */
+#define DP83TG720S_PKT_STAT_1			0x639
+#define DP83TG720S_PKT_STAT_2			0x63a
+#define DP83TG720S_PKT_STAT_3			0x63b
+#define DP83TG720S_PKT_STAT_4			0x63c
+#define DP83TG720S_PKT_STAT_5			0x63d
+#define DP83TG720S_PKT_STAT_6			0x63e
+
 /* Register 0x083F: Unknown Register */
 #define DP83TG720S_UNKNOWN_083F			0x83f
 
@@ -68,6 +184,134 @@
 #define DP83TG720S_SQI_OUT			GENMASK(3, 1)
 
 #define DP83TG720_SQI_MAX			7
+
+struct dp83tg720_stats {
+	u64 link_loss_cnt;
+	u64 tx_pkt_cnt;
+	u64 tx_err_pkt_cnt;
+	u64 rx_pkt_cnt;
+	u64 rx_err_pkt_cnt;
+};
+
+struct dp83tg720_priv {
+	struct dp83tg720_stats stats;
+	unsigned long last_link_down_jiffies;
+};
+
+/**
+ * dp83tg720_update_stats - Update the PHY statistics for the DP83TD510 PHY.
+ * @phydev: Pointer to the phy_device structure.
+ *
+ * The function reads the PHY statistics registers and updates the statistics
+ * structure.
+ *
+ * Returns: 0 on success or a negative error code on failure.
+ */
+static int dp83tg720_update_stats(struct phy_device *phydev)
+{
+	struct dp83tg720_priv *priv = phydev->priv;
+	u32 count;
+	int ret;
+
+	/* Read the link loss count */
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_LINK_QUAL_3);
+	if (ret < 0)
+		return ret;
+	/* link_loss_cnt */
+	count = FIELD_GET(DP83TG720S_LINK_LOSS_CNT_MASK, ret);
+	priv->stats.link_loss_cnt += count;
+
+	/* The DP83TG720S_PKT_STAT registers are divided into two groups:
+	 * - Group 1 (TX stats): DP83TG720S_PKT_STAT_1 to DP83TG720S_PKT_STAT_3
+	 * - Group 2 (RX stats): DP83TG720S_PKT_STAT_4 to DP83TG720S_PKT_STAT_6
+	 *
+	 * Registers in each group are cleared only after reading them in a
+	 * plain sequence (e.g., 1, 2, 3 for Group 1 or 4, 5, 6 for Group 2).
+	 * Any deviation from the sequence, such as reading 1, 2, 1, 2, 3, will
+	 * prevent the group from being cleared. Additionally, the counters
+	 * for a group are frozen as soon as the first register in that group
+	 * is accessed.
+	 */
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_PKT_STAT_1);
+	if (ret < 0)
+		return ret;
+	/* tx_pkt_cnt_15_0 */
+	count = ret;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_PKT_STAT_2);
+	if (ret < 0)
+		return ret;
+	/* tx_pkt_cnt_31_16 */
+	count |= ret << 16;
+	priv->stats.tx_pkt_cnt += count;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_PKT_STAT_3);
+	if (ret < 0)
+		return ret;
+	/* tx_err_pkt_cnt */
+	priv->stats.tx_err_pkt_cnt += ret;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_PKT_STAT_4);
+	if (ret < 0)
+		return ret;
+	/* rx_pkt_cnt_15_0 */
+	count = ret;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_PKT_STAT_5);
+	if (ret < 0)
+		return ret;
+	/* rx_pkt_cnt_31_16 */
+	count |= ret << 16;
+	priv->stats.rx_pkt_cnt += count;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_PKT_STAT_6);
+	if (ret < 0)
+		return ret;
+	/* rx_err_pkt_cnt */
+	priv->stats.rx_err_pkt_cnt += ret;
+
+	return 0;
+}
+
+static int dp83tg720_soft_reset(struct phy_device *phydev)
+{
+	int ret;
+
+	ret = phy_write(phydev, DP83TG720S_PHY_RESET, DP83TG720S_HW_RESET);
+	if (ret)
+		return ret;
+
+	/* Include mandatory MDC-access delay (1ms) + extra asymmetric delay to
+	 * avoid synchronized reset deadlock. See section 1 in the top-of-file
+	 * comment block.
+	 */
+	if (phydev->master_slave_state == MASTER_SLAVE_STATE_SLAVE)
+		msleep(DP83TG720S_RESET_DELAY_MS_SLAVE);
+	else
+		msleep(DP83TG720S_RESET_DELAY_MS_MASTER);
+
+	return ret;
+}
+
+static void dp83tg720_get_link_stats(struct phy_device *phydev,
+				     struct ethtool_link_ext_stats *link_stats)
+{
+	struct dp83tg720_priv *priv = phydev->priv;
+
+	link_stats->link_down_events = priv->stats.link_loss_cnt;
+}
+
+static void dp83tg720_get_phy_stats(struct phy_device *phydev,
+				    struct ethtool_eth_phy_stats *eth_stats,
+				    struct ethtool_phy_stats *stats)
+{
+	struct dp83tg720_priv *priv = phydev->priv;
+
+	stats->tx_packets = priv->stats.tx_pkt_cnt;
+	stats->tx_errors = priv->stats.tx_err_pkt_cnt;
+	stats->rx_packets = priv->stats.rx_pkt_cnt;
+	stats->rx_errors = priv->stats.rx_err_pkt_cnt;
+}
 
 /**
  * dp83tg720_cable_test_start - Start the cable test for the DP83TG720 PHY.
@@ -182,6 +426,11 @@ static int dp83tg720_cable_test_get_status(struct phy_device *phydev,
 
 	ethnl_cable_test_result(phydev, ETHTOOL_A_CABLE_PAIR_A, stat);
 
+	/* save the current stats before resetting the PHY */
+	ret = dp83tg720_update_stats(phydev);
+	if (ret)
+		return ret;
+
 	return phy_init_hw(phydev);
 }
 
@@ -217,12 +466,14 @@ static int dp83tg720_read_status(struct phy_device *phydev)
 	phy_sts = phy_read(phydev, DP83TG720S_MII_REG_10);
 	phydev->link = !!(phy_sts & DP83TG720S_LINK_STATUS);
 	if (!phydev->link) {
+		/* save the current stats before resetting the PHY */
+		ret = dp83tg720_update_stats(phydev);
+		if (ret)
+			return ret;
+
 		/* According to the "DP83TC81x, DP83TG72x Software
 		 * Implementation Guide", the PHY needs to be reset after a
 		 * link loss or if no link is created after at least 100ms.
-		 *
-		 * Currently we are polling with the PHY_STATE_TIME (1000ms)
-		 * interval, which is still enough for not automotive use cases.
 		 */
 		ret = phy_init_hw(phydev);
 		if (ret)
@@ -308,18 +559,10 @@ static int dp83tg720_config_init(struct phy_device *phydev)
 {
 	int ret;
 
-	/* Software Restart is not enough to recover from a link failure.
-	 * Using Hardware Reset instead.
-	 */
-	ret = phy_write(phydev, DP83TG720S_PHY_RESET, DP83TG720S_HW_RESET);
+	/* Reset the PHY to recover from a link failure */
+	ret = dp83tg720_soft_reset(phydev);
 	if (ret)
 		return ret;
-
-	/* Wait until MDC can be used again.
-	 * The wait value of one 1ms is documented in "DP83TG720S-Q1 1000BASE-T1
-	 * Automotive Ethernet PHY with SGMII and RGMII" datasheet.
-	 */
-	usleep_range(1000, 2000);
 
 	if (phy_interface_is_rgmii(phydev)) {
 		ret = dp83tg720_config_rgmii_delay(phydev);
@@ -341,12 +584,71 @@ static int dp83tg720_config_init(struct phy_device *phydev)
 	return genphy_c45_pma_baset1_read_master_slave(phydev);
 }
 
+static int dp83tg720_probe(struct phy_device *phydev)
+{
+	struct device *dev = &phydev->mdio.dev;
+	struct dp83tg720_priv *priv;
+
+	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
+	if (!priv)
+		return -ENOMEM;
+
+	phydev->priv = priv;
+
+	return 0;
+}
+
+/**
+ * dp83tg720_get_next_update_time - Return next polling interval for PHY state
+ * @phydev: Pointer to the phy_device structure
+ *
+ * Implements adaptive polling interval logic depending on link state and
+ * downtime duration. See the "2. Polling-Based Link Detection and IRQ Support"
+ * section at the top of this file for details.
+ *
+ * Return: Time (in jiffies) until the next poll
+ */
+static unsigned int dp83tg720_get_next_update_time(struct phy_device *phydev)
+{
+	struct dp83tg720_priv *priv = phydev->priv;
+	unsigned int next_time_jiffies;
+
+	if (phydev->link) {
+		priv->last_link_down_jiffies = 0;
+
+		/* When the link is up, use a slower interval (in jiffies) */
+		next_time_jiffies =
+			msecs_to_jiffies(DP83TG720S_POLL_ACTIVE_LINK);
+	} else {
+		unsigned long now = jiffies;
+
+		if (!priv->last_link_down_jiffies)
+			priv->last_link_down_jiffies = now;
+
+		if (time_before(now, priv->last_link_down_jiffies +
+			  msecs_to_jiffies(DP83TG720S_FAST_POLL_DURATION_MS))) {
+			/* Link recently went down: fast polling */
+			next_time_jiffies =
+				msecs_to_jiffies(DP83TG720S_POLL_NO_LINK);
+		} else {
+			/* Link has been down for a while: slow polling */
+			next_time_jiffies =
+				msecs_to_jiffies(DP83TG720S_POLL_SLOW);
+		}
+	}
+
+	/* Ensure the polling time is at least one jiffy */
+	return max(next_time_jiffies, 1U);
+}
+
 static struct phy_driver dp83tg720_driver[] = {
 {
 	PHY_ID_MATCH_MODEL(DP83TG720S_PHY_ID),
 	.name		= "TI DP83TG720S",
 
 	.flags          = PHY_POLL_CABLE_TEST,
+	.probe		= dp83tg720_probe,
+	.soft_reset	= dp83tg720_soft_reset,
 	.config_aneg	= dp83tg720_config_aneg,
 	.read_status	= dp83tg720_read_status,
 	.get_features	= genphy_c45_pma_read_ext_abilities,
@@ -355,13 +657,17 @@ static struct phy_driver dp83tg720_driver[] = {
 	.get_sqi_max	= dp83tg720_get_sqi_max,
 	.cable_test_start = dp83tg720_cable_test_start,
 	.cable_test_get_status = dp83tg720_cable_test_get_status,
+	.get_link_stats	= dp83tg720_get_link_stats,
+	.get_phy_stats	= dp83tg720_get_phy_stats,
+	.update_stats	= dp83tg720_update_stats,
+	.get_next_update_time = dp83tg720_get_next_update_time,
 
 	.suspend	= genphy_suspend,
 	.resume		= genphy_resume,
 } };
 module_phy_driver(dp83tg720_driver);
 
-static struct mdio_device_id __maybe_unused dp83tg720_tbl[] = {
+static const struct mdio_device_id __maybe_unused dp83tg720_tbl[] = {
 	{ PHY_ID_MATCH_MODEL(DP83TG720S_PHY_ID) },
 	{ }
 };

@@ -644,11 +644,9 @@ static int wkup_m3_ipc_probe(struct platform_device *pdev)
 
 	m3_ipc->mbox = mbox_request_channel(&m3_ipc->mbox_client, 0);
 
-	if (IS_ERR(m3_ipc->mbox)) {
-		dev_err(dev, "IPC Request for A8->M3 Channel failed! %ld\n",
-			PTR_ERR(m3_ipc->mbox));
-		return PTR_ERR(m3_ipc->mbox);
-	}
+	if (IS_ERR(m3_ipc->mbox))
+		return dev_err_probe(dev, PTR_ERR(m3_ipc->mbox),
+				     "IPC Request for A8->M3 Channel failed!\n");
 
 	if (of_property_read_u32(dev->of_node, "ti,rproc", &rproc_phandle)) {
 		dev_err(&pdev->dev, "could not get rproc phandle\n");
@@ -755,7 +753,7 @@ MODULE_DEVICE_TABLE(of, wkup_m3_ipc_of_match);
 
 static struct platform_driver wkup_m3_ipc_driver = {
 	.probe = wkup_m3_ipc_probe,
-	.remove_new = wkup_m3_ipc_remove,
+	.remove = wkup_m3_ipc_remove,
 	.driver = {
 		.name = "wkup_m3_ipc",
 		.of_match_table = wkup_m3_ipc_of_match,

@@ -9,6 +9,8 @@
  */
 
 #include <linux/kernel_stat.h>
+#include <linux/utsname.h>
+#include <linux/cpufeature.h>
 #include <linux/init.h>
 #include <linux/errno.h>
 #include <linux/entry-common.h>
@@ -20,7 +22,6 @@
 #include <linux/module.h>
 #include <linux/sched/signal.h>
 #include <linux/kvm_host.h>
-#include <linux/export.h>
 #include <asm/lowcore.h>
 #include <asm/ctlreg.h>
 #include <asm/fpu.h>
@@ -45,7 +46,7 @@ static DEFINE_PER_CPU(struct mcck_struct, cpu_mcck);
 
 static inline int nmi_needs_mcesa(void)
 {
-	return cpu_has_vx() || MACHINE_HAS_GS;
+	return cpu_has_vx() || cpu_has_gs();
 }
 
 /*
@@ -61,7 +62,7 @@ void __init nmi_alloc_mcesa_early(u64 *mcesad)
 	if (!nmi_needs_mcesa())
 		return;
 	*mcesad = __pa(&boot_mcesa);
-	if (MACHINE_HAS_GS)
+	if (cpu_has_gs())
 		*mcesad |= ilog2(MCESA_MAX_SIZE);
 }
 
@@ -73,14 +74,14 @@ int nmi_alloc_mcesa(u64 *mcesad)
 	*mcesad = 0;
 	if (!nmi_needs_mcesa())
 		return 0;
-	size = MACHINE_HAS_GS ? MCESA_MAX_SIZE : MCESA_MIN_SIZE;
+	size = cpu_has_gs() ? MCESA_MAX_SIZE : MCESA_MIN_SIZE;
 	origin = kmalloc(size, GFP_KERNEL);
 	if (!origin)
 		return -ENOMEM;
 	/* The pointer is stored with mcesa_bits ORed in */
 	kmemleak_not_leak(origin);
 	*mcesad = __pa(origin);
-	if (MACHINE_HAS_GS)
+	if (cpu_has_gs())
 		*mcesad |= ilog2(MCESA_MAX_SIZE);
 	return 0;
 }
@@ -115,18 +116,82 @@ static __always_inline char *u64_to_hex(char *dest, u64 val)
 	return dest;
 }
 
+static notrace void nmi_print_info(void)
+{
+	struct lowcore *lc = get_lowcore();
+	char message[100];
+	char *ptr;
+	int i;
+
+	ptr = nmi_puts(message, "Unrecoverable machine check, code: ");
+	ptr = u64_to_hex(ptr, lc->mcck_interruption_code);
+	ptr = nmi_puts(ptr, "\n");
+	sclp_emergency_printk(message);
+
+	ptr = nmi_puts(message, init_utsname()->release);
+	ptr = nmi_puts(ptr, "\n");
+	sclp_emergency_printk(message);
+
+	ptr = nmi_puts(message, arch_hw_string);
+	ptr = nmi_puts(ptr, "\n");
+	sclp_emergency_printk(message);
+
+	ptr = nmi_puts(message, "PSW: ");
+	ptr = u64_to_hex(ptr, lc->mcck_old_psw.mask);
+	ptr = nmi_puts(ptr, " ");
+	ptr = u64_to_hex(ptr, lc->mcck_old_psw.addr);
+	ptr = nmi_puts(ptr, " PFX: ");
+	ptr = u64_to_hex(ptr, (u64)get_lowcore());
+	ptr = nmi_puts(ptr, "\n");
+	sclp_emergency_printk(message);
+
+	ptr = nmi_puts(message, "LBA: ");
+	ptr = u64_to_hex(ptr, lc->last_break_save_area);
+	ptr = nmi_puts(ptr, " EDC: ");
+	ptr = u64_to_hex(ptr, lc->external_damage_code);
+	ptr = nmi_puts(ptr, " FSA: ");
+	ptr = u64_to_hex(ptr, lc->failing_storage_address);
+	ptr = nmi_puts(ptr, "\n");
+	sclp_emergency_printk(message);
+
+	ptr = nmi_puts(message, "CRS:\n");
+	sclp_emergency_printk(message);
+	ptr = message;
+	for (i = 0; i < 16; i++) {
+		ptr = u64_to_hex(ptr, lc->cregs_save_area[i].val);
+		ptr = nmi_puts(ptr, " ");
+		if ((i + 1) % 4 == 0) {
+			ptr = nmi_puts(ptr, "\n");
+			sclp_emergency_printk(message);
+			ptr = message;
+		}
+	}
+
+	ptr = nmi_puts(message, "GPRS:\n");
+	sclp_emergency_printk(message);
+	ptr = message;
+	for (i = 0; i < 16; i++) {
+		ptr = u64_to_hex(ptr, lc->gpregs_save_area[i]);
+		ptr = nmi_puts(ptr, " ");
+		if ((i + 1) % 4 == 0) {
+			ptr = nmi_puts(ptr, "\n");
+			sclp_emergency_printk(message);
+			ptr = message;
+		}
+	}
+
+	ptr = nmi_puts(message, "System stopped\n");
+	sclp_emergency_printk(message);
+}
+
 static notrace void s390_handle_damage(void)
 {
 	struct lowcore *lc = get_lowcore();
 	union ctlreg0 cr0, cr0_new;
-	char message[100];
 	psw_t psw_save;
-	char *ptr;
 
 	smp_emergency_stop();
 	diag_amode31_ops.diag308_reset();
-	ptr = nmi_puts(message, "System stopped due to unrecoverable machine check, code: 0x");
-	u64_to_hex(ptr, lc->mcck_interruption_code);
 
 	/*
 	 * Disable low address protection and make machine check new PSW a
@@ -140,7 +205,7 @@ static notrace void s390_handle_damage(void)
 	psw_bits(lc->mcck_new_psw).io = 0;
 	psw_bits(lc->mcck_new_psw).ext = 0;
 	psw_bits(lc->mcck_new_psw).wait = 1;
-	sclp_emergency_printk(message);
+	nmi_print_info();
 
 	/*
 	 * Restore machine check new PSW and control register 0 to original

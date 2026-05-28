@@ -672,8 +672,8 @@ static const struct scsi_host_template mv6_sht = {
 	.dma_boundary		= MV_DMA_BOUNDARY,
 	.sdev_groups		= ata_ncq_sdev_groups,
 	.change_queue_depth	= ata_scsi_change_queue_depth,
-	.tag_alloc_policy	= BLK_TAG_ALLOC_RR,
-	.device_configure	= ata_scsi_device_configure
+	.tag_alloc_policy_rr	= true,
+	.sdev_configure		= ata_scsi_sdev_configure
 };
 
 static struct ata_port_operations mv5_ops = {
@@ -687,7 +687,7 @@ static struct ata_port_operations mv5_ops = {
 
 	.freeze			= mv_eh_freeze,
 	.thaw			= mv_eh_thaw,
-	.hardreset		= mv_hardreset,
+	.reset.hardreset	= mv_hardreset,
 
 	.scr_read		= mv5_scr_read,
 	.scr_write		= mv5_scr_write,
@@ -709,10 +709,10 @@ static struct ata_port_operations mv6_ops = {
 
 	.freeze			= mv_eh_freeze,
 	.thaw			= mv_eh_thaw,
-	.hardreset		= mv_hardreset,
-	.softreset		= mv_softreset,
-	.pmp_hardreset		= mv_pmp_hardreset,
-	.pmp_softreset		= mv_softreset,
+	.reset.hardreset	= mv_hardreset,
+	.reset.softreset	= mv_softreset,
+	.pmp_reset.hardreset	= mv_pmp_hardreset,
+	.pmp_reset.softreset	= mv_softreset,
 	.error_handler		= mv_pmp_error_handler,
 
 	.scr_read		= mv_scr_read,
@@ -4255,7 +4255,7 @@ MODULE_DEVICE_TABLE(of, mv_sata_dt_ids);
 
 static struct platform_driver mv_platform_driver = {
 	.probe		= mv_platform_probe,
-	.remove_new	= mv_platform_remove,
+	.remove		= mv_platform_remove,
 	.suspend	= mv_platform_suspend,
 	.resume		= mv_platform_resume,
 	.driver		= {

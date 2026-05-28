@@ -814,11 +814,11 @@ static int aspeed_i2c_unreg_slave(struct i2c_client *client)
 #endif /* CONFIG_I2C_SLAVE */
 
 static const struct i2c_algorithm aspeed_i2c_algo = {
-	.master_xfer	= aspeed_i2c_master_xfer,
-	.functionality	= aspeed_i2c_functionality,
+	.xfer = aspeed_i2c_master_xfer,
+	.functionality = aspeed_i2c_functionality,
 #if IS_ENABLED(CONFIG_I2C_SLAVE)
-	.reg_slave	= aspeed_i2c_reg_slave,
-	.unreg_slave	= aspeed_i2c_unreg_slave,
+	.reg_slave = aspeed_i2c_reg_slave,
+	.unreg_slave = aspeed_i2c_unreg_slave,
 #endif /* CONFIG_I2C_SLAVE */
 };
 
@@ -1102,7 +1102,7 @@ static void aspeed_i2c_remove_bus(struct platform_device *pdev)
 
 static struct platform_driver aspeed_i2c_bus_driver = {
 	.probe		= aspeed_i2c_probe_bus,
-	.remove_new	= aspeed_i2c_remove_bus,
+	.remove		= aspeed_i2c_remove_bus,
 	.driver		= {
 		.name		= "aspeed-i2c-bus",
 		.of_match_table	= aspeed_i2c_bus_of_table,

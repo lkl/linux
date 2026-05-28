@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # perf stat tests
 # SPDX-License-Identifier: GPL-2.0
 
@@ -67,19 +67,54 @@ test_topdown_groups() {
     echo "Topdown event group test [Skipped event parsing failed]"
     return
   fi
-  if perf stat -e '{slots,topdown-retiring}' true 2>&1 | grep -E -q "<not supported>"
+  td_err=0
+  do_topdown_group_test() {
+    events=$1
+    failure=$2
+    if perf stat -e "$events" true 2>&1 | grep -E -q "<not supported>"
+    then
+      echo "Topdown event group test [Failed $failure for '$events']"
+      td_err=1
+      return
+    fi
+  }
+  do_topdown_group_test "{slots,topdown-retiring}" "events not supported"
+  do_topdown_group_test "{instructions,r400,r8000}" "raw format slots not reordered first"
+  filler_events=("instructions" "cycles"
+                 "context-switches" "faults")
+  for ((i = 0; i < ${#filler_events[@]}; i+=2))
+  do
+    filler1=${filler_events[i]}
+    filler2=${filler_events[i+1]}
+    do_topdown_group_test "$filler1,topdown-retiring,slots" \
+      "slots not reordered first in no-group case"
+    do_topdown_group_test "slots,$filler1,topdown-retiring" \
+      "topdown metrics event not reordered in no-group case"
+    do_topdown_group_test "{$filler1,topdown-retiring,slots}" \
+      "slots not reordered first in single group case"
+    do_topdown_group_test "{$filler1,slots},topdown-retiring" \
+      "topdown metrics event not move into slots group"
+    do_topdown_group_test "topdown-retiring,{$filler1,slots}" \
+      "topdown metrics event not move into slots group last"
+    do_topdown_group_test "{$filler1,slots},{topdown-retiring}" \
+      "topdown metrics group not merge into slots group"
+    do_topdown_group_test "{topdown-retiring},{$filler1,slots}" \
+      "topdown metrics group not merge into slots group last"
+    do_topdown_group_test "{$filler1,slots},$filler2,topdown-retiring" \
+      "non-adjacent topdown metrics group not move into slots group"
+    do_topdown_group_test "$filler2,topdown-retiring,{$filler1,slots}" \
+      "non-adjacent topdown metrics group not move into slots group last"
+    do_topdown_group_test "{$filler1,slots},{$filler2,topdown-retiring}" \
+      "metrics group not merge into slots group"
+    do_topdown_group_test "{$filler1,topdown-retiring},{$filler2,slots}" \
+      "metrics group not merge into slots group last"
+  done
+  if test "$td_err" -eq 0
   then
-    echo "Topdown event group test [Failed events not supported]"
-    err=1
-    return
+    echo "Topdown event group test [Success]"
+  else
+    err="$td_err"
   fi
-  if perf stat -e '{topdown-retiring,slots}' true 2>&1 | grep -E -q "<not supported>"
-  then
-    echo "Topdown event group test [Failed slots not reordered first]"
-    err=1
-    return
-  fi
-  echo "Topdown event group test [Success]"
 }
 
 test_topdown_weak_groups() {
@@ -117,16 +152,18 @@ test_cputype() {
 
   # Find a known PMU for cputype.
   pmu=""
-  for i in cpu cpu_atom armv8_pmuv3_0
+  devs="/sys/bus/event_source/devices"
+  for i in $devs/cpu $devs/cpu_atom $devs/armv8_pmuv3_0 $devs/armv8_cortex_*
   do
-    if test -d "/sys/devices/$i"
+    i_base=$(basename "$i")
+    if test -d "$i"
     then
-      pmu="$i"
+      pmu="$i_base"
       break
     fi
-    if perf stat -e "$i/instructions/" true > /dev/null 2>&1
+    if perf stat -e "$i_base/instructions/" true > /dev/null 2>&1
     then
-      pmu="$i"
+      pmu="$i_base"
       break
     fi
   done
@@ -146,6 +183,34 @@ test_cputype() {
   echo "cputype test [Success]"
 }
 
+test_hybrid() {
+  # Test the default stat command on hybrid devices opens one cycles event for
+  # each CPU type.
+  echo "hybrid test"
+
+  # Count the number of core PMUs, assume minimum of 1
+  pmus=$(ls /sys/bus/event_source/devices/*/cpus 2>/dev/null | wc -l)
+  if [ "$pmus" -lt 1 ]
+  then
+    pmus=1
+  fi
+
+  # Run default Perf stat
+  cycles_events=$(perf stat -- true 2>&1 | grep -E "/cycles/[uH]*|  cycles[:uH]*  " -c)
+
+  # The expectation is that default output will have a cycles events on each
+  # hybrid PMU. In situations with no cycles PMU events, like virtualized, this
+  # can fall back to task-clock and so the end count may be 0. Fail if neither
+  # condition holds.
+  if [ "$pmus" -ne "$cycles_events" ] && [ "0" -ne "$cycles_events" ]
+  then
+    echo "hybrid test [Found $pmus PMUs but $cycles_events cycles events. Failed]"
+    err=1
+    return
+  fi
+  echo "hybrid test [Success]"
+}
+
 test_default_stat
 test_stat_record_report
 test_stat_record_script
@@ -153,4 +218,5 @@ test_stat_repeat_weak_groups
 test_topdown_groups
 test_topdown_weak_groups
 test_cputype
+test_hybrid
 exit $err

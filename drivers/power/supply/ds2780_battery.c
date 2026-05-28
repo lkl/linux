@@ -621,7 +621,7 @@ static ssize_t ds2780_set_pio_pin(struct device *dev,
 
 static ssize_t ds2780_read_param_eeprom_bin(struct file *filp,
 				struct kobject *kobj,
-				struct bin_attribute *bin_attr,
+				const struct bin_attribute *bin_attr,
 				char *buf, loff_t off, size_t count)
 {
 	struct device *dev = kobj_to_dev(kobj);
@@ -634,7 +634,7 @@ static ssize_t ds2780_read_param_eeprom_bin(struct file *filp,
 
 static ssize_t ds2780_write_param_eeprom_bin(struct file *filp,
 				struct kobject *kobj,
-				struct bin_attribute *bin_attr,
+				const struct bin_attribute *bin_attr,
 				char *buf, loff_t off, size_t count)
 {
 	struct device *dev = kobj_to_dev(kobj);
@@ -654,7 +654,7 @@ static ssize_t ds2780_write_param_eeprom_bin(struct file *filp,
 	return count;
 }
 
-static struct bin_attribute ds2780_param_eeprom_bin_attr = {
+static const struct bin_attribute ds2780_param_eeprom_bin_attr = {
 	.attr = {
 		.name = "param_eeprom",
 		.mode = S_IRUGO | S_IWUSR,
@@ -666,7 +666,7 @@ static struct bin_attribute ds2780_param_eeprom_bin_attr = {
 
 static ssize_t ds2780_read_user_eeprom_bin(struct file *filp,
 				struct kobject *kobj,
-				struct bin_attribute *bin_attr,
+				const struct bin_attribute *bin_attr,
 				char *buf, loff_t off, size_t count)
 {
 	struct device *dev = kobj_to_dev(kobj);
@@ -679,7 +679,7 @@ static ssize_t ds2780_read_user_eeprom_bin(struct file *filp,
 
 static ssize_t ds2780_write_user_eeprom_bin(struct file *filp,
 				struct kobject *kobj,
-				struct bin_attribute *bin_attr,
+				const struct bin_attribute *bin_attr,
 				char *buf, loff_t off, size_t count)
 {
 	struct device *dev = kobj_to_dev(kobj);
@@ -699,7 +699,7 @@ static ssize_t ds2780_write_user_eeprom_bin(struct file *filp,
 	return count;
 }
 
-static struct bin_attribute ds2780_user_eeprom_bin_attr = {
+static const struct bin_attribute ds2780_user_eeprom_bin_attr = {
 	.attr = {
 		.name = "user_eeprom",
 		.mode = S_IRUGO | S_IWUSR,
@@ -726,7 +726,7 @@ static struct attribute *ds2780_sysfs_attrs[] = {
 	NULL
 };
 
-static struct bin_attribute *ds2780_sysfs_bin_attrs[] = {
+static const struct bin_attribute *const ds2780_sysfs_bin_attrs[] = {
 	&ds2780_param_eeprom_bin_attr,
 	&ds2780_user_eeprom_bin_attr,
 	NULL

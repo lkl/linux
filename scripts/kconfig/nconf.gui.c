@@ -173,12 +173,10 @@ void fill_window(WINDOW *win, const char *text)
 	/* do not go over end of line */
 	total_lines = min(total_lines, y);
 	for (i = 0; i < total_lines; i++) {
-		char tmp[x+10];
 		const char *line = get_line(text, i);
-		int len = get_line_length(line);
-		strncpy(tmp, line, min(len, x));
-		tmp[len] = '\0';
-		mvwprintw(win, i, 0, "%s", tmp);
+		int len = min(get_line_length(line), x);
+
+		mvwprintw(win, i, 0, "%.*s", len, line);
 	}
 }
 
@@ -277,6 +275,15 @@ int btn_dialog(WINDOW *main_window, const char *msg, int btn_num, ...)
 		case KEY_RIGHT:
 			menu_driver(menu, REQ_RIGHT_ITEM);
 			break;
+		case 9: /* TAB */
+			if (btn_num > 1) {
+				/* cycle through buttons */
+				if (item_index(current_item(menu)) == btn_num - 1)
+					menu_driver(menu, REQ_FIRST_ITEM);
+				else
+					menu_driver(menu, REQ_NEXT_ITEM);
+			}
+			break;
 		case 10: /* ENTER */
 		case 27: /* ESCAPE */
 		case ' ':
@@ -350,6 +357,7 @@ int dialog_inputbox(WINDOW *main_window,
 	x = (columns-win_cols)/2;
 
 	strncpy(result, init, *result_len);
+	result[*result_len - 1] = '\0';
 
 	/* create the windows */
 	win = newwin(win_lines, win_cols, y, x);

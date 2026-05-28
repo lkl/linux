@@ -511,7 +511,7 @@ static int imx_sata_enable(struct ahci_host_priv *hpriv)
 
 	if (imxpriv->type == AHCI_IMX6Q || imxpriv->type == AHCI_IMX6QP) {
 		/*
-		 * set PHY Paremeters, two steps to configure the GPR13,
+		 * set PHY Parameters, two steps to configure the GPR13,
 		 * one write for rest of parameters, mask of first write
 		 * is 0x07ffffff, and the other one write for setting
 		 * the mpll_clk_en.
@@ -642,18 +642,19 @@ static int ahci_imx_softreset(struct ata_link *link, unsigned int *class,
 	int ret;
 
 	if (imxpriv->type == AHCI_IMX53)
-		ret = ahci_pmp_retry_srst_ops.softreset(link, class, deadline);
+		ret = ahci_pmp_retry_srst_ops.reset.softreset(link, class,
+							      deadline);
 	else
-		ret = ahci_ops.softreset(link, class, deadline);
+		ret = ahci_ops.reset.softreset(link, class, deadline);
 
 	return ret;
 }
 
 static struct ata_port_operations ahci_imx_ops = {
-	.inherits	= &ahci_ops,
-	.host_stop	= ahci_imx_host_stop,
-	.error_handler	= ahci_imx_error_handler,
-	.softreset	= ahci_imx_softreset,
+	.inherits		= &ahci_ops,
+	.host_stop		= ahci_imx_host_stop,
+	.error_handler		= ahci_imx_error_handler,
+	.reset.softreset	= ahci_imx_softreset,
 };
 
 static const struct ata_port_info ahci_imx_port_info = {
@@ -1027,7 +1028,7 @@ static SIMPLE_DEV_PM_OPS(ahci_imx_pm_ops, imx_ahci_suspend, imx_ahci_resume);
 
 static struct platform_driver imx_ahci_driver = {
 	.probe = imx_ahci_probe,
-	.remove_new = ata_platform_remove_one,
+	.remove = ata_platform_remove_one,
 	.driver = {
 		.name = DRV_NAME,
 		.of_match_table = imx_ahci_of_match,

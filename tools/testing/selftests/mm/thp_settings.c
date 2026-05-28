@@ -87,7 +87,7 @@ int write_file(const char *path, const char *buf, size_t buflen)
 	return (unsigned int) numwritten;
 }
 
-const unsigned long read_num(const char *path)
+unsigned long read_num(const char *path)
 {
 	char buf[21];
 
@@ -172,7 +172,7 @@ void thp_write_string(const char *name, const char *val)
 	}
 }
 
-const unsigned long thp_read_num(const char *name)
+unsigned long thp_read_num(const char *name)
 {
 	char path[PATH_MAX];
 	int ret;
@@ -380,4 +380,22 @@ unsigned long thp_supported_orders(void)
 unsigned long thp_shmem_supported_orders(void)
 {
 	return __thp_supported_orders(true);
+}
+
+bool thp_available(void)
+{
+	if (access(THP_SYSFS, F_OK) != 0)
+		return false;
+	return true;
+}
+
+bool thp_is_enabled(void)
+{
+	if (!thp_available())
+		return false;
+
+	int mode = thp_read_string("enabled", thp_enabled_strings);
+
+	/* THP is considered enabled if it's either "always" or "madvise" */
+	return mode == 1 || mode == 3;
 }

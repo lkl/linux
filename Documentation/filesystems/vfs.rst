@@ -209,31 +209,8 @@ method fills in is the "s_op" field.  This is a pointer to a "struct
 super_operations" which describes the next level of the filesystem
 implementation.
 
-Usually, a filesystem uses one of the generic mount() implementations
-and provides a fill_super() callback instead.  The generic variants are:
-
-``mount_bdev``
-	mount a filesystem residing on a block device
-
-``mount_nodev``
-	mount a filesystem that is not backed by a device
-
-``mount_single``
-	mount a filesystem which shares the instance between all mounts
-
-A fill_super() callback implementation has the following arguments:
-
-``struct super_block *sb``
-	the superblock structure.  The callback must initialize this
-	properly.
-
-``void *data``
-	arbitrary mount options, usually comes as an ASCII string (see
-	"Mount Options" section)
-
-``int silent``
-	whether or not to be silent on error
-
+For more information on mounting (and the new mount API), see
+Documentation/filesystems/mount_api.rst.
 
 The Superblock Object
 =====================
@@ -327,11 +304,11 @@ or bottom half).
 	inode->i_lock spinlock held.
 
 	This method should be either NULL (normal UNIX filesystem
-	semantics) or "generic_delete_inode" (for filesystems that do
+	semantics) or "inode_just_drop" (for filesystems that do
 	not want to cache inodes - causing "delete_inode" to always be
 	called regardless of the value of i_nlink)
 
-	The "generic_delete_inode()" behavior is equivalent to the old
+	The "inode_just_drop()" behavior is equivalent to the old
 	practice of using "force_delete" in the put_inode() case, but
 	does not have the races that the "force_delete()" approach had.
 
@@ -495,7 +472,7 @@ As of kernel 2.6.22, the following members are defined:
 		int (*link) (struct dentry *,struct inode *,struct dentry *);
 		int (*unlink) (struct inode *,struct dentry *);
 		int (*symlink) (struct mnt_idmap *, struct inode *,struct dentry *,const char *);
-		int (*mkdir) (struct mnt_idmap *, struct inode *,struct dentry *,umode_t);
+		struct dentry *(*mkdir) (struct mnt_idmap *, struct inode *,struct dentry *,umode_t);
 		int (*rmdir) (struct inode *,struct dentry *);
 		int (*mknod) (struct mnt_idmap *, struct inode *,struct dentry *,umode_t,dev_t);
 		int (*rename) (struct mnt_idmap *, struct inode *, struct dentry *,
@@ -515,8 +492,8 @@ As of kernel 2.6.22, the following members are defined:
 		struct posix_acl * (*get_acl)(struct mnt_idmap *, struct dentry *, int);
 	        int (*set_acl)(struct mnt_idmap *, struct dentry *, struct posix_acl *, int);
 		int (*fileattr_set)(struct mnt_idmap *idmap,
-				    struct dentry *dentry, struct fileattr *fa);
-		int (*fileattr_get)(struct dentry *dentry, struct fileattr *fa);
+				    struct dentry *dentry, struct file_kattr *fa);
+		int (*fileattr_get)(struct dentry *dentry, struct file_kattr *fa);
 	        struct offset_ctx *(*get_offset_ctx)(struct inode *inode);
 	};
 
@@ -562,7 +539,26 @@ otherwise noted.
 ``mkdir``
 	called by the mkdir(2) system call.  Only required if you want
 	to support creating subdirectories.  You will probably need to
-	call d_instantiate() just as you would in the create() method
+	call d_instantiate_new() just as you would in the create() method.
+
+	If d_instantiate_new() is not used and if the fh_to_dentry()
+	export operation is provided, or if the storage might be
+	accessible by another path (e.g. with a network filesystem)
+	then more care may be needed.  Importantly d_instantate()
+	should not be used with an inode that is no longer I_NEW if there
+	any chance that the inode could already be attached to a dentry.
+	This is because of a hard rule in the VFS that a directory must
+	only ever have one dentry.
+
+	For example, if an NFS filesystem is mounted twice the new directory
+	could be visible on the other mount before it is on the original
+	mount, and a pair of name_to_handle_at(), open_by_handle_at()
+	calls could instantiate the directory inode with an IS_ROOT()
+	dentry before the first mkdir returns.
+
+	If there is any chance this could happen, then the new inode
+	should be d_drop()ed and attached with d_splice_alias().  The
+	returned dentry (if any) should be returned by ->mkdir().
 
 ``rmdir``
 	called by the rmdir(2) system call.  Only required if you want
@@ -697,9 +693,8 @@ page lookup by address, and keeping track of pages tagged as Dirty or
 Writeback.
 
 The first can be used independently to the others.  The VM can try to
-either write dirty pages in order to clean them, or release clean pages
-in order to reuse them.  To do this it can call the ->writepage method
-on dirty pages, and ->release_folio on clean folios with the private
+release clean pages in order to reuse them.  To do this it can call
+->release_folio on clean folios with the private
 flag set.  Clean pages without PagePrivate and with no external references
 will be released without notice being given to the address_space.
 
@@ -712,8 +707,8 @@ maintains information about the PG_Dirty and PG_Writeback status of each
 page, so that pages with either of these flags can be found quickly.
 
 The Dirty tag is primarily used by mpage_writepages - the default
-->writepages method.  It uses the tag to find dirty pages to call
-->writepage on.  If mpage_writepages is not used (i.e. the address
+->writepages method.  It uses the tag to find dirty pages to
+write back.  If mpage_writepages is not used (i.e. the address
 provides its own ->writepages) , the PAGECACHE_TAG_DIRTY tag is almost
 unused.  write_inode_now and sync_inode do use it (through
 __sync_single_inode) to check if ->writepages has been successful in
@@ -737,23 +732,24 @@ pages, however the address_space has finer control of write sizes.
 
 The read process essentially only requires 'read_folio'.  The write
 process is more complicated and uses write_begin/write_end or
-dirty_folio to write data into the address_space, and writepage and
+dirty_folio to write data into the address_space, and
 writepages to writeback data to storage.
 
-Adding and removing pages to/from an address_space is protected by the
-inode's i_mutex.
+Removing pages from an address_space requires holding the inode's i_rwsem
+exclusively, while adding pages to the address_space requires holding the
+inode's i_mapping->invalidate_lock exclusively.
 
 When data is written to a page, the PG_Dirty flag should be set.  It
-typically remains set until writepage asks for it to be written.  This
+typically remains set until writepages asks for it to be written.  This
 should clear PG_Dirty and set PG_Writeback.  It can be actually written
 at any point after PG_Dirty is clear.  Once it is known to be safe,
 PG_Writeback is cleared.
 
 Writeback makes use of a writeback_control structure to direct the
-operations.  This gives the writepage and writepages operations some
+operations.  This gives the writepages operation some
 information about the nature of and reason for the writeback request,
 and the constraints under which it is being done.  It is also used to
-return information back to the caller about the result of a writepage or
+return information back to the caller about the result of a
 writepages request.
 
 
@@ -800,15 +796,14 @@ cache in your filesystem.  The following members are defined:
 .. code-block:: c
 
 	struct address_space_operations {
-		int (*writepage)(struct page *page, struct writeback_control *wbc);
 		int (*read_folio)(struct file *, struct folio *);
 		int (*writepages)(struct address_space *, struct writeback_control *);
 		bool (*dirty_folio)(struct address_space *, struct folio *);
 		void (*readahead)(struct readahead_control *);
-		int (*write_begin)(struct file *, struct address_space *mapping,
+		int (*write_begin)(const struct kiocb *, struct address_space *mapping,
 				   loff_t pos, unsigned len,
-				struct page **pagep, void **fsdata);
-		int (*write_end)(struct file *, struct address_space *mapping,
+				   struct page **pagep, void **fsdata);
+		int (*write_end)(const struct kiocb *, struct address_space *mapping,
 				 loff_t pos, unsigned len, unsigned copied,
 				 struct folio *folio, void *fsdata);
 		sector_t (*bmap)(struct address_space *, sector_t);
@@ -828,25 +823,6 @@ cache in your filesystem.  The following members are defined:
 		int (*swap_deactivate)(struct file *);
 		int (*swap_rw)(struct kiocb *iocb, struct iov_iter *iter);
 	};
-
-``writepage``
-	called by the VM to write a dirty page to backing store.  This
-	may happen for data integrity reasons (i.e. 'sync'), or to free
-	up memory (flush).  The difference can be seen in
-	wbc->sync_mode.  The PG_Dirty flag has been cleared and
-	PageLocked is true.  writepage should start writeout, should set
-	PG_Writeback, and should make sure the page is unlocked, either
-	synchronously or asynchronously when the write operation
-	completes.
-
-	If wbc->sync_mode is WB_SYNC_NONE, ->writepage doesn't have to
-	try too hard if there are problems, and may choose to write out
-	other pages from the mapping if that is easier (e.g. due to
-	internal dependencies).  If it chooses not to start writeout, it
-	should return AOP_WRITEPAGE_ACTIVATE so that the VM will not
-	keep calling ->writepage on that page.
-
-	See the file "Locking" for more details.
 
 ``read_folio``
 	Called by the page cache to read a folio from the backing store.
@@ -890,7 +866,7 @@ cache in your filesystem.  The following members are defined:
 	given and that many pages should be written if possible.  If no
 	->writepages is given, then mpage_writepages is used instead.
 	This will choose pages from the address space that are tagged as
-	DIRTY and will pass them to ->writepage.
+	DIRTY and will write them back.
 
 ``dirty_folio``
 	called by the VM to mark a folio as dirty.  This is particularly
@@ -1073,12 +1049,14 @@ This describes how the VFS can manipulate an open file.  As of kernel
 
 	struct file_operations {
 		struct module *owner;
+		fop_flags_t fop_flags;
 		loff_t (*llseek) (struct file *, loff_t, int);
 		ssize_t (*read) (struct file *, char __user *, size_t, loff_t *);
 		ssize_t (*write) (struct file *, const char __user *, size_t, loff_t *);
 		ssize_t (*read_iter) (struct kiocb *, struct iov_iter *);
 		ssize_t (*write_iter) (struct kiocb *, struct iov_iter *);
-		int (*iopoll)(struct kiocb *kiocb, bool spin);
+		int (*iopoll)(struct kiocb *kiocb, struct io_comp_batch *,
+				unsigned int flags);
 		int (*iterate_shared) (struct file *, struct dir_context *);
 		__poll_t (*poll) (struct file *, struct poll_table_struct *);
 		long (*unlocked_ioctl) (struct file *, unsigned int, unsigned long);
@@ -1095,18 +1073,24 @@ This describes how the VFS can manipulate an open file.  As of kernel
 		int (*flock) (struct file *, int, struct file_lock *);
 		ssize_t (*splice_write)(struct pipe_inode_info *, struct file *, loff_t *, size_t, unsigned int);
 		ssize_t (*splice_read)(struct file *, loff_t *, struct pipe_inode_info *, size_t, unsigned int);
-		int (*setlease)(struct file *, long, struct file_lock **, void **);
+		void (*splice_eof)(struct file *file);
+		int (*setlease)(struct file *, int, struct file_lease **, void **);
 		long (*fallocate)(struct file *file, int mode, loff_t offset,
 				  loff_t len);
 		void (*show_fdinfo)(struct seq_file *m, struct file *f);
 	#ifndef CONFIG_MMU
 		unsigned (*mmap_capabilities)(struct file *);
 	#endif
-		ssize_t (*copy_file_range)(struct file *, loff_t, struct file *, loff_t, size_t, unsigned int);
+		ssize_t (*copy_file_range)(struct file *, loff_t, struct file *,
+				loff_t, size_t, unsigned int);
 		loff_t (*remap_file_range)(struct file *file_in, loff_t pos_in,
 					   struct file *file_out, loff_t pos_out,
 					   loff_t len, unsigned int remap_flags);
 		int (*fadvise)(struct file *, loff_t, loff_t, int);
+		int (*uring_cmd)(struct io_uring_cmd *ioucmd, unsigned int issue_flags);
+		int (*uring_cmd_iopoll)(struct io_uring_cmd *, struct io_comp_batch *,
+					unsigned int poll_flags);
+		int (*mmap_prepare)(struct vm_area_desc *);
 	};
 
 Again, all methods are called without any locks being held, unless
@@ -1146,7 +1130,8 @@ otherwise noted.
 	 used on 64 bit kernels.
 
 ``mmap``
-	called by the mmap(2) system call
+	called by the mmap(2) system call. Deprecated in favour of
+	``mmap_prepare``.
 
 ``open``
 	called by the VFS when an inode should be opened.  When the VFS
@@ -1223,6 +1208,11 @@ otherwise noted.
 ``fadvise``
 	possibly called by the fadvise64() system call.
 
+``mmap_prepare``
+	Called by the mmap(2) system call. Allows a VFS to set up a
+	file-backed memory mapping, most notably establishing relevant
+	private state and VMA callbacks.
+
 Note that the file operations are implemented by the specific
 filesystem in which the inode resides.  When opening a device node
 (character or block special) most filesystems will call special
@@ -1251,7 +1241,8 @@ defined:
 .. code-block:: c
 
 	struct dentry_operations {
-		int (*d_revalidate)(struct dentry *, unsigned int);
+		int (*d_revalidate)(struct inode *, const struct qstr *,
+				    struct dentry *, unsigned int);
 		int (*d_weak_revalidate)(struct dentry *, unsigned int);
 		int (*d_hash)(const struct dentry *, struct qstr *);
 		int (*d_compare)(const struct dentry *,
@@ -1264,6 +1255,8 @@ defined:
 		struct vfsmount *(*d_automount)(struct path *);
 		int (*d_manage)(const struct path *, bool);
 		struct dentry *(*d_real)(struct dentry *, enum d_real_type type);
+		bool (*d_unalias_trylock)(const struct dentry *);
+		void (*d_unalias_unlock)(const struct dentry *);
 	};
 
 ``d_revalidate``
@@ -1389,9 +1382,7 @@ defined:
 
 	If a vfsmount is returned, the caller will attempt to mount it
 	on the mountpoint and will remove the vfsmount from its
-	expiration list in the case of failure.  The vfsmount should be
-	returned with 2 refs on it to prevent automatic expiration - the
-	caller will clean up the additional ref.
+	expiration list in the case of failure.
 
 	This function is only used if DCACHE_NEED_AUTOMOUNT is set on
 	the dentry.  This is set by __d_instantiate() if S_AUTOMOUNT is
@@ -1426,6 +1417,25 @@ defined:
 	hosting the file's data or metadata respectively.
 
 	For non-regular files, the 'dentry' argument is returned.
+
+``d_unalias_trylock``
+	if present, will be called by d_splice_alias() before moving a
+	preexisting attached alias.  Returning false prevents __d_move(),
+	making d_splice_alias() fail with -ESTALE.
+
+	Rationale: setting FS_RENAME_DOES_D_MOVE will prevent d_move()
+	and d_exchange() calls from the outside of filesystem methods;
+	however, it does not guarantee that attached dentries won't
+	be renamed or moved by d_splice_alias() finding a preexisting
+	alias for a directory inode.  Normally we would not care;
+	however, something that wants to stabilize the entire path to
+	root over a blocking operation might need that.  See 9p for one
+	(and hopefully only) example.
+
+``d_unalias_unlock``
+	should be paired with ``d_unalias_trylock``; that one is called after
+	__d_move() call in __d_unalias().
+
 
 Each dentry has a pointer to its parent dentry, as well as a hash list
 of child dentries.  Child dentries are basically like files in a

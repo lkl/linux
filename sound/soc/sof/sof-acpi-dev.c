@@ -24,11 +24,11 @@
 
 static char *fw_path;
 module_param(fw_path, charp, 0444);
-MODULE_PARM_DESC(fw_path, "alternate path for SOF firmware.");
+MODULE_PARM_DESC(fw_path, "deprecated - moved to snd-sof module.");
 
 static char *tplg_path;
 module_param(tplg_path, charp, 0444);
-MODULE_PARM_DESC(tplg_path, "alternate path for SOF topology.");
+MODULE_PARM_DESC(tplg_path, "deprecated - moved to snd-sof module.");
 
 static int sof_acpi_debug;
 module_param_named(sof_acpi_debug, sof_acpi_debug, int, 0444);
@@ -36,12 +36,11 @@ MODULE_PARM_DESC(sof_acpi_debug, "SOF ACPI debug options (0x0 all off)");
 
 #define SOF_ACPI_DISABLE_PM_RUNTIME BIT(0)
 
-const struct dev_pm_ops sof_acpi_pm = {
-	SET_SYSTEM_SLEEP_PM_OPS(snd_sof_suspend, snd_sof_resume)
-	SET_RUNTIME_PM_OPS(snd_sof_runtime_suspend, snd_sof_runtime_resume,
-			   snd_sof_runtime_idle)
+EXPORT_NS_DEV_PM_OPS(sof_acpi_pm, SND_SOC_SOF_ACPI_DEV) = {
+	SYSTEM_SLEEP_PM_OPS(snd_sof_suspend, snd_sof_resume)
+	RUNTIME_PM_OPS(snd_sof_runtime_suspend, snd_sof_runtime_resume,
+		       snd_sof_runtime_idle)
 };
-EXPORT_SYMBOL_NS(sof_acpi_pm, SND_SOC_SOF_ACPI_DEV);
 
 static void sof_acpi_probe_complete(struct device *dev)
 {
@@ -85,7 +84,7 @@ int sof_acpi_probe(struct platform_device *pdev, const struct sof_dev_desc *desc
 	/* call sof helper for DSP hardware probe */
 	return snd_sof_device_probe(dev, sof_pdata);
 }
-EXPORT_SYMBOL_NS(sof_acpi_probe, SND_SOC_SOF_ACPI_DEV);
+EXPORT_SYMBOL_NS(sof_acpi_probe, "SND_SOC_SOF_ACPI_DEV");
 
 void sof_acpi_remove(struct platform_device *pdev)
 {
@@ -97,7 +96,7 @@ void sof_acpi_remove(struct platform_device *pdev)
 	/* call sof helper for DSP hardware remove */
 	snd_sof_device_remove(dev);
 }
-EXPORT_SYMBOL_NS(sof_acpi_remove, SND_SOC_SOF_ACPI_DEV);
+EXPORT_SYMBOL_NS(sof_acpi_remove, "SND_SOC_SOF_ACPI_DEV");
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("SOF support for ACPI platforms");

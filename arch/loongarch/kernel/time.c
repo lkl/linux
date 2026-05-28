@@ -5,6 +5,7 @@
  * Copyright (C) 2020-2022 Loongson Technology Corporation Limited
  */
 #include <linux/clockchips.h>
+#include <linux/cpuhotplug.h>
 #include <linux/delay.h>
 #include <linux/export.h>
 #include <linux/init.h>
@@ -102,7 +103,22 @@ static int constant_timer_next_event(unsigned long delta, struct clock_event_dev
 	return 0;
 }
 
-static unsigned long __init get_loops_per_jiffy(void)
+static int arch_timer_starting(unsigned int cpu)
+{
+	set_csr_ecfg(ECFGF_TIMER);
+
+	return 0;
+}
+
+static int arch_timer_dying(unsigned int cpu)
+{
+	/* Clear Timer Interrupt */
+	write_csr_tintclear(CSR_TINTCLR_TI);
+
+	return 0;
+}
+
+static unsigned long get_loops_per_jiffy(void)
 {
 	unsigned long lpj = (unsigned long)const_clock_freq;
 
@@ -111,7 +127,7 @@ static unsigned long __init get_loops_per_jiffy(void)
 	return lpj;
 }
 
-static long init_offset __nosavedata;
+static long init_offset;
 
 void save_counter(void)
 {
@@ -127,8 +143,12 @@ void sync_counter(void)
 int constant_clockevent_init(void)
 {
 	unsigned int cpu = smp_processor_id();
-	unsigned long min_delta = 0x600;
-	unsigned long max_delta = (1UL << 48) - 1;
+#ifdef CONFIG_PREEMPT_RT
+	unsigned long min_delta = 100;
+#else
+	unsigned long min_delta = 1000;
+#endif
+	unsigned long max_delta = GENMASK_ULL(boot_cpu_data.timerbits, 0);
 	struct clock_event_device *cd;
 	static int irq = 0, timer_irq_installed = 0;
 
@@ -167,6 +187,10 @@ int constant_clockevent_init(void)
 
 	lpj_fine = get_loops_per_jiffy();
 	pr_info("Constant clock event device register\n");
+
+	cpuhp_setup_state(CPUHP_AP_LOONGARCH_ARCH_TIMER_STARTING,
+			  "clockevents/loongarch/timer:starting",
+			  arch_timer_starting, arch_timer_dying);
 
 	return 0;
 }

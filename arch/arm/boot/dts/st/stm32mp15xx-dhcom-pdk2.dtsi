@@ -7,16 +7,6 @@
 #include <dt-bindings/pwm/pwm.h>
 
 / {
-	aliases {
-		serial0 = &uart4;
-		serial1 = &usart3;
-		serial2 = &uart8;
-	};
-
-	chosen {
-		stdout-path = "serial0:115200n8";
-	};
-
 	clk_ext_audio_codec: clock-codec {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
@@ -30,7 +20,6 @@
 		default-brightness-level = <8>;
 		enable-gpios = <&gpioi 0 GPIO_ACTIVE_HIGH>;
 		power-supply = <&reg_panel_bl>;
-		status = "okay";
 	};
 
 	gpio-keys-polled {
@@ -145,7 +134,6 @@
 			  "MIC_IN", "Microphone Jack",
 			  "Microphone Jack", "Mic Bias";
 		dais = <&sai2a_port &sai2b_port>;
-		status = "okay";
 	};
 };
 
@@ -160,7 +148,6 @@
 	pinctrl-0 = <&i2c2_pins_a>;
 	i2c-scl-rising-time-ns = <185>;
 	i2c-scl-falling-time-ns = <20>;
-	status = "okay";
 	/* spare dmas for other usage */
 	/delete-property/dmas;
 	/delete-property/dma-names;

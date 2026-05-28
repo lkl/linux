@@ -186,8 +186,13 @@ static int essiv_aead_crypt(struct aead_request *req, bool enc)
 	const struct essiv_tfm_ctx *tctx = crypto_aead_ctx(tfm);
 	struct essiv_aead_request_ctx *rctx = aead_request_ctx(req);
 	struct aead_request *subreq = &rctx->aead_req;
+	int ivsize = crypto_aead_ivsize(tfm);
+	int ssize = req->assoclen - ivsize;
 	struct scatterlist *src = req->src;
 	int err;
+
+	if (ssize < 0)
+		return -EINVAL;
 
 	crypto_cipher_encrypt_one(tctx->essiv_cipher, req->iv, req->iv);
 
@@ -198,18 +203,11 @@ static int essiv_aead_crypt(struct aead_request *req, bool enc)
 	 */
 	rctx->assoc = NULL;
 	if (req->src == req->dst || !enc) {
-		scatterwalk_map_and_copy(req->iv, req->dst,
-					 req->assoclen - crypto_aead_ivsize(tfm),
-					 crypto_aead_ivsize(tfm), 1);
+		scatterwalk_map_and_copy(req->iv, req->dst, ssize, ivsize, 1);
 	} else {
 		u8 *iv = (u8 *)aead_request_ctx(req) + tctx->ivoffset;
-		int ivsize = crypto_aead_ivsize(tfm);
-		int ssize = req->assoclen - ivsize;
 		struct scatterlist *sg;
 		int nents;
-
-		if (ssize < 0)
-			return -EINVAL;
 
 		nents = sg_nents_for_len(req->src, ssize);
 		if (nents < 0)
@@ -405,8 +403,7 @@ static bool parse_cipher_name(char *essiv_cipher_name, const char *cra_name)
 	if (len >= CRYPTO_MAX_ALG_NAME)
 		return false;
 
-	memcpy(essiv_cipher_name, p, len);
-	essiv_cipher_name[len] = '\0';
+	strscpy(essiv_cipher_name, p, len + 1);
 	return true;
 }
 
@@ -549,8 +546,7 @@ static int essiv_create(struct crypto_template *tmpl, struct rtattr **tb)
 	}
 
 	/* record the driver name so we can instantiate this exact algo later */
-	strscpy(ictx->shash_driver_name, hash_alg->base.cra_driver_name,
-		CRYPTO_MAX_ALG_NAME);
+	strscpy(ictx->shash_driver_name, hash_alg->base.cra_driver_name);
 
 	/* Instance fields */
 
@@ -643,10 +639,10 @@ static void __exit essiv_module_exit(void)
 	crypto_unregister_template(&essiv_tmpl);
 }
 
-subsys_initcall(essiv_module_init);
+module_init(essiv_module_init);
 module_exit(essiv_module_exit);
 
 MODULE_DESCRIPTION("ESSIV skcipher/aead wrapper for block encryption");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS_CRYPTO("essiv");
-MODULE_IMPORT_NS(CRYPTO_INTERNAL);
+MODULE_IMPORT_NS("CRYPTO_INTERNAL");

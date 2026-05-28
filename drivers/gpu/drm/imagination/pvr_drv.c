@@ -44,6 +44,7 @@
  * This driver supports the following PowerVR/IMG graphics cores from Imagination Technologies:
  *
  * * AXE-1-16M (found in Texas Instruments AM62)
+ * * BXS-4-64 MC1 (found in Texas Instruments J721S2/AM68)
  */
 
 /**
@@ -221,7 +222,7 @@ err_drm_dev_exit:
 	return ret;
 }
 
-static __always_inline u64
+static __always_inline __maybe_unused u64
 pvr_fw_version_packed(u32 major, u32 minor)
 {
 	return ((u64)major << 32) | minor;
@@ -1387,7 +1388,6 @@ static struct drm_driver pvr_drm_driver = {
 
 	.name = PVR_DRIVER_NAME,
 	.desc = PVR_DRIVER_DESC,
-	.date = PVR_DRIVER_DATE,
 	.major = PVR_DRIVER_MAJOR,
 	.minor = PVR_DRIVER_MINOR,
 	.patchlevel = PVR_DRIVER_PATCHLEVEL,
@@ -1411,6 +1411,10 @@ pvr_probe(struct platform_device *plat_dev)
 	drm_dev = &pvr_dev->base;
 
 	platform_set_drvdata(plat_dev, drm_dev);
+
+	err = pvr_power_domains_init(pvr_dev);
+	if (err)
+		return err;
 
 	init_rwsem(&pvr_dev->reset_sem);
 
@@ -1451,6 +1455,8 @@ err_watchdog_fini:
 err_context_fini:
 	pvr_context_device_fini(pvr_dev);
 
+	pvr_power_domains_fini(pvr_dev);
+
 	return err;
 }
 
@@ -1471,10 +1477,36 @@ static void pvr_remove(struct platform_device *plat_dev)
 	pvr_watchdog_fini(pvr_dev);
 	pvr_queue_device_fini(pvr_dev);
 	pvr_context_device_fini(pvr_dev);
+	pvr_power_domains_fini(pvr_dev);
 }
 
+static const struct pvr_device_data pvr_device_data_manual = {
+	.pwr_ops = &pvr_power_sequence_ops_manual,
+};
+
+static const struct pvr_device_data pvr_device_data_pwrseq = {
+	.pwr_ops = &pvr_power_sequence_ops_pwrseq,
+};
+
 static const struct of_device_id dt_match[] = {
-	{ .compatible = "img,img-axe", .data = NULL },
+	{
+		.compatible = "thead,th1520-gpu",
+		.data = &pvr_device_data_pwrseq,
+	},
+	{
+		.compatible = "img,img-rogue",
+		.data = &pvr_device_data_manual,
+	},
+
+	/*
+	 * This legacy compatible string was introduced early on before the more generic
+	 * "img,img-rogue" was added. Keep it around here for compatibility, but never use
+	 * "img,img-axe" in new devicetrees.
+	 */
+	{
+		.compatible = "img,img-axe",
+		.data = &pvr_device_data_manual,
+	},
 	{}
 };
 MODULE_DEVICE_TABLE(of, dt_match);
@@ -1485,7 +1517,7 @@ static const struct dev_pm_ops pvr_pm_ops = {
 
 static struct platform_driver pvr_driver = {
 	.probe = pvr_probe,
-	.remove_new = pvr_remove,
+	.remove = pvr_remove,
 	.driver = {
 		.name = PVR_DRIVER_NAME,
 		.pm = &pvr_pm_ops,
@@ -1497,5 +1529,7 @@ module_platform_driver(pvr_driver);
 MODULE_AUTHOR("Imagination Technologies Ltd.");
 MODULE_DESCRIPTION(PVR_DRIVER_DESC);
 MODULE_LICENSE("Dual MIT/GPL");
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");
 MODULE_FIRMWARE("powervr/rogue_33.15.11.3_v1.fw");
+MODULE_FIRMWARE("powervr/rogue_36.52.104.182_v1.fw");
+MODULE_FIRMWARE("powervr/rogue_36.53.104.796_v1.fw");

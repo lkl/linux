@@ -484,8 +484,7 @@ static void skge_get_strings(struct net_device *dev, u32 stringset, u8 *data)
 	switch (stringset) {
 	case ETH_SS_STATS:
 		for (i = 0; i < ARRAY_SIZE(skge_stats); i++)
-			memcpy(data + i * ETH_GSTRING_LEN,
-			       skge_stats[i].name, ETH_GSTRING_LEN);
+			ethtool_puts(&data, skge_stats[i].name);
 		break;
 	}
 }
@@ -1495,7 +1494,7 @@ static int xm_check_link(struct net_device *dev)
  */
 static void xm_link_timer(struct timer_list *t)
 {
-	struct skge_port *skge = from_timer(skge, t, link_timer);
+	struct skge_port *skge = timer_container_of(skge, t, link_timer);
 	struct net_device *dev = skge->netdev;
 	struct skge_hw *hw = skge->hw;
 	int port = skge->port;
@@ -2663,7 +2662,7 @@ static int skge_down(struct net_device *dev)
 	netif_tx_disable(dev);
 
 	if (is_genesis(hw) && hw->phy_type == SK_PHY_XMAC)
-		del_timer_sync(&skge->link_timer);
+		timer_delete_sync(&skge->link_timer);
 
 	napi_disable(&skge->napi);
 	netif_carrier_off(dev);
@@ -3743,10 +3742,7 @@ static int skge_device_event(struct notifier_block *unused,
 	skge = netdev_priv(dev);
 	switch (event) {
 	case NETDEV_CHANGENAME:
-		if (skge->debugfs)
-			skge->debugfs = debugfs_rename(skge_debug,
-						       skge->debugfs,
-						       skge_debug, dev->name);
+		debugfs_change_name(skge->debugfs, "%s", dev->name);
 		break;
 
 	case NETDEV_GOING_DOWN:

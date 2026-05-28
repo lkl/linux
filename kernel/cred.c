@@ -287,7 +287,7 @@ struct cred *prepare_exec_creds(void)
  * The new process gets the current process's subjective credentials as its
  * objective and subjective credentials
  */
-int copy_creds(struct task_struct *p, unsigned long clone_flags)
+int copy_creds(struct task_struct *p, u64 clone_flags)
 {
 	struct cred *new;
 	int ret;
@@ -475,56 +475,6 @@ void abort_creds(struct cred *new)
 	put_cred(new);
 }
 EXPORT_SYMBOL(abort_creds);
-
-/**
- * override_creds - Override the current process's subjective credentials
- * @new: The credentials to be assigned
- *
- * Install a set of temporary override subjective credentials on the current
- * process, returning the old set for later reversion.
- */
-const struct cred *override_creds(const struct cred *new)
-{
-	const struct cred *old = current->cred;
-
-	kdebug("override_creds(%p{%ld})", new,
-	       atomic_long_read(&new->usage));
-
-	/*
-	 * NOTE! This uses 'get_new_cred()' rather than 'get_cred()'.
-	 *
-	 * That means that we do not clear the 'non_rcu' flag, since
-	 * we are only installing the cred into the thread-synchronous
-	 * '->cred' pointer, not the '->real_cred' pointer that is
-	 * visible to other threads under RCU.
-	 */
-	get_new_cred((struct cred *)new);
-	rcu_assign_pointer(current->cred, new);
-
-	kdebug("override_creds() = %p{%ld}", old,
-	       atomic_long_read(&old->usage));
-	return old;
-}
-EXPORT_SYMBOL(override_creds);
-
-/**
- * revert_creds - Revert a temporary subjective credentials override
- * @old: The credentials to be restored
- *
- * Revert a temporary set of override subjective credentials to an old set,
- * discarding the override set.
- */
-void revert_creds(const struct cred *old)
-{
-	const struct cred *override = current->cred;
-
-	kdebug("revert_creds(%p{%ld})", old,
-	       atomic_long_read(&old->usage));
-
-	rcu_assign_pointer(current->cred, old);
-	put_cred(override);
-}
-EXPORT_SYMBOL(revert_creds);
 
 /**
  * cred_fscmp - Compare two credentials with respect to filesystem access.

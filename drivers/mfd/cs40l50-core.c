@@ -52,7 +52,7 @@ static const struct regmap_irq cs40l50_reg_irqs[] = {
 		       CS40L50_GLOBAL_ERROR_MASK),
 };
 
-static struct regmap_irq_chip cs40l50_irq_chip = {
+static const struct regmap_irq_chip cs40l50_irq_chip = {
 	.name =		"cs40l50",
 	.status_base =	CS40L50_IRQ1_INT_1,
 	.mask_base =	CS40L50_IRQ1_MASK_1,
@@ -531,7 +531,6 @@ int cs40l50_probe(struct cs40l50 *cs40l50)
 	if (ret)
 		return dev_err_probe(dev, ret, "Failed to request %s\n", CS40L50_FW);
 
-	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put_autosuspend(dev);
 
 	return 0;
@@ -567,4 +566,4 @@ EXPORT_GPL_DEV_PM_OPS(cs40l50_pm_ops) = {
 MODULE_DESCRIPTION("CS40L50 Advanced Haptic Driver");
 MODULE_AUTHOR("James Ogletree, Cirrus Logic Inc. <james.ogletree@cirrus.com>");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(FW_CS_DSP);
+MODULE_IMPORT_NS("FW_CS_DSP");

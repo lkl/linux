@@ -111,6 +111,7 @@ void snd_dmaengine_pcm_set_config_from_dai_data(
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		slave_config->dst_addr = dma_data->addr;
 		slave_config->dst_maxburst = dma_data->maxburst;
+		slave_config->dst_port_window_size = dma_data->port_window_size;
 		if (dma_data->flags & SND_DMAENGINE_PCM_DAI_FLAG_PACK)
 			slave_config->dst_addr_width =
 				DMA_SLAVE_BUSWIDTH_UNDEFINED;
@@ -119,6 +120,7 @@ void snd_dmaengine_pcm_set_config_from_dai_data(
 	} else {
 		slave_config->src_addr = dma_data->addr;
 		slave_config->src_maxburst = dma_data->maxburst;
+		slave_config->src_port_window_size = dma_data->port_window_size;
 		if (dma_data->flags & SND_DMAENGINE_PCM_DAI_FLAG_PACK)
 			slave_config->src_addr_width =
 				DMA_SLAVE_BUSWIDTH_UNDEFINED;
@@ -327,27 +329,6 @@ int snd_dmaengine_pcm_open(struct snd_pcm_substream *substream,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_dmaengine_pcm_open);
-
-/**
- * snd_dmaengine_pcm_open_request_chan - Open a dmaengine based PCM substream and request channel
- * @substream: PCM substream
- * @filter_fn: Filter function used to request the DMA channel
- * @filter_data: Data passed to the DMA filter function
- *
- * This function will request a DMA channel using the passed filter function and
- * data. The function should usually be called from the pcm open callback. Note
- * that this function will use private_data field of the substream's runtime. So
- * it is not available to your pcm driver implementation.
- *
- * Return: 0 on success, a negative error code otherwise
- */
-int snd_dmaengine_pcm_open_request_chan(struct snd_pcm_substream *substream,
-	dma_filter_fn filter_fn, void *filter_data)
-{
-	return snd_dmaengine_pcm_open(substream,
-		    snd_dmaengine_pcm_request_channel(filter_fn, filter_data));
-}
-EXPORT_SYMBOL_GPL(snd_dmaengine_pcm_open_request_chan);
 
 int snd_dmaengine_pcm_sync_stop(struct snd_pcm_substream *substream)
 {

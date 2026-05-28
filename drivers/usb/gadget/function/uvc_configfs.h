@@ -49,6 +49,7 @@ container_of(group_ptr, struct uvcg_color_matching, group)
 enum uvcg_format_type {
 	UVCG_UNCOMPRESSED = 0,
 	UVCG_MJPEG,
+	UVCG_FRAMEBASED,
 };
 
 struct uvcg_format {
@@ -73,10 +74,12 @@ static inline struct uvcg_format *to_uvcg_format(struct config_item *item)
 
 struct uvcg_streaming_header {
 	struct config_item				item;
-	struct uvc_input_header_descriptor		desc;
 	unsigned					linked;
 	struct list_head				formats;
 	unsigned					num_fmt;
+
+	/* Must be last --ends in a flexible-array member. */
+	struct uvc_input_header_descriptor		desc;
 };
 
 static inline struct uvcg_streaming_header *to_uvcg_streaming_header(struct config_item *item)
@@ -105,6 +108,7 @@ struct uvcg_frame {
 		u32	dw_max_video_frame_buffer_size;
 		u32	dw_default_frame_interval;
 		u8	b_frame_interval_type;
+		u32     dw_bytes_perline;
 	} __attribute__((packed)) frame;
 	u32 *dw_frame_interval;
 };
@@ -140,6 +144,20 @@ struct uvcg_mjpeg {
 static inline struct uvcg_mjpeg *to_uvcg_mjpeg(struct config_item *item)
 {
 	return container_of(to_uvcg_format(item), struct uvcg_mjpeg, fmt);
+}
+
+/* -----------------------------------------------------------------------------
+ * streaming/framebased/<NAME>
+ */
+
+struct uvcg_framebased {
+	struct uvcg_format              fmt;
+	struct uvc_format_framebased    desc;
+};
+
+static inline struct uvcg_framebased *to_uvcg_framebased(struct config_item *item)
+{
+	return container_of(to_uvcg_format(item), struct uvcg_framebased, fmt);
 }
 
 /* -----------------------------------------------------------------------------

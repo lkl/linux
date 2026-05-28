@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /* Copyright (c) 2020 Facebook */
-#include "bpf_iter.h"
+#include <vmlinux.h>
 #include "bpf_tracing_net.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
@@ -64,7 +64,8 @@ int dump_udp4(struct bpf_iter__udp *ctx)
 		       0, 0L, 0, ctx->uid, 0,
 		       sock_i_ino(&inet->sk),
 		       inet->sk.sk_refcnt.refs.counter, udp_sk,
-		       inet->sk.sk_drops.counter);
+		       udp_sk->drop_counters.drops0.counter +
+		       udp_sk->drop_counters.drops1.counter);
 
 	return 0;
 }

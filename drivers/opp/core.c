@@ -40,17 +40,14 @@ static DEFINE_XARRAY_ALLOC1(opp_configs);
 static bool _find_opp_dev(const struct device *dev, struct opp_table *opp_table)
 {
 	struct opp_device *opp_dev;
-	bool found = false;
 
-	mutex_lock(&opp_table->lock);
+	guard(mutex)(&opp_table->lock);
+
 	list_for_each_entry(opp_dev, &opp_table->dev_list, node)
-		if (opp_dev->dev == dev) {
-			found = true;
-			break;
-		}
+		if (opp_dev->dev == dev)
+			return true;
 
-	mutex_unlock(&opp_table->lock);
-	return found;
+	return false;
 }
 
 static struct opp_table *_find_opp_table_unlocked(struct device *dev)
@@ -58,10 +55,8 @@ static struct opp_table *_find_opp_table_unlocked(struct device *dev)
 	struct opp_table *opp_table;
 
 	list_for_each_entry(opp_table, &opp_tables, node) {
-		if (_find_opp_dev(dev, opp_table)) {
-			_get_opp_table_kref(opp_table);
-			return opp_table;
-		}
+		if (_find_opp_dev(dev, opp_table))
+			return dev_pm_opp_get_opp_table_ref(opp_table);
 	}
 
 	return ERR_PTR(-ENODEV);
@@ -80,18 +75,13 @@ static struct opp_table *_find_opp_table_unlocked(struct device *dev)
  */
 struct opp_table *_find_opp_table(struct device *dev)
 {
-	struct opp_table *opp_table;
-
 	if (IS_ERR_OR_NULL(dev)) {
 		pr_err("%s: Invalid parameters\n", __func__);
 		return ERR_PTR(-EINVAL);
 	}
 
-	mutex_lock(&opp_table_lock);
-	opp_table = _find_opp_table_unlocked(dev);
-	mutex_unlock(&opp_table_lock);
-
-	return opp_table;
+	guard(mutex)(&opp_table_lock);
+	return _find_opp_table_unlocked(dev);
 }
 
 /*
@@ -101,10 +91,54 @@ struct opp_table *_find_opp_table(struct device *dev)
  * representation in the OPP table and manage the clock configuration themselves
  * in an platform specific way.
  */
-static bool assert_single_clk(struct opp_table *opp_table)
+static bool assert_single_clk(struct opp_table *opp_table,
+			      unsigned int __always_unused index)
 {
 	return !WARN_ON(opp_table->clk_count > 1);
 }
+
+/*
+ * Returns true if clock table is large enough to contain the clock index.
+ */
+static bool assert_clk_index(struct opp_table *opp_table,
+			     unsigned int index)
+{
+	return opp_table->clk_count > index;
+}
+
+/*
+ * Returns true if bandwidth table is large enough to contain the bandwidth index.
+ */
+static bool assert_bandwidth_index(struct opp_table *opp_table,
+				   unsigned int index)
+{
+	return opp_table->path_count > index;
+}
+
+/**
+ * dev_pm_opp_get_bw() - Gets the bandwidth corresponding to an opp
+ * @opp:	opp for which bandwidth has to be returned for
+ * @peak:	select peak or average bandwidth
+ * @index:	bandwidth index
+ *
+ * Return: bandwidth in kBps, else return 0
+ */
+unsigned long dev_pm_opp_get_bw(struct dev_pm_opp *opp, bool peak, int index)
+{
+	if (IS_ERR_OR_NULL(opp)) {
+		pr_err("%s: Invalid parameters\n", __func__);
+		return 0;
+	}
+
+	if (index >= opp->opp_table->path_count)
+		return 0;
+
+	if (!opp->bandwidth)
+		return 0;
+
+	return peak ? opp->bandwidth[index].peak : opp->bandwidth[index].avg;
+}
+EXPORT_SYMBOL_GPL(dev_pm_opp_get_bw);
 
 /**
  * dev_pm_opp_get_voltage() - Gets the voltage corresponding to an opp
@@ -275,18 +309,13 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_is_turbo);
  */
 unsigned long dev_pm_opp_get_max_clock_latency(struct device *dev)
 {
-	struct opp_table *opp_table;
-	unsigned long clock_latency_ns;
+	struct opp_table *opp_table __free(put_opp_table);
 
 	opp_table = _find_opp_table(dev);
 	if (IS_ERR(opp_table))
 		return 0;
 
-	clock_latency_ns = opp_table->clock_latency_ns_max;
-
-	dev_pm_opp_put_opp_table(opp_table);
-
-	return clock_latency_ns;
+	return opp_table->clock_latency_ns_max;
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_get_max_clock_latency);
 
@@ -298,7 +327,7 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_get_max_clock_latency);
  */
 unsigned long dev_pm_opp_get_max_volt_latency(struct device *dev)
 {
-	struct opp_table *opp_table;
+	struct opp_table *opp_table __free(put_opp_table);
 	struct dev_pm_opp *opp;
 	struct regulator *reg;
 	unsigned long latency_ns = 0;
@@ -314,32 +343,30 @@ unsigned long dev_pm_opp_get_max_volt_latency(struct device *dev)
 
 	/* Regulator may not be required for the device */
 	if (!opp_table->regulators)
-		goto put_opp_table;
+		return 0;
 
 	count = opp_table->regulator_count;
 
 	uV = kmalloc_array(count, sizeof(*uV), GFP_KERNEL);
 	if (!uV)
-		goto put_opp_table;
+		return 0;
 
-	mutex_lock(&opp_table->lock);
+	scoped_guard(mutex, &opp_table->lock) {
+		for (i = 0; i < count; i++) {
+			uV[i].min = ~0;
+			uV[i].max = 0;
 
-	for (i = 0; i < count; i++) {
-		uV[i].min = ~0;
-		uV[i].max = 0;
+			list_for_each_entry(opp, &opp_table->opp_list, node) {
+				if (!opp->available)
+					continue;
 
-		list_for_each_entry(opp, &opp_table->opp_list, node) {
-			if (!opp->available)
-				continue;
-
-			if (opp->supplies[i].u_volt_min < uV[i].min)
-				uV[i].min = opp->supplies[i].u_volt_min;
-			if (opp->supplies[i].u_volt_max > uV[i].max)
-				uV[i].max = opp->supplies[i].u_volt_max;
+				if (opp->supplies[i].u_volt_min < uV[i].min)
+					uV[i].min = opp->supplies[i].u_volt_min;
+				if (opp->supplies[i].u_volt_max > uV[i].max)
+					uV[i].max = opp->supplies[i].u_volt_max;
+			}
 		}
 	}
-
-	mutex_unlock(&opp_table->lock);
 
 	/*
 	 * The caller needs to ensure that opp_table (and hence the regulator)
@@ -353,8 +380,6 @@ unsigned long dev_pm_opp_get_max_volt_latency(struct device *dev)
 	}
 
 	kfree(uV);
-put_opp_table:
-	dev_pm_opp_put_opp_table(opp_table);
 
 	return latency_ns;
 }
@@ -384,7 +409,7 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_get_max_transition_latency);
  */
 unsigned long dev_pm_opp_get_suspend_opp_freq(struct device *dev)
 {
-	struct opp_table *opp_table;
+	struct opp_table *opp_table __free(put_opp_table);
 	unsigned long freq = 0;
 
 	opp_table = _find_opp_table(dev);
@@ -393,8 +418,6 @@ unsigned long dev_pm_opp_get_suspend_opp_freq(struct device *dev)
 
 	if (opp_table->suspend_opp && opp_table->suspend_opp->available)
 		freq = dev_pm_opp_get_freq(opp_table->suspend_opp);
-
-	dev_pm_opp_put_opp_table(opp_table);
 
 	return freq;
 }
@@ -405,14 +428,12 @@ int _get_opp_count(struct opp_table *opp_table)
 	struct dev_pm_opp *opp;
 	int count = 0;
 
-	mutex_lock(&opp_table->lock);
+	guard(mutex)(&opp_table->lock);
 
 	list_for_each_entry(opp, &opp_table->opp_list, node) {
 		if (opp->available)
 			count++;
 	}
-
-	mutex_unlock(&opp_table->lock);
 
 	return count;
 }
@@ -426,21 +447,16 @@ int _get_opp_count(struct opp_table *opp_table)
  */
 int dev_pm_opp_get_opp_count(struct device *dev)
 {
-	struct opp_table *opp_table;
-	int count;
+	struct opp_table *opp_table __free(put_opp_table);
 
 	opp_table = _find_opp_table(dev);
 	if (IS_ERR(opp_table)) {
-		count = PTR_ERR(opp_table);
-		dev_dbg(dev, "%s: OPP table not found (%d)\n",
-			__func__, count);
-		return count;
+		dev_dbg(dev, "%s: OPP table not found (%ld)\n",
+			__func__, PTR_ERR(opp_table));
+		return PTR_ERR(opp_table);
 	}
 
-	count = _get_opp_count(opp_table);
-	dev_pm_opp_put_opp_table(opp_table);
-
-	return count;
+	return _get_opp_count(opp_table);
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_get_opp_count);
 
@@ -458,6 +474,16 @@ static unsigned long _read_level(struct dev_pm_opp *opp, int index)
 static unsigned long _read_bw(struct dev_pm_opp *opp, int index)
 {
 	return opp->bandwidth[index].peak;
+}
+
+static unsigned long _read_opp_key(struct dev_pm_opp *opp, int index,
+				   struct dev_pm_opp_key *key)
+{
+	key->bw = opp->bandwidth ? opp->bandwidth[index].peak : 0;
+	key->freq = opp->rates[index];
+	key->level = opp->level;
+
+	return true;
 }
 
 /* Generic comparison helpers */
@@ -493,21 +519,37 @@ static bool _compare_floor(struct dev_pm_opp **opp, struct dev_pm_opp *temp_opp,
 	return false;
 }
 
+static bool _compare_opp_key_exact(struct dev_pm_opp **opp,
+		struct dev_pm_opp *temp_opp, struct dev_pm_opp_key *opp_key,
+		struct dev_pm_opp_key *key)
+{
+	bool level_match = (key->level == OPP_LEVEL_UNSET || opp_key->level == key->level);
+	bool freq_match = (key->freq == 0 || opp_key->freq == key->freq);
+	bool bw_match = (key->bw == 0 || opp_key->bw == key->bw);
+
+	if (freq_match && level_match && bw_match) {
+		*opp = temp_opp;
+		return true;
+	}
+
+	return false;
+}
+
 /* Generic key finding helpers */
 static struct dev_pm_opp *_opp_table_find_key(struct opp_table *opp_table,
 		unsigned long *key, int index, bool available,
 		unsigned long (*read)(struct dev_pm_opp *opp, int index),
 		bool (*compare)(struct dev_pm_opp **opp, struct dev_pm_opp *temp_opp,
 				unsigned long opp_key, unsigned long key),
-		bool (*assert)(struct opp_table *opp_table))
+		bool (*assert)(struct opp_table *opp_table, unsigned int index))
 {
 	struct dev_pm_opp *temp_opp, *opp = ERR_PTR(-ERANGE);
 
 	/* Assert that the requirement is met */
-	if (assert && !assert(opp_table))
+	if (assert && !assert(opp_table, index))
 		return ERR_PTR(-EINVAL);
 
-	mutex_lock(&opp_table->lock);
+	guard(mutex)(&opp_table->lock);
 
 	list_for_each_entry(temp_opp, &opp_table->opp_list, node) {
 		if (temp_opp->available == available) {
@@ -522,7 +564,36 @@ static struct dev_pm_opp *_opp_table_find_key(struct opp_table *opp_table,
 		dev_pm_opp_get(opp);
 	}
 
-	mutex_unlock(&opp_table->lock);
+	return opp;
+}
+
+static struct dev_pm_opp *_opp_table_find_opp_key(struct opp_table *opp_table,
+		struct dev_pm_opp_key *key, bool available,
+		unsigned long (*read)(struct dev_pm_opp *opp, int index,
+				      struct dev_pm_opp_key *key),
+		bool (*compare)(struct dev_pm_opp **opp, struct dev_pm_opp *temp_opp,
+				struct dev_pm_opp_key *opp_key, struct dev_pm_opp_key *key),
+		bool (*assert)(struct opp_table *opp_table, unsigned int index))
+{
+	struct dev_pm_opp *temp_opp, *opp = ERR_PTR(-ERANGE);
+	struct dev_pm_opp_key temp_key;
+
+	/* Assert that the requirement is met */
+	if (!assert(opp_table, 0))
+		return ERR_PTR(-EINVAL);
+
+	guard(mutex)(&opp_table->lock);
+
+	list_for_each_entry(temp_opp, &opp_table->opp_list, node) {
+		if (temp_opp->available == available) {
+			read(temp_opp, 0, &temp_key);
+			if (compare(&opp, temp_opp, &temp_key, key)) {
+				/* Increment the reference count of OPP */
+				dev_pm_opp_get(opp);
+				break;
+			}
+		}
+	}
 
 	return opp;
 }
@@ -532,10 +603,9 @@ _find_key(struct device *dev, unsigned long *key, int index, bool available,
 	  unsigned long (*read)(struct dev_pm_opp *opp, int index),
 	  bool (*compare)(struct dev_pm_opp **opp, struct dev_pm_opp *temp_opp,
 			  unsigned long opp_key, unsigned long key),
-	  bool (*assert)(struct opp_table *opp_table))
+	  bool (*assert)(struct opp_table *opp_table, unsigned int index))
 {
-	struct opp_table *opp_table;
-	struct dev_pm_opp *opp;
+	struct opp_table *opp_table __free(put_opp_table);
 
 	opp_table = _find_opp_table(dev);
 	if (IS_ERR(opp_table)) {
@@ -544,18 +614,14 @@ _find_key(struct device *dev, unsigned long *key, int index, bool available,
 		return ERR_CAST(opp_table);
 	}
 
-	opp = _opp_table_find_key(opp_table, key, index, available, read,
-				  compare, assert);
-
-	dev_pm_opp_put_opp_table(opp_table);
-
-	return opp;
+	return _opp_table_find_key(opp_table, key, index, available, read,
+				   compare, assert);
 }
 
 static struct dev_pm_opp *_find_key_exact(struct device *dev,
 		unsigned long key, int index, bool available,
 		unsigned long (*read)(struct dev_pm_opp *opp, int index),
-		bool (*assert)(struct opp_table *opp_table))
+		bool (*assert)(struct opp_table *opp_table, unsigned int index))
 {
 	/*
 	 * The value of key will be updated here, but will be ignored as the
@@ -568,7 +634,7 @@ static struct dev_pm_opp *_find_key_exact(struct device *dev,
 static struct dev_pm_opp *_opp_table_find_key_ceil(struct opp_table *opp_table,
 		unsigned long *key, int index, bool available,
 		unsigned long (*read)(struct dev_pm_opp *opp, int index),
-		bool (*assert)(struct opp_table *opp_table))
+		bool (*assert)(struct opp_table *opp_table, unsigned int index))
 {
 	return _opp_table_find_key(opp_table, key, index, available, read,
 				   _compare_ceil, assert);
@@ -577,7 +643,7 @@ static struct dev_pm_opp *_opp_table_find_key_ceil(struct opp_table *opp_table,
 static struct dev_pm_opp *_find_key_ceil(struct device *dev, unsigned long *key,
 		int index, bool available,
 		unsigned long (*read)(struct dev_pm_opp *opp, int index),
-		bool (*assert)(struct opp_table *opp_table))
+		bool (*assert)(struct opp_table *opp_table, unsigned int index))
 {
 	return _find_key(dev, key, index, available, read, _compare_ceil,
 			 assert);
@@ -586,7 +652,7 @@ static struct dev_pm_opp *_find_key_ceil(struct device *dev, unsigned long *key,
 static struct dev_pm_opp *_find_key_floor(struct device *dev,
 		unsigned long *key, int index, bool available,
 		unsigned long (*read)(struct dev_pm_opp *opp, int index),
-		bool (*assert)(struct opp_table *opp_table))
+		bool (*assert)(struct opp_table *opp_table, unsigned int index))
 {
 	return _find_key(dev, key, index, available, read, _compare_floor,
 			 assert);
@@ -624,6 +690,48 @@ struct dev_pm_opp *dev_pm_opp_find_freq_exact(struct device *dev,
 EXPORT_SYMBOL_GPL(dev_pm_opp_find_freq_exact);
 
 /**
+ * dev_pm_opp_find_key_exact() - Search for an OPP with exact key set
+ * @dev:		Device for which the OPP is being searched
+ * @key:		OPP key set to match
+ * @available:		true/false - match for available OPP
+ *
+ * Search for an exact match of the key set in the OPP table.
+ *
+ * Return: A matching opp on success, else ERR_PTR in case of error.
+ * Possible error values:
+ * EINVAL:	for bad pointers
+ * ERANGE:	no match found for search
+ * ENODEV:	if device not found in list of registered devices
+ *
+ * Note: 'available' is a modifier for the search. If 'available' == true,
+ * then the match is for exact matching key and is available in the stored
+ * OPP table. If false, the match is for exact key which is not available.
+ *
+ * This provides a mechanism to enable an OPP which is not available currently
+ * or the opposite as well.
+ *
+ * The callers are required to call dev_pm_opp_put() for the returned OPP after
+ * use.
+ */
+struct dev_pm_opp *dev_pm_opp_find_key_exact(struct device *dev,
+					     struct dev_pm_opp_key *key,
+					     bool available)
+{
+	struct opp_table *opp_table __free(put_opp_table) = _find_opp_table(dev);
+
+	if (IS_ERR(opp_table)) {
+		dev_err(dev, "%s: OPP table not found (%ld)\n", __func__,
+			PTR_ERR(opp_table));
+		return ERR_CAST(opp_table);
+	}
+
+	return _opp_table_find_opp_key(opp_table, key, available,
+				       _read_opp_key, _compare_opp_key_exact,
+				       assert_single_clk);
+}
+EXPORT_SYMBOL_GPL(dev_pm_opp_find_key_exact);
+
+/**
  * dev_pm_opp_find_freq_exact_indexed() - Search for an exact freq for the
  *					 clock corresponding to the index
  * @dev:	Device for which we do this operation
@@ -647,7 +755,8 @@ struct dev_pm_opp *
 dev_pm_opp_find_freq_exact_indexed(struct device *dev, unsigned long freq,
 				   u32 index, bool available)
 {
-	return _find_key_exact(dev, freq, index, available, _read_freq, NULL);
+	return _find_key_exact(dev, freq, index, available, _read_freq,
+			       assert_clk_index);
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_find_freq_exact_indexed);
 
@@ -707,7 +816,8 @@ struct dev_pm_opp *
 dev_pm_opp_find_freq_ceil_indexed(struct device *dev, unsigned long *freq,
 				  u32 index)
 {
-	return _find_key_ceil(dev, freq, index, true, _read_freq, NULL);
+	return _find_key_ceil(dev, freq, index, true, _read_freq,
+			      assert_clk_index);
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_find_freq_ceil_indexed);
 
@@ -760,7 +870,7 @@ struct dev_pm_opp *
 dev_pm_opp_find_freq_floor_indexed(struct device *dev, unsigned long *freq,
 				   u32 index)
 {
-	return _find_key_floor(dev, freq, index, true, _read_freq, NULL);
+	return _find_key_floor(dev, freq, index, true, _read_freq, assert_clk_index);
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_find_freq_floor_indexed);
 
@@ -878,7 +988,8 @@ struct dev_pm_opp *dev_pm_opp_find_bw_ceil(struct device *dev, unsigned int *bw,
 	unsigned long temp = *bw;
 	struct dev_pm_opp *opp;
 
-	opp = _find_key_ceil(dev, &temp, index, true, _read_bw, NULL);
+	opp = _find_key_ceil(dev, &temp, index, true, _read_bw,
+			     assert_bandwidth_index);
 	*bw = temp;
 	return opp;
 }
@@ -909,7 +1020,8 @@ struct dev_pm_opp *dev_pm_opp_find_bw_floor(struct device *dev,
 	unsigned long temp = *bw;
 	struct dev_pm_opp *opp;
 
-	opp = _find_key_floor(dev, &temp, index, true, _read_bw, NULL);
+	opp = _find_key_floor(dev, &temp, index, true, _read_bw,
+			      assert_bandwidth_index);
 	*bw = temp;
 	return opp;
 }
@@ -1139,10 +1251,9 @@ static void _find_current_opp(struct device *dev, struct opp_table *opp_table)
 	 * make special checks to validate current_opp.
 	 */
 	if (IS_ERR(opp)) {
-		mutex_lock(&opp_table->lock);
-		opp = list_first_entry(&opp_table->opp_list, struct dev_pm_opp, node);
-		dev_pm_opp_get(opp);
-		mutex_unlock(&opp_table->lock);
+		guard(mutex)(&opp_table->lock);
+		opp = dev_pm_opp_get(list_first_entry(&opp_table->opp_list,
+						      struct dev_pm_opp, node));
 	}
 
 	opp_table->current_opp = opp;
@@ -1281,8 +1392,7 @@ static int _set_opp(struct device *dev, struct opp_table *opp_table,
 	dev_pm_opp_put(old_opp);
 
 	/* Make sure current_opp doesn't get freed */
-	dev_pm_opp_get(opp);
-	opp_table->current_opp = opp;
+	opp_table->current_opp = dev_pm_opp_get(opp);
 
 	return ret;
 }
@@ -1300,11 +1410,10 @@ static int _set_opp(struct device *dev, struct opp_table *opp_table,
  */
 int dev_pm_opp_set_rate(struct device *dev, unsigned long target_freq)
 {
-	struct opp_table *opp_table;
+	struct opp_table *opp_table __free(put_opp_table);
+	struct dev_pm_opp *opp __free(put_opp) = NULL;
 	unsigned long freq = 0, temp_freq;
-	struct dev_pm_opp *opp = NULL;
 	bool forced = false;
-	int ret;
 
 	opp_table = _find_opp_table(dev);
 	if (IS_ERR(opp_table)) {
@@ -1321,9 +1430,8 @@ int dev_pm_opp_set_rate(struct device *dev, unsigned long target_freq)
 		 * equivalent to a clk_set_rate()
 		 */
 		if (!_get_opp_count(opp_table)) {
-			ret = opp_table->config_clks(dev, opp_table, NULL,
-						     &target_freq, false);
-			goto put_opp_table;
+			return opp_table->config_clks(dev, opp_table, NULL,
+						      &target_freq, false);
 		}
 
 		freq = clk_round_rate(opp_table->clk, target_freq);
@@ -1338,10 +1446,9 @@ int dev_pm_opp_set_rate(struct device *dev, unsigned long target_freq)
 		temp_freq = freq;
 		opp = _find_freq_ceil(opp_table, &temp_freq);
 		if (IS_ERR(opp)) {
-			ret = PTR_ERR(opp);
-			dev_err(dev, "%s: failed to find OPP for freq %lu (%d)\n",
-				__func__, freq, ret);
-			goto put_opp_table;
+			dev_err(dev, "%s: failed to find OPP for freq %lu (%ld)\n",
+				__func__, freq, PTR_ERR(opp));
+			return PTR_ERR(opp);
 		}
 
 		/*
@@ -1354,14 +1461,7 @@ int dev_pm_opp_set_rate(struct device *dev, unsigned long target_freq)
 		forced = opp_table->current_rate_single_clk != freq;
 	}
 
-	ret = _set_opp(dev, opp_table, opp, &freq, forced);
-
-	if (freq)
-		dev_pm_opp_put(opp);
-
-put_opp_table:
-	dev_pm_opp_put_opp_table(opp_table);
-	return ret;
+	return _set_opp(dev, opp_table, opp, &freq, forced);
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_set_rate);
 
@@ -1377,8 +1477,7 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_set_rate);
  */
 int dev_pm_opp_set_opp(struct device *dev, struct dev_pm_opp *opp)
 {
-	struct opp_table *opp_table;
-	int ret;
+	struct opp_table *opp_table __free(put_opp_table);
 
 	opp_table = _find_opp_table(dev);
 	if (IS_ERR(opp_table)) {
@@ -1386,10 +1485,7 @@ int dev_pm_opp_set_opp(struct device *dev, struct dev_pm_opp *opp)
 		return PTR_ERR(opp_table);
 	}
 
-	ret = _set_opp(dev, opp_table, opp, NULL, false);
-	dev_pm_opp_put_opp_table(opp_table);
-
-	return ret;
+	return _set_opp(dev, opp_table, opp, NULL, false);
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_set_opp);
 
@@ -1414,9 +1510,8 @@ struct opp_device *_add_opp_dev(const struct device *dev,
 	/* Initialize opp-dev */
 	opp_dev->dev = dev;
 
-	mutex_lock(&opp_table->lock);
-	list_add(&opp_dev->node, &opp_table->dev_list);
-	mutex_unlock(&opp_table->lock);
+	scoped_guard(mutex, &opp_table->lock)
+		list_add(&opp_dev->node, &opp_table->dev_list);
 
 	/* Create debugfs entries for the opp_table */
 	opp_debug_register(opp_dev, opp_table);
@@ -1478,11 +1573,6 @@ remove_opp_dev:
 err:
 	kfree(opp_table);
 	return ERR_PTR(ret);
-}
-
-void _get_opp_table_kref(struct opp_table *opp_table)
-{
-	kref_get(&opp_table->kref);
 }
 
 static struct opp_table *_update_opp_table_clk(struct device *dev,
@@ -1645,6 +1735,13 @@ static void _opp_table_kref_release(struct kref *kref)
 	kfree(opp_table);
 }
 
+struct opp_table *dev_pm_opp_get_opp_table_ref(struct opp_table *opp_table)
+{
+	kref_get(&opp_table->kref);
+	return opp_table;
+}
+EXPORT_SYMBOL_GPL(dev_pm_opp_get_opp_table_ref);
+
 void dev_pm_opp_put_opp_table(struct opp_table *opp_table)
 {
 	kref_put_mutex(&opp_table->kref, _opp_table_kref_release,
@@ -1675,10 +1772,12 @@ static void _opp_kref_release(struct kref *kref)
 	kfree(opp);
 }
 
-void dev_pm_opp_get(struct dev_pm_opp *opp)
+struct dev_pm_opp *dev_pm_opp_get(struct dev_pm_opp *opp)
 {
 	kref_get(&opp->kref);
+	return opp;
 }
+EXPORT_SYMBOL_GPL(dev_pm_opp_get);
 
 void dev_pm_opp_put(struct dev_pm_opp *opp)
 {
@@ -1695,26 +1794,24 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_put);
  */
 void dev_pm_opp_remove(struct device *dev, unsigned long freq)
 {
+	struct opp_table *opp_table __free(put_opp_table);
 	struct dev_pm_opp *opp = NULL, *iter;
-	struct opp_table *opp_table;
 
 	opp_table = _find_opp_table(dev);
 	if (IS_ERR(opp_table))
 		return;
 
-	if (!assert_single_clk(opp_table))
-		goto put_table;
+	if (!assert_single_clk(opp_table, 0))
+		return;
 
-	mutex_lock(&opp_table->lock);
-
-	list_for_each_entry(iter, &opp_table->opp_list, node) {
-		if (iter->rates[0] == freq) {
-			opp = iter;
-			break;
+	scoped_guard(mutex, &opp_table->lock) {
+		list_for_each_entry(iter, &opp_table->opp_list, node) {
+			if (iter->rates[0] == freq) {
+				opp = iter;
+				break;
+			}
 		}
 	}
-
-	mutex_unlock(&opp_table->lock);
 
 	if (opp) {
 		dev_pm_opp_put(opp);
@@ -1725,32 +1822,26 @@ void dev_pm_opp_remove(struct device *dev, unsigned long freq)
 		dev_warn(dev, "%s: Couldn't find OPP with freq: %lu\n",
 			 __func__, freq);
 	}
-
-put_table:
-	/* Drop the reference taken by _find_opp_table() */
-	dev_pm_opp_put_opp_table(opp_table);
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_remove);
 
 static struct dev_pm_opp *_opp_get_next(struct opp_table *opp_table,
 					bool dynamic)
 {
-	struct dev_pm_opp *opp = NULL, *temp;
+	struct dev_pm_opp *opp;
 
-	mutex_lock(&opp_table->lock);
-	list_for_each_entry(temp, &opp_table->opp_list, node) {
+	guard(mutex)(&opp_table->lock);
+
+	list_for_each_entry(opp, &opp_table->opp_list, node) {
 		/*
 		 * Refcount must be dropped only once for each OPP by OPP core,
 		 * do that with help of "removed" flag.
 		 */
-		if (!temp->removed && dynamic == temp->dynamic) {
-			opp = temp;
-			break;
-		}
+		if (!opp->removed && dynamic == opp->dynamic)
+			return opp;
 	}
 
-	mutex_unlock(&opp_table->lock);
-	return opp;
+	return NULL;
 }
 
 /*
@@ -1774,19 +1865,13 @@ static void _opp_remove_all(struct opp_table *opp_table, bool dynamic)
 
 bool _opp_remove_all_static(struct opp_table *opp_table)
 {
-	mutex_lock(&opp_table->lock);
+	scoped_guard(mutex, &opp_table->lock) {
+		if (!opp_table->parsed_static_opps)
+			return false;
 
-	if (!opp_table->parsed_static_opps) {
-		mutex_unlock(&opp_table->lock);
-		return false;
+		if (--opp_table->parsed_static_opps)
+			return true;
 	}
-
-	if (--opp_table->parsed_static_opps) {
-		mutex_unlock(&opp_table->lock);
-		return true;
-	}
-
-	mutex_unlock(&opp_table->lock);
 
 	_opp_remove_all(opp_table, false);
 	return true;
@@ -1800,16 +1885,13 @@ bool _opp_remove_all_static(struct opp_table *opp_table)
  */
 void dev_pm_opp_remove_all_dynamic(struct device *dev)
 {
-	struct opp_table *opp_table;
+	struct opp_table *opp_table __free(put_opp_table);
 
 	opp_table = _find_opp_table(dev);
 	if (IS_ERR(opp_table))
 		return;
 
 	_opp_remove_all(opp_table, true);
-
-	/* Drop the reference taken by _find_opp_table() */
-	dev_pm_opp_put_opp_table(opp_table);
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_remove_all_dynamic);
 
@@ -1994,17 +2076,15 @@ int _opp_add(struct device *dev, struct dev_pm_opp *new_opp,
 	struct list_head *head;
 	int ret;
 
-	mutex_lock(&opp_table->lock);
-	head = &opp_table->opp_list;
+	scoped_guard(mutex, &opp_table->lock) {
+		head = &opp_table->opp_list;
 
-	ret = _opp_is_duplicate(dev, new_opp, opp_table, &head);
-	if (ret) {
-		mutex_unlock(&opp_table->lock);
-		return ret;
+		ret = _opp_is_duplicate(dev, new_opp, opp_table, &head);
+		if (ret)
+			return ret;
+
+		list_add(&new_opp->node, head);
 	}
-
-	list_add(&new_opp->node, head);
-	mutex_unlock(&opp_table->lock);
 
 	new_opp->opp_table = opp_table;
 	kref_init(&new_opp->kref);
@@ -2054,7 +2134,7 @@ int _opp_add_v1(struct opp_table *opp_table, struct device *dev,
 	unsigned long tol, u_volt = data->u_volt;
 	int ret;
 
-	if (!assert_single_clk(opp_table))
+	if (!assert_single_clk(opp_table, 0))
 		return -EINVAL;
 
 	new_opp = _opp_allocate(opp_table);
@@ -2106,8 +2186,8 @@ static int _opp_set_supported_hw(struct opp_table *opp_table,
 	if (opp_table->supported_hw)
 		return 0;
 
-	opp_table->supported_hw = kmemdup(versions, count * sizeof(*versions),
-					GFP_KERNEL);
+	opp_table->supported_hw = kmemdup_array(versions, count,
+						sizeof(*versions), GFP_KERNEL);
 	if (!opp_table->supported_hw)
 		return -ENOMEM;
 
@@ -2360,48 +2440,13 @@ static void _opp_put_config_regulators_helper(struct opp_table *opp_table)
 		opp_table->config_regulators = NULL;
 }
 
-static void _opp_detach_genpd(struct opp_table *opp_table)
+static int _opp_set_required_dev(struct opp_table *opp_table,
+				 struct device *dev,
+				 struct device *required_dev,
+				 unsigned int index)
 {
-	int index;
-
-	for (index = 0; index < opp_table->required_opp_count; index++) {
-		if (!opp_table->required_devs[index])
-			continue;
-
-		dev_pm_domain_detach(opp_table->required_devs[index], false);
-		opp_table->required_devs[index] = NULL;
-	}
-}
-
-/*
- * Multiple generic power domains for a device are supported with the help of
- * virtual genpd devices, which are created for each consumer device - genpd
- * pair. These are the device structures which are attached to the power domain
- * and are required by the OPP core to set the performance state of the genpd.
- * The same API also works for the case where single genpd is available and so
- * we don't need to support that separately.
- *
- * This helper will normally be called by the consumer driver of the device
- * "dev", as only that has details of the genpd names.
- *
- * This helper needs to be called once with a list of all genpd to attach.
- * Otherwise the original device structure will be used instead by the OPP core.
- *
- * The order of entries in the names array must match the order in which
- * "required-opps" are added in DT.
- */
-static int _opp_attach_genpd(struct opp_table *opp_table, struct device *dev,
-			const char * const *names, struct device ***virt_devs)
-{
-	struct device *virt_dev, *gdev;
-	struct opp_table *genpd_table;
-	int index = 0, ret = -EINVAL;
-	const char * const *name = names;
-
-	if (!opp_table->required_devs) {
-		dev_err(dev, "Required OPPs not available, can't attach genpd\n");
-		return -EINVAL;
-	}
+	struct opp_table *required_table, *pd_table;
+	struct device *gdev;
 
 	/* Genpd core takes care of propagation to parent genpd */
 	if (opp_table->is_genpd) {
@@ -2409,114 +2454,59 @@ static int _opp_attach_genpd(struct opp_table *opp_table, struct device *dev,
 		return -EOPNOTSUPP;
 	}
 
-	/* Checking only the first one is enough ? */
-	if (opp_table->required_devs[0])
-		return 0;
-
-	while (*name) {
-		if (index >= opp_table->required_opp_count) {
-			dev_err(dev, "Index can't be greater than required-opp-count - 1, %s (%d : %d)\n",
-				*name, opp_table->required_opp_count, index);
-			goto err;
-		}
-
-		virt_dev = dev_pm_domain_attach_by_name(dev, *name);
-		if (IS_ERR_OR_NULL(virt_dev)) {
-			ret = virt_dev ? PTR_ERR(virt_dev) : -ENODEV;
-			dev_err(dev, "Couldn't attach to pm_domain: %d\n", ret);
-			goto err;
-		}
-
-		/*
-		 * The required_opp_tables parsing is not perfect, as the OPP
-		 * core does the parsing solely based on the DT node pointers.
-		 * The core sets the required_opp_tables entry to the first OPP
-		 * table in the "opp_tables" list, that matches with the node
-		 * pointer.
-		 *
-		 * If the target DT OPP table is used by multiple devices and
-		 * they all create separate instances of 'struct opp_table' from
-		 * it, then it is possible that the required_opp_tables entry
-		 * may be set to the incorrect sibling device.
-		 *
-		 * Cross check it again and fix if required.
-		 */
-		gdev = dev_to_genpd_dev(virt_dev);
-		if (IS_ERR(gdev)) {
-			ret = PTR_ERR(gdev);
-			goto err;
-		}
-
-		genpd_table = _find_opp_table(gdev);
-		if (!IS_ERR(genpd_table)) {
-			if (genpd_table != opp_table->required_opp_tables[index]) {
-				dev_pm_opp_put_opp_table(opp_table->required_opp_tables[index]);
-				opp_table->required_opp_tables[index] = genpd_table;
-			} else {
-				dev_pm_opp_put_opp_table(genpd_table);
-			}
-		}
-
-		opp_table->required_devs[index] = virt_dev;
-		index++;
-		name++;
-	}
-
-	if (virt_devs)
-		*virt_devs = opp_table->required_devs;
-
-	return 0;
-
-err:
-	_opp_detach_genpd(opp_table);
-	return ret;
-
-}
-
-static int _opp_set_required_devs(struct opp_table *opp_table,
-				  struct device *dev,
-				  struct device **required_devs)
-{
-	int i;
-
-	if (!opp_table->required_devs) {
+	if (index >= opp_table->required_opp_count) {
 		dev_err(dev, "Required OPPs not available, can't set required devs\n");
 		return -EINVAL;
 	}
 
-	/* Another device that shares the OPP table has set the required devs ? */
-	if (opp_table->required_devs[0])
-		return 0;
-
-	for (i = 0; i < opp_table->required_opp_count; i++) {
-		/* Genpd core takes care of propagation to parent genpd */
-		if (required_devs[i] && opp_table->is_genpd &&
-		    opp_table->required_opp_tables[i]->is_genpd) {
-			dev_err(dev, "%s: Operation not supported for genpds\n", __func__);
-			return -EOPNOTSUPP;
-		}
-
-		opp_table->required_devs[i] = required_devs[i];
+	required_table = opp_table->required_opp_tables[index];
+	if (IS_ERR(required_table)) {
+		dev_err(dev, "Missing OPP table, unable to set the required devs\n");
+		return -ENODEV;
 	}
 
+	/*
+	 * The required_opp_tables parsing is not perfect, as the OPP core does
+	 * the parsing solely based on the DT node pointers. The core sets the
+	 * required_opp_tables entry to the first OPP table in the "opp_tables"
+	 * list, that matches with the node pointer.
+	 *
+	 * If the target DT OPP table is used by multiple devices and they all
+	 * create separate instances of 'struct opp_table' from it, then it is
+	 * possible that the required_opp_tables entry may be set to the
+	 * incorrect sibling device.
+	 *
+	 * Cross check it again and fix if required.
+	 */
+	gdev = dev_to_genpd_dev(required_dev);
+	if (IS_ERR(gdev))
+		return PTR_ERR(gdev);
+
+	pd_table = _find_opp_table(gdev);
+	if (!IS_ERR(pd_table)) {
+		if (pd_table != required_table) {
+			dev_pm_opp_put_opp_table(required_table);
+			opp_table->required_opp_tables[index] = pd_table;
+		} else {
+			dev_pm_opp_put_opp_table(pd_table);
+		}
+	}
+
+	opp_table->required_devs[index] = required_dev;
 	return 0;
 }
 
-static void _opp_put_required_devs(struct opp_table *opp_table)
+static void _opp_put_required_dev(struct opp_table *opp_table,
+				  unsigned int index)
 {
-	int i;
-
-	for (i = 0; i < opp_table->required_opp_count; i++)
-		opp_table->required_devs[i] = NULL;
+	opp_table->required_devs[index] = NULL;
 }
 
 static void _opp_clear_config(struct opp_config_data *data)
 {
-	if (data->flags & OPP_CONFIG_REQUIRED_DEVS)
-		_opp_put_required_devs(data->opp_table);
-	else if (data->flags & OPP_CONFIG_GENPD)
-		_opp_detach_genpd(data->opp_table);
-
+	if (data->flags & OPP_CONFIG_REQUIRED_DEV)
+		_opp_put_required_dev(data->opp_table,
+				      data->required_dev_index);
 	if (data->flags & OPP_CONFIG_REGULATOR)
 		_opp_put_regulators(data->opp_table);
 	if (data->flags & OPP_CONFIG_SUPPORTED_HW)
@@ -2628,26 +2618,15 @@ int dev_pm_opp_set_config(struct device *dev, struct dev_pm_opp_config *config)
 		data->flags |= OPP_CONFIG_REGULATOR;
 	}
 
-	/* Attach genpds */
-	if (config->genpd_names) {
-		if (config->required_devs) {
-			ret = -EINVAL;
-			goto err;
-		}
-
-		ret = _opp_attach_genpd(opp_table, dev, config->genpd_names,
-					config->virt_devs);
+	if (config->required_dev) {
+		ret = _opp_set_required_dev(opp_table, dev,
+					    config->required_dev,
+					    config->required_dev_index);
 		if (ret)
 			goto err;
 
-		data->flags |= OPP_CONFIG_GENPD;
-	} else if (config->required_devs) {
-		ret = _opp_set_required_devs(opp_table, dev,
-					     config->required_devs);
-		if (ret)
-			goto err;
-
-		data->flags |= OPP_CONFIG_REQUIRED_DEVS;
+		data->required_dev_index = config->required_dev_index;
+		data->flags |= OPP_CONFIG_REQUIRED_DEV;
 	}
 
 	ret = xa_alloc(&opp_configs, &id, data, XA_LIMIT(1, INT_MAX),
@@ -2752,18 +2731,16 @@ struct dev_pm_opp *dev_pm_opp_xlate_required_opp(struct opp_table *src_table,
 		return ERR_PTR(-EBUSY);
 
 	for (i = 0; i < src_table->required_opp_count; i++) {
-		if (src_table->required_opp_tables[i] == dst_table) {
-			mutex_lock(&src_table->lock);
+		if (src_table->required_opp_tables[i] != dst_table)
+			continue;
 
+		scoped_guard(mutex, &src_table->lock) {
 			list_for_each_entry(opp, &src_table->opp_list, node) {
 				if (opp == src_opp) {
-					dest_opp = opp->required_opps[i];
-					dev_pm_opp_get(dest_opp);
+					dest_opp = dev_pm_opp_get(opp->required_opps[i]);
 					break;
 				}
 			}
-
-			mutex_unlock(&src_table->lock);
 			break;
 		}
 	}
@@ -2795,7 +2772,6 @@ int dev_pm_opp_xlate_performance_state(struct opp_table *src_table,
 				       unsigned int pstate)
 {
 	struct dev_pm_opp *opp;
-	int dest_pstate = -EINVAL;
 	int i;
 
 	/*
@@ -2829,22 +2805,17 @@ int dev_pm_opp_xlate_performance_state(struct opp_table *src_table,
 		return -EINVAL;
 	}
 
-	mutex_lock(&src_table->lock);
+	guard(mutex)(&src_table->lock);
 
 	list_for_each_entry(opp, &src_table->opp_list, node) {
-		if (opp->level == pstate) {
-			dest_pstate = opp->required_opps[i]->level;
-			goto unlock;
-		}
+		if (opp->level == pstate)
+			return opp->required_opps[i]->level;
 	}
 
 	pr_err("%s: Couldn't find matching OPP (%p: %p)\n", __func__, src_table,
 	       dst_table);
 
-unlock:
-	mutex_unlock(&src_table->lock);
-
-	return dest_pstate;
+	return -EINVAL;
 }
 
 /**
@@ -2899,46 +2870,38 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_add_dynamic);
 static int _opp_set_availability(struct device *dev, unsigned long freq,
 				 bool availability_req)
 {
-	struct opp_table *opp_table;
-	struct dev_pm_opp *tmp_opp, *opp = ERR_PTR(-ENODEV);
-	int r = 0;
+	struct dev_pm_opp *opp __free(put_opp) = ERR_PTR(-ENODEV), *tmp_opp;
+	struct opp_table *opp_table __free(put_opp_table);
 
 	/* Find the opp_table */
 	opp_table = _find_opp_table(dev);
 	if (IS_ERR(opp_table)) {
-		r = PTR_ERR(opp_table);
-		dev_warn(dev, "%s: Device OPP not found (%d)\n", __func__, r);
-		return r;
+		dev_warn(dev, "%s: Device OPP not found (%ld)\n", __func__,
+			 PTR_ERR(opp_table));
+		return PTR_ERR(opp_table);
 	}
 
-	if (!assert_single_clk(opp_table)) {
-		r = -EINVAL;
-		goto put_table;
-	}
+	if (!assert_single_clk(opp_table, 0))
+		return -EINVAL;
 
-	mutex_lock(&opp_table->lock);
+	scoped_guard(mutex, &opp_table->lock) {
+		/* Do we have the frequency? */
+		list_for_each_entry(tmp_opp, &opp_table->opp_list, node) {
+			if (tmp_opp->rates[0] == freq) {
+				opp = dev_pm_opp_get(tmp_opp);
 
-	/* Do we have the frequency? */
-	list_for_each_entry(tmp_opp, &opp_table->opp_list, node) {
-		if (tmp_opp->rates[0] == freq) {
-			opp = tmp_opp;
-			break;
+				/* Is update really needed? */
+				if (opp->available == availability_req)
+					return 0;
+
+				opp->available = availability_req;
+				break;
+			}
 		}
 	}
 
-	if (IS_ERR(opp)) {
-		r = PTR_ERR(opp);
-		goto unlock;
-	}
-
-	/* Is update really needed? */
-	if (opp->available == availability_req)
-		goto unlock;
-
-	opp->available = availability_req;
-
-	dev_pm_opp_get(opp);
-	mutex_unlock(&opp_table->lock);
+	if (IS_ERR(opp))
+		return PTR_ERR(opp);
 
 	/* Notify the change of the OPP availability */
 	if (availability_req)
@@ -2948,14 +2911,7 @@ static int _opp_set_availability(struct device *dev, unsigned long freq,
 		blocking_notifier_call_chain(&opp_table->head,
 					     OPP_EVENT_DISABLE, opp);
 
-	dev_pm_opp_put(opp);
-	goto put_table;
-
-unlock:
-	mutex_unlock(&opp_table->lock);
-put_table:
-	dev_pm_opp_put_opp_table(opp_table);
-	return r;
+	return 0;
 }
 
 /**
@@ -2975,9 +2931,9 @@ int dev_pm_opp_adjust_voltage(struct device *dev, unsigned long freq,
 			      unsigned long u_volt_max)
 
 {
-	struct opp_table *opp_table;
-	struct dev_pm_opp *tmp_opp, *opp = ERR_PTR(-ENODEV);
-	int r = 0;
+	struct dev_pm_opp *opp __free(put_opp) = ERR_PTR(-ENODEV), *tmp_opp;
+	struct opp_table *opp_table __free(put_opp_table);
+	int r;
 
 	/* Find the opp_table */
 	opp_table = _find_opp_table(dev);
@@ -2987,49 +2943,36 @@ int dev_pm_opp_adjust_voltage(struct device *dev, unsigned long freq,
 		return r;
 	}
 
-	if (!assert_single_clk(opp_table)) {
-		r = -EINVAL;
-		goto put_table;
-	}
+	if (!assert_single_clk(opp_table, 0))
+		return -EINVAL;
 
-	mutex_lock(&opp_table->lock);
+	scoped_guard(mutex, &opp_table->lock) {
+		/* Do we have the frequency? */
+		list_for_each_entry(tmp_opp, &opp_table->opp_list, node) {
+			if (tmp_opp->rates[0] == freq) {
+				opp = dev_pm_opp_get(tmp_opp);
 
-	/* Do we have the frequency? */
-	list_for_each_entry(tmp_opp, &opp_table->opp_list, node) {
-		if (tmp_opp->rates[0] == freq) {
-			opp = tmp_opp;
-			break;
+				/* Is update really needed? */
+				if (opp->supplies->u_volt == u_volt)
+					return 0;
+
+				opp->supplies->u_volt = u_volt;
+				opp->supplies->u_volt_min = u_volt_min;
+				opp->supplies->u_volt_max = u_volt_max;
+
+				break;
+			}
 		}
 	}
 
-	if (IS_ERR(opp)) {
-		r = PTR_ERR(opp);
-		goto adjust_unlock;
-	}
-
-	/* Is update really needed? */
-	if (opp->supplies->u_volt == u_volt)
-		goto adjust_unlock;
-
-	opp->supplies->u_volt = u_volt;
-	opp->supplies->u_volt_min = u_volt_min;
-	opp->supplies->u_volt_max = u_volt_max;
-
-	dev_pm_opp_get(opp);
-	mutex_unlock(&opp_table->lock);
+	if (IS_ERR(opp))
+		return PTR_ERR(opp);
 
 	/* Notify the voltage change of the OPP */
 	blocking_notifier_call_chain(&opp_table->head, OPP_EVENT_ADJUST_VOLTAGE,
 				     opp);
 
-	dev_pm_opp_put(opp);
-	goto put_table;
-
-adjust_unlock:
-	mutex_unlock(&opp_table->lock);
-put_table:
-	dev_pm_opp_put_opp_table(opp_table);
-	return r;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_adjust_voltage);
 
@@ -3043,9 +2986,9 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_adjust_voltage);
  */
 int dev_pm_opp_sync_regulators(struct device *dev)
 {
-	struct opp_table *opp_table;
+	struct opp_table *opp_table __free(put_opp_table);
 	struct regulator *reg;
-	int i, ret = 0;
+	int ret, i;
 
 	/* Device may not have OPP table */
 	opp_table = _find_opp_table(dev);
@@ -3054,23 +2997,20 @@ int dev_pm_opp_sync_regulators(struct device *dev)
 
 	/* Regulator may not be required for the device */
 	if (unlikely(!opp_table->regulators))
-		goto put_table;
+		return 0;
 
 	/* Nothing to sync if voltage wasn't changed */
 	if (!opp_table->enabled)
-		goto put_table;
+		return 0;
 
 	for (i = 0; i < opp_table->regulator_count; i++) {
 		reg = opp_table->regulators[i];
 		ret = regulator_sync_voltage(reg);
 		if (ret)
-			break;
+			return ret;
 	}
-put_table:
-	/* Drop reference taken by _find_opp_table() */
-	dev_pm_opp_put_opp_table(opp_table);
 
-	return ret;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_sync_regulators);
 
@@ -3122,18 +3062,13 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_disable);
  */
 int dev_pm_opp_register_notifier(struct device *dev, struct notifier_block *nb)
 {
-	struct opp_table *opp_table;
-	int ret;
+	struct opp_table *opp_table __free(put_opp_table);
 
 	opp_table = _find_opp_table(dev);
 	if (IS_ERR(opp_table))
 		return PTR_ERR(opp_table);
 
-	ret = blocking_notifier_chain_register(&opp_table->head, nb);
-
-	dev_pm_opp_put_opp_table(opp_table);
-
-	return ret;
+	return blocking_notifier_chain_register(&opp_table->head, nb);
 }
 EXPORT_SYMBOL(dev_pm_opp_register_notifier);
 
@@ -3147,18 +3082,13 @@ EXPORT_SYMBOL(dev_pm_opp_register_notifier);
 int dev_pm_opp_unregister_notifier(struct device *dev,
 				   struct notifier_block *nb)
 {
-	struct opp_table *opp_table;
-	int ret;
+	struct opp_table *opp_table __free(put_opp_table);
 
 	opp_table = _find_opp_table(dev);
 	if (IS_ERR(opp_table))
 		return PTR_ERR(opp_table);
 
-	ret = blocking_notifier_chain_unregister(&opp_table->head, nb);
-
-	dev_pm_opp_put_opp_table(opp_table);
-
-	return ret;
+	return blocking_notifier_chain_unregister(&opp_table->head, nb);
 }
 EXPORT_SYMBOL(dev_pm_opp_unregister_notifier);
 
@@ -3171,7 +3101,7 @@ EXPORT_SYMBOL(dev_pm_opp_unregister_notifier);
  */
 void dev_pm_opp_remove_table(struct device *dev)
 {
-	struct opp_table *opp_table;
+	struct opp_table *opp_table __free(put_opp_table);
 
 	/* Check for existing table for 'dev' */
 	opp_table = _find_opp_table(dev);
@@ -3192,8 +3122,5 @@ void dev_pm_opp_remove_table(struct device *dev)
 	 **/
 	if (_opp_remove_all_static(opp_table))
 		dev_pm_opp_put_opp_table(opp_table);
-
-	/* Drop reference taken by _find_opp_table() */
-	dev_pm_opp_put_opp_table(opp_table);
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_remove_table);

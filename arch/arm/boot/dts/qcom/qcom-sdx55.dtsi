@@ -57,7 +57,7 @@
 			enable-method = "psci";
 			clocks = <&apcs>;
 			power-domains = <&rpmhpd SDX55_CX>;
-			power-domain-names = "rpmhpd";
+			power-domain-names = "perf";
 			operating-points-v2 = <&cpu_opp_table>;
 		};
 	};
@@ -340,10 +340,10 @@
 					  "msi8";
 			#interrupt-cells = <1>;
 			interrupt-map-mask = <0 0 0 0x7>;
-			interrupt-map = <0 0 0 1 &intc 0 141 IRQ_TYPE_LEVEL_HIGH>, /* int_a */
-					<0 0 0 2 &intc 0 142 IRQ_TYPE_LEVEL_HIGH>, /* int_b */
-					<0 0 0 3 &intc 0 143 IRQ_TYPE_LEVEL_HIGH>, /* int_c */
-					<0 0 0 4 &intc 0 144 IRQ_TYPE_LEVEL_HIGH>; /* int_d */
+			interrupt-map = <0 0 0 1 &intc GIC_SPI 141 IRQ_TYPE_LEVEL_HIGH>, /* int_a */
+					<0 0 0 2 &intc GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>, /* int_b */
+					<0 0 0 3 &intc GIC_SPI 143 IRQ_TYPE_LEVEL_HIGH>, /* int_c */
+					<0 0 0 4 &intc GIC_SPI 144 IRQ_TYPE_LEVEL_HIGH>; /* int_d */
 
 			clocks = <&gcc GCC_PCIE_PIPE_CLK>,
 				 <&gcc GCC_PCIE_AUX_CLK>,
@@ -427,8 +427,9 @@
 			interrupt-names = "global",
 					  "doorbell";
 
-			interconnects = <&system_noc MASTER_PCIE &mc_virt SLAVE_EBI_CH0>;
-			interconnect-names = "pcie-mem";
+			interconnects = <&system_noc MASTER_PCIE &mc_virt SLAVE_EBI_CH0>,
+					<&mem_noc MASTER_AMPSS_M0 &system_noc SLAVE_PCIE_0>;
+			interconnect-names = "pcie-mem", "cpu-pcie";
 
 			resets = <&gcc GCC_PCIE_BCR>;
 			reset-names = "core";
@@ -437,6 +438,7 @@
 			phy-names = "pciephy";
 			max-link-speed = <3>;
 			num-lanes = <2>;
+			linux,pci-domain = <0>;
 
 			status = "disabled";
 		};
@@ -612,6 +614,8 @@
 				iommus = <&apps_smmu 0x1a0 0x0>;
 				snps,dis_u2_susphy_quirk;
 				snps,dis_enblslpm_quirk;
+				snps,dis-u1-entry-quirk;
+				snps,dis-u2-entry-quirk;
 				phys = <&usb_hsphy>, <&usb_qmpphy>;
 				phy-names = "usb2-phy", "usb3-phy";
 			};
@@ -703,6 +707,7 @@
 			compatible = "qcom,msm-qgic2";
 			interrupt-controller;
 			interrupt-parent = <&intc>;
+			#address-cells = <0>;
 			#interrupt-cells = <3>;
 			reg = <0x17800000 0x1000>,
 			      <0x17802000 0x1000>;

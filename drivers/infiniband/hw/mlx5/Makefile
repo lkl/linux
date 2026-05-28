@@ -8,7 +8,9 @@ mlx5_ib-y := ah.o \
 	     cq.o \
 	     data_direct.o \
 	     dm.o \
+	     dmah.o \
 	     doorbell.o \
+	     fs.o \
 	     gsi.o \
 	     ib_virt.o \
 	     mad.o \
@@ -26,7 +28,6 @@ mlx5_ib-y := ah.o \
 mlx5_ib-$(CONFIG_INFINIBAND_ON_DEMAND_PAGING) += odp.o
 mlx5_ib-$(CONFIG_MLX5_ESWITCH) += ib_rep.o
 mlx5_ib-$(CONFIG_INFINIBAND_USER_ACCESS) += devx.o \
-					    fs.o \
 					    qos.o \
 					    std_types.o
 mlx5_ib-$(CONFIG_MLX5_MACSEC) += macsec.o

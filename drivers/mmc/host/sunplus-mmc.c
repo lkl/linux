@@ -791,7 +791,7 @@ static int spmmc_get_cd(struct mmc_host *mmc)
 {
 	int ret = 0;
 
-	if (mmc_can_gpio_cd(mmc))
+	if (mmc_host_can_gpio_cd(mmc))
 		ret = mmc_gpio_get_cd(mmc);
 
 	if (ret < 0)
@@ -982,7 +982,7 @@ MODULE_DEVICE_TABLE(of, spmmc_of_table);
 
 static struct platform_driver spmmc_driver = {
 	.probe = spmmc_drv_probe,
-	.remove_new = spmmc_drv_remove,
+	.remove = spmmc_drv_remove,
 	.driver = {
 		.name = "spmmc",
 		.pm = pm_ptr(&spmmc_pm_ops),

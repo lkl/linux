@@ -93,6 +93,10 @@ static const char *const blk_queue_flag_name[] = {
 	QUEUE_FLAG_NAME(RQ_ALLOC_TIME),
 	QUEUE_FLAG_NAME(HCTX_ACTIVE),
 	QUEUE_FLAG_NAME(SQ_SCHED),
+	QUEUE_FLAG_NAME(DISABLE_WBT_DEF),
+	QUEUE_FLAG_NAME(NO_ELV_SWITCH),
+	QUEUE_FLAG_NAME(QOS_ENABLED),
+	QUEUE_FLAG_NAME(BIO_ISSUE_TIME),
 };
 #undef QUEUE_FLAG_NAME
 
@@ -172,21 +176,13 @@ static int hctx_state_show(void *data, struct seq_file *m)
 	return 0;
 }
 
-#define BLK_TAG_ALLOC_NAME(name) [BLK_TAG_ALLOC_##name] = #name
-static const char *const alloc_policy_name[] = {
-	BLK_TAG_ALLOC_NAME(FIFO),
-	BLK_TAG_ALLOC_NAME(RR),
-};
-#undef BLK_TAG_ALLOC_NAME
-
 #define HCTX_FLAG_NAME(name) [ilog2(BLK_MQ_F_##name)] = #name
 static const char *const hctx_flag_name[] = {
-	HCTX_FLAG_NAME(SHOULD_MERGE),
 	HCTX_FLAG_NAME(TAG_QUEUE_SHARED),
 	HCTX_FLAG_NAME(STACKING),
 	HCTX_FLAG_NAME(TAG_HCTX_SHARED),
 	HCTX_FLAG_NAME(BLOCKING),
-	HCTX_FLAG_NAME(NO_SCHED),
+	HCTX_FLAG_NAME(TAG_RR),
 	HCTX_FLAG_NAME(NO_SCHED_BY_DEFAULT),
 };
 #undef HCTX_FLAG_NAME
@@ -194,22 +190,11 @@ static const char *const hctx_flag_name[] = {
 static int hctx_flags_show(void *data, struct seq_file *m)
 {
 	struct blk_mq_hw_ctx *hctx = data;
-	const int alloc_policy = BLK_MQ_FLAG_TO_ALLOC_POLICY(hctx->flags);
 
-	BUILD_BUG_ON(ARRAY_SIZE(hctx_flag_name) !=
-			BLK_MQ_F_ALLOC_POLICY_START_BIT);
-	BUILD_BUG_ON(ARRAY_SIZE(alloc_policy_name) != BLK_TAG_ALLOC_MAX);
+	BUILD_BUG_ON(ARRAY_SIZE(hctx_flag_name) != ilog2(BLK_MQ_F_MAX));
 
-	seq_puts(m, "alloc_policy=");
-	if (alloc_policy < ARRAY_SIZE(alloc_policy_name) &&
-	    alloc_policy_name[alloc_policy])
-		seq_puts(m, alloc_policy_name[alloc_policy]);
-	else
-		seq_printf(m, "%d", alloc_policy);
-	seq_puts(m, " ");
-	blk_flags_show(m,
-		       hctx->flags ^ BLK_ALLOC_POLICY_TO_MQ_FLAG(alloc_policy),
-		       hctx_flag_name, ARRAY_SIZE(hctx_flag_name));
+	blk_flags_show(m, hctx->flags, hctx_flag_name,
+			ARRAY_SIZE(hctx_flag_name));
 	seq_puts(m, "\n");
 	return 0;
 }
@@ -366,9 +351,14 @@ static int hctx_busy_show(void *data, struct seq_file *m)
 {
 	struct blk_mq_hw_ctx *hctx = data;
 	struct show_busy_params params = { .m = m, .hctx = hctx };
+	int res;
 
+	res = mutex_lock_interruptible(&hctx->queue->elevator_lock);
+	if (res)
+		return res;
 	blk_mq_tagset_busy_iter(hctx->queue->tag_set, hctx_show_busy_rq,
 				&params);
+	mutex_unlock(&hctx->queue->elevator_lock);
 
 	return 0;
 }
@@ -419,15 +409,14 @@ static int hctx_tags_show(void *data, struct seq_file *m)
 	struct request_queue *q = hctx->queue;
 	int res;
 
-	res = mutex_lock_interruptible(&q->sysfs_lock);
+	res = mutex_lock_interruptible(&q->elevator_lock);
 	if (res)
-		goto out;
+		return res;
 	if (hctx->tags)
 		blk_mq_debugfs_tags_show(m, hctx->tags);
-	mutex_unlock(&q->sysfs_lock);
+	mutex_unlock(&q->elevator_lock);
 
-out:
-	return res;
+	return 0;
 }
 
 static int hctx_tags_bitmap_show(void *data, struct seq_file *m)
@@ -436,15 +425,14 @@ static int hctx_tags_bitmap_show(void *data, struct seq_file *m)
 	struct request_queue *q = hctx->queue;
 	int res;
 
-	res = mutex_lock_interruptible(&q->sysfs_lock);
+	res = mutex_lock_interruptible(&q->elevator_lock);
 	if (res)
-		goto out;
+		return res;
 	if (hctx->tags)
 		sbitmap_bitmap_show(&hctx->tags->bitmap_tags.sb, m);
-	mutex_unlock(&q->sysfs_lock);
+	mutex_unlock(&q->elevator_lock);
 
-out:
-	return res;
+	return 0;
 }
 
 static int hctx_sched_tags_show(void *data, struct seq_file *m)
@@ -453,15 +441,14 @@ static int hctx_sched_tags_show(void *data, struct seq_file *m)
 	struct request_queue *q = hctx->queue;
 	int res;
 
-	res = mutex_lock_interruptible(&q->sysfs_lock);
+	res = mutex_lock_interruptible(&q->elevator_lock);
 	if (res)
-		goto out;
+		return res;
 	if (hctx->sched_tags)
 		blk_mq_debugfs_tags_show(m, hctx->sched_tags);
-	mutex_unlock(&q->sysfs_lock);
+	mutex_unlock(&q->elevator_lock);
 
-out:
-	return res;
+	return 0;
 }
 
 static int hctx_sched_tags_bitmap_show(void *data, struct seq_file *m)
@@ -470,15 +457,14 @@ static int hctx_sched_tags_bitmap_show(void *data, struct seq_file *m)
 	struct request_queue *q = hctx->queue;
 	int res;
 
-	res = mutex_lock_interruptible(&q->sysfs_lock);
+	res = mutex_lock_interruptible(&q->elevator_lock);
 	if (res)
-		goto out;
+		return res;
 	if (hctx->sched_tags)
 		sbitmap_bitmap_show(&hctx->sched_tags->bitmap_tags.sb, m);
-	mutex_unlock(&q->sysfs_lock);
+	mutex_unlock(&q->elevator_lock);
 
-out:
-	return res;
+	return 0;
 }
 
 static int hctx_active_show(void *data, struct seq_file *m)
@@ -537,7 +523,7 @@ CTX_RQ_SEQ_OPS(poll, HCTX_TYPE_POLL);
 static int blk_mq_debugfs_show(struct seq_file *m, void *v)
 {
 	const struct blk_mq_debugfs_attr *attr = m->private;
-	void *data = d_inode(m->file->f_path.dentry->d_parent)->i_private;
+	void *data = debugfs_get_aux(m->file);
 
 	return attr->show(data, m);
 }
@@ -547,7 +533,7 @@ static ssize_t blk_mq_debugfs_write(struct file *file, const char __user *buf,
 {
 	struct seq_file *m = file->private_data;
 	const struct blk_mq_debugfs_attr *attr = m->private;
-	void *data = d_inode(file->f_path.dentry->d_parent)->i_private;
+	void *data = debugfs_get_aux(file);
 
 	/*
 	 * Attributes that only implement .seq_ops are read-only and 'attr' is
@@ -562,7 +548,7 @@ static ssize_t blk_mq_debugfs_write(struct file *file, const char __user *buf,
 static int blk_mq_debugfs_open(struct inode *inode, struct file *file)
 {
 	const struct blk_mq_debugfs_attr *attr = inode->i_private;
-	void *data = d_inode(file->f_path.dentry->d_parent)->i_private;
+	void *data = debugfs_get_aux(file);
 	struct seq_file *m;
 	int ret;
 
@@ -628,11 +614,9 @@ static void debugfs_create_files(struct dentry *parent, void *data,
 	if (IS_ERR_OR_NULL(parent))
 		return;
 
-	d_inode(parent)->i_private = data;
-
 	for (; attr->name; attr++)
-		debugfs_create_file(attr->name, attr->mode, parent,
-				    (void *)attr, &blk_mq_debugfs_fops);
+		debugfs_create_file_aux(attr->name, attr->mode, parent,
+				    (void *)attr, data, &blk_mq_debugfs_fops);
 }
 
 void blk_mq_debugfs_register(struct request_queue *q)
@@ -642,20 +626,9 @@ void blk_mq_debugfs_register(struct request_queue *q)
 
 	debugfs_create_files(q->debugfs_dir, q, blk_mq_debugfs_queue_attrs);
 
-	/*
-	 * blk_mq_init_sched() attempted to do this already, but q->debugfs_dir
-	 * didn't exist yet (because we don't know what to name the directory
-	 * until the queue is registered to a gendisk).
-	 */
-	if (q->elevator && !q->sched_debugfs_dir)
-		blk_mq_debugfs_register_sched(q);
-
-	/* Similarly, blk_mq_init_hctx() couldn't do this previously. */
 	queue_for_each_hw_ctx(q, hctx, i) {
 		if (!hctx->debugfs_dir)
 			blk_mq_debugfs_register_hctx(q, hctx);
-		if (q->elevator && !hctx->sched_debugfs_dir)
-			blk_mq_debugfs_register_sched_hctx(q, hctx);
 	}
 
 	if (q->rq_qos) {

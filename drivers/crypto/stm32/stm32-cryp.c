@@ -666,7 +666,7 @@ static void stm32_cryp_write_ccm_first_header(struct stm32_cryp *cryp)
 
 	written = min_t(size_t, AES_BLOCK_SIZE - len, alen);
 
-	scatterwalk_copychunks((char *)block + len, &cryp->in_walk, written, 0);
+	memcpy_from_scatterwalk((char *)block + len, &cryp->in_walk, written);
 
 	writesl(cryp->regs + cryp->caps->din, block, AES_BLOCK_32);
 
@@ -851,7 +851,6 @@ static void stm32_cryp_finish_req(struct stm32_cryp *cryp, int err)
 	if (!err && (!(is_gcm(cryp) || is_ccm(cryp) || is_ecb(cryp))))
 		stm32_cryp_get_iv(cryp);
 
-	pm_runtime_mark_last_busy(cryp->dev);
 	pm_runtime_put_autosuspend(cryp->dev);
 
 	if (is_gcm(cryp) || is_ccm(cryp))
@@ -993,7 +992,7 @@ static int stm32_cryp_header_dma_start(struct stm32_cryp *cryp)
 
 	/* Advance scatterwalk to not DMA'ed data */
 	align_size = ALIGN_DOWN(cryp->header_in, cryp->hw_blocksize);
-	scatterwalk_copychunks(NULL, &cryp->in_walk, align_size, 2);
+	scatterwalk_skip(&cryp->in_walk, align_size);
 	cryp->header_in -= align_size;
 
 	ret = dma_submit_error(dmaengine_submit(tx_in));
@@ -1056,7 +1055,7 @@ static int stm32_cryp_dma_start(struct stm32_cryp *cryp)
 
 	/* Advance scatterwalk to not DMA'ed data */
 	align_size = ALIGN_DOWN(cryp->payload_in, cryp->hw_blocksize);
-	scatterwalk_copychunks(NULL, &cryp->in_walk, align_size, 2);
+	scatterwalk_skip(&cryp->in_walk, align_size);
 	cryp->payload_in -= align_size;
 
 	ret = dma_submit_error(dmaengine_submit(tx_in));
@@ -1067,7 +1066,7 @@ static int stm32_cryp_dma_start(struct stm32_cryp *cryp)
 	dma_async_issue_pending(cryp->dma_lch_in);
 
 	/* Advance scatterwalk to not DMA'ed data */
-	scatterwalk_copychunks(NULL, &cryp->out_walk, align_size, 2);
+	scatterwalk_skip(&cryp->out_walk, align_size);
 	cryp->payload_out -= align_size;
 	ret = dma_submit_error(dmaengine_submit(tx_out));
 	if (ret < 0) {
@@ -1737,9 +1736,9 @@ static int stm32_cryp_prepare_req(struct skcipher_request *req,
 		out_sg = areq->dst;
 
 		scatterwalk_start(&cryp->in_walk, in_sg);
-		scatterwalk_start(&cryp->out_walk, out_sg);
 		/* In output, jump after assoc data */
-		scatterwalk_copychunks(NULL, &cryp->out_walk, cryp->areq->assoclen, 2);
+		scatterwalk_start_at_pos(&cryp->out_walk, out_sg,
+					 areq->assoclen);
 
 		ret = stm32_cryp_hw_init(cryp);
 		if (ret)
@@ -1873,12 +1872,12 @@ static int stm32_cryp_read_auth_tag(struct stm32_cryp *cryp)
 
 		/* Get and write tag */
 		readsl(cryp->regs + cryp->caps->dout, out_tag, AES_BLOCK_32);
-		scatterwalk_copychunks(out_tag, &cryp->out_walk, cryp->authsize, 1);
+		memcpy_to_scatterwalk(&cryp->out_walk, out_tag, cryp->authsize);
 	} else {
 		/* Get and check tag */
 		u32 in_tag[AES_BLOCK_32], out_tag[AES_BLOCK_32];
 
-		scatterwalk_copychunks(in_tag, &cryp->in_walk, cryp->authsize, 0);
+		memcpy_from_scatterwalk(in_tag, &cryp->in_walk, cryp->authsize);
 		readsl(cryp->regs + cryp->caps->dout, out_tag, AES_BLOCK_32);
 
 		if (crypto_memneq(in_tag, out_tag, cryp->authsize))
@@ -1923,8 +1922,8 @@ static void stm32_cryp_irq_read_data(struct stm32_cryp *cryp)
 	u32 block[AES_BLOCK_32];
 
 	readsl(cryp->regs + cryp->caps->dout, block, cryp->hw_blocksize / sizeof(u32));
-	scatterwalk_copychunks(block, &cryp->out_walk, min_t(size_t, cryp->hw_blocksize,
-							     cryp->payload_out), 1);
+	memcpy_to_scatterwalk(&cryp->out_walk, block, min_t(size_t, cryp->hw_blocksize,
+							    cryp->payload_out));
 	cryp->payload_out -= min_t(size_t, cryp->hw_blocksize,
 				   cryp->payload_out);
 }
@@ -1933,8 +1932,8 @@ static void stm32_cryp_irq_write_block(struct stm32_cryp *cryp)
 {
 	u32 block[AES_BLOCK_32] = {0};
 
-	scatterwalk_copychunks(block, &cryp->in_walk, min_t(size_t, cryp->hw_blocksize,
-							    cryp->payload_in), 0);
+	memcpy_from_scatterwalk(block, &cryp->in_walk, min_t(size_t, cryp->hw_blocksize,
+							     cryp->payload_in));
 	writesl(cryp->regs + cryp->caps->din, block, cryp->hw_blocksize / sizeof(u32));
 	cryp->payload_in -= min_t(size_t, cryp->hw_blocksize, cryp->payload_in);
 }
@@ -1981,8 +1980,8 @@ static void stm32_cryp_irq_write_gcm_padded_data(struct stm32_cryp *cryp)
 	 */
 	readsl(cryp->regs + cryp->caps->dout, block, cryp->hw_blocksize / sizeof(u32));
 
-	scatterwalk_copychunks(block, &cryp->out_walk, min_t(size_t, cryp->hw_blocksize,
-							     cryp->payload_out), 1);
+	memcpy_to_scatterwalk(&cryp->out_walk, block, min_t(size_t, cryp->hw_blocksize,
+							    cryp->payload_out));
 	cryp->payload_out -= min_t(size_t, cryp->hw_blocksize,
 				   cryp->payload_out);
 
@@ -2079,8 +2078,8 @@ static void stm32_cryp_irq_write_ccm_padded_data(struct stm32_cryp *cryp)
 	 */
 	readsl(cryp->regs + cryp->caps->dout, block, cryp->hw_blocksize / sizeof(u32));
 
-	scatterwalk_copychunks(block, &cryp->out_walk, min_t(size_t, cryp->hw_blocksize,
-							     cryp->payload_out), 1);
+	memcpy_to_scatterwalk(&cryp->out_walk, block, min_t(size_t, cryp->hw_blocksize,
+							    cryp->payload_out));
 	cryp->payload_out -= min_t(size_t, cryp->hw_blocksize, cryp->payload_out);
 
 	/* d) Load again CRYP_CSGCMCCMxR */
@@ -2161,7 +2160,7 @@ static void stm32_cryp_irq_write_gcmccm_header(struct stm32_cryp *cryp)
 
 	written = min_t(size_t, AES_BLOCK_SIZE, cryp->header_in);
 
-	scatterwalk_copychunks(block, &cryp->in_walk, written, 0);
+	memcpy_from_scatterwalk(block, &cryp->in_walk, written);
 
 	writesl(cryp->regs + cryp->caps->din, block, AES_BLOCK_32);
 
@@ -2771,7 +2770,7 @@ static const struct dev_pm_ops stm32_cryp_pm_ops = {
 
 static struct platform_driver stm32_cryp_driver = {
 	.probe  = stm32_cryp_probe,
-	.remove_new = stm32_cryp_remove,
+	.remove = stm32_cryp_remove,
 	.driver = {
 		.name           = DRIVER_NAME,
 		.pm		= &stm32_cryp_pm_ops,
@@ -2782,5 +2781,5 @@ static struct platform_driver stm32_cryp_driver = {
 module_platform_driver(stm32_cryp_driver);
 
 MODULE_AUTHOR("Fabien Dessenne <fabien.dessenne@st.com>");
-MODULE_DESCRIPTION("STMicrolectronics STM32 CRYP hardware driver");
+MODULE_DESCRIPTION("STMicroelectronics STM32 CRYP hardware driver");
 MODULE_LICENSE("GPL");

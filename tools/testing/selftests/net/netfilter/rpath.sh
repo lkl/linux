@@ -1,8 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-2.0
 
-# return code to signal skipped test
-ksft_skip=4
+source lib.sh
 
 # search for legacy iptables (it uses the xtables extensions
 if iptables-legacy --version >/dev/null 2>&1; then
@@ -32,17 +31,10 @@ if [ -z "$iptables$ip6tables$nft" ]; then
 	exit $ksft_skip
 fi
 
-sfx=$(mktemp -u "XXXXXXXX")
-ns1="ns1-$sfx"
-ns2="ns2-$sfx"
-trap "ip netns del $ns1; ip netns del $ns2" EXIT
+trap cleanup_all_ns EXIT
 
-# create two netns, disable rp_filter in ns2 and
-# keep IPv6 address when moving into VRF
-ip netns add "$ns1"
-ip netns add "$ns2"
-ip netns exec "$ns2" sysctl -q net.ipv4.conf.all.rp_filter=0
-ip netns exec "$ns2" sysctl -q net.ipv4.conf.default.rp_filter=0
+# create two netns, keep IPv6 address when moving into VRF
+setup_ns ns1 ns2
 ip netns exec "$ns2" sysctl -q net.ipv6.conf.all.keep_addr_on_down=1
 
 # a standard connection between the netns, should not trigger rp filter
@@ -61,9 +53,20 @@ ip -net "$ns2" a a 192.168.42.1/24 dev d0
 ip -net "$ns1" a a fec0:42::2/64 dev v0 nodad
 ip -net "$ns2" a a fec0:42::1/64 dev d0 nodad
 
+# avoid neighbor lookups and enable martian IPv6 pings
+ns2_hwaddr=$(ip -net "$ns2" link show dev v0 | \
+	     sed -n 's, *link/ether \([^ ]*\) .*,\1,p')
+ns1_hwaddr=$(ip -net "$ns1" link show dev v0 | \
+	     sed -n 's, *link/ether \([^ ]*\) .*,\1,p')
+ip -net "$ns1" neigh add fec0:42::1 lladdr "$ns2_hwaddr" nud permanent dev v0
+ip -net "$ns1" neigh add fec0:23::1 lladdr "$ns2_hwaddr" nud permanent dev v0
+ip -net "$ns2" neigh add fec0:42::2 lladdr "$ns1_hwaddr" nud permanent dev d0
+ip -net "$ns2" neigh add fec0:23::2 lladdr "$ns1_hwaddr" nud permanent dev v0
+
 # firewall matches to test
 [ -n "$iptables" ] && {
 	common='-t raw -A PREROUTING -s 192.168.0.0/16'
+	common+=' -p icmp --icmp-type echo-request'
 	if ! ip netns exec "$ns2" "$iptables" $common -m rpfilter;then
 		echo "Cannot add rpfilter rule"
 		exit $ksft_skip
@@ -72,6 +75,7 @@ ip -net "$ns2" a a fec0:42::1/64 dev d0 nodad
 }
 [ -n "$ip6tables" ] && {
 	common='-t raw -A PREROUTING -s fec0::/16'
+	common+=' -p icmpv6 --icmpv6-type echo-request'
 	if ! ip netns exec "$ns2" "$ip6tables" $common -m rpfilter;then
 		echo "Cannot add rpfilter rule"
 		exit $ksft_skip
@@ -82,8 +86,10 @@ ip -net "$ns2" a a fec0:42::1/64 dev d0 nodad
 table inet t {
 	chain c {
 		type filter hook prerouting priority raw;
-		ip saddr 192.168.0.0/16 fib saddr . iif oif exists counter
-		ip6 saddr fec0::/16 fib saddr . iif oif exists counter
+		ip saddr 192.168.0.0/16 icmp type echo-request \
+			fib saddr . iif oif exists counter
+		ip6 saddr fec0::/16 icmpv6 type echo-request \
+			fib saddr . iif oif exists counter
 	}
 }
 EOF

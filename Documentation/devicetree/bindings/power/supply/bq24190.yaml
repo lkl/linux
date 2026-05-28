@@ -19,13 +19,21 @@ properties:
       - ti,bq24190
       - ti,bq24192
       - ti,bq24192i
+      - ti,bq24193
       - ti,bq24196
       - ti,bq24296
+      - ti,bq24297
 
   reg:
     maxItems: 1
 
   interrupts:
+    maxItems: 1
+
+  ce-gpios:
+    description:
+      Active low Charge Enable pin. Battery charging is enabled when
+      REG01[5:4] = 01 and CE pin is Low. CE pin must be pulled high or low.
     maxItems: 1
 
   usb-otg-vbus:
@@ -46,7 +54,6 @@ properties:
       battery device.
 
   monitored-battery:
-    $ref: /schemas/types.yaml#/definitions/phandle
     description: |
       phandle to a "simple-battery" compatible node.
 

@@ -161,8 +161,6 @@ const struct vb2_ops saa7134_vbi_qops = {
 	.buf_init	= buffer_init,
 	.buf_prepare	= buffer_prepare,
 	.buf_queue	= saa7134_vb2_buffer_queue,
-	.wait_prepare	= vb2_ops_wait_prepare,
-	.wait_finish	= vb2_ops_wait_finish,
 	.start_streaming = saa7134_vb2_start_streaming,
 	.stop_streaming = saa7134_vb2_stop_streaming,
 };
@@ -185,7 +183,7 @@ int saa7134_vbi_init1(struct saa7134_dev *dev)
 int saa7134_vbi_fini(struct saa7134_dev *dev)
 {
 	/* nothing */
-	del_timer_sync(&dev->vbi_q.timeout);
+	timer_delete_sync(&dev->vbi_q.timeout);
 	return 0;
 }
 

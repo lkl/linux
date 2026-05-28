@@ -80,7 +80,7 @@ static struct ccu_div r_apb2_clk = {
  * in the BSP source code, although most of them are unused. The existence
  * of the hardware block is verified with "3.1 Memory Mapping" chapter in
  * "Allwinner H6 V200 User Manual V1.1"; and the parent APB buses are verified
- * with "3.3.2.1 System Bus Tree" chapter inthe same document.
+ * with "3.3.2.1 System Bus Tree" chapter in the same document.
  */
 static SUNXI_CCU_GATE(r_apb1_timer_clk,	"r-apb1-timer",	"r-apb1",
 		      0x11c, BIT(0), 0);
@@ -179,7 +179,7 @@ static struct clk_hw_onecell_data sun50i_h616_r_hw_clks = {
 	.num	= CLK_NUMBER,
 };
 
-static struct ccu_reset_map sun50i_h6_r_ccu_resets[] = {
+static const struct ccu_reset_map sun50i_h6_r_ccu_resets[] = {
 	[RST_R_APB1_TIMER]	=  { 0x11c, BIT(16) },
 	[RST_R_APB1_TWD]	=  { 0x12c, BIT(16) },
 	[RST_R_APB1_PWM]	=  { 0x13c, BIT(16) },
@@ -190,7 +190,7 @@ static struct ccu_reset_map sun50i_h6_r_ccu_resets[] = {
 	[RST_R_APB1_W1]		=  { 0x1ec, BIT(16) },
 };
 
-static struct ccu_reset_map sun50i_h616_r_ccu_resets[] = {
+static const struct ccu_reset_map sun50i_h616_r_ccu_resets[] = {
 	[RST_R_APB1_TWD]	=  { 0x12c, BIT(16) },
 	[RST_R_APB2_I2C]	=  { 0x19c, BIT(16) },
 	[RST_R_APB2_RSB]	=  { 0x1bc, BIT(16) },
@@ -256,6 +256,6 @@ static struct platform_driver sun50i_h6_r_ccu_driver = {
 };
 module_platform_driver(sun50i_h6_r_ccu_driver);
 
-MODULE_IMPORT_NS(SUNXI_CCU);
+MODULE_IMPORT_NS("SUNXI_CCU");
 MODULE_DESCRIPTION("Support for the Allwinner H6 and H616 PRCM CCU");
 MODULE_LICENSE("GPL");

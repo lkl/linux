@@ -39,6 +39,7 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
+#include <linux/string.h>
 
 #include <sound/core.h>
 #include <sound/pcm.h>
@@ -345,34 +346,25 @@ static struct snd_amd7930 *amd7930_list;
 /* Idle the AMD7930 chip.  The amd->lock is not held.  */
 static __inline__ void amd7930_idle(struct snd_amd7930 *amd)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&amd->lock, flags);
+	guard(spinlock_irqsave)(&amd->lock);
 	sbus_writeb(AMR_INIT, amd->regs + AMD7930_CR);
 	sbus_writeb(0, amd->regs + AMD7930_DR);
-	spin_unlock_irqrestore(&amd->lock, flags);
 }
 
 /* Enable chip interrupts.  The amd->lock is not held.  */
 static __inline__ void amd7930_enable_ints(struct snd_amd7930 *amd)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&amd->lock, flags);
+	guard(spinlock_irqsave)(&amd->lock);
 	sbus_writeb(AMR_INIT, amd->regs + AMD7930_CR);
 	sbus_writeb(AM_INIT_ACTIVE, amd->regs + AMD7930_DR);
-	spin_unlock_irqrestore(&amd->lock, flags);
 }
 
 /* Disable chip interrupts.  The amd->lock is not held.  */
 static __inline__ void amd7930_disable_ints(struct snd_amd7930 *amd)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&amd->lock, flags);
+	guard(spinlock_irqsave)(&amd->lock);
 	sbus_writeb(AMR_INIT, amd->regs + AMD7930_CR);
 	sbus_writeb(AM_INIT_ACTIVE | AM_INIT_DISABLE_INTS, amd->regs + AMD7930_DR);
-	spin_unlock_irqrestore(&amd->lock, flags);
 }
 
 /* Commit amd7930_map settings to the hardware.
@@ -496,34 +488,33 @@ static irqreturn_t snd_amd7930_interrupt(int irq, void *dev_id)
 	unsigned int elapsed;
 	u8 ir;
 
-	spin_lock(&amd->lock);
+	scoped_guard(spinlock, &amd->lock) {
+		elapsed = 0;
 
-	elapsed = 0;
+		ir = sbus_readb(amd->regs + AMD7930_IR);
+		if (ir & AMR_IR_BBUF) {
+			u8 byte;
 
-	ir = sbus_readb(amd->regs + AMD7930_IR);
-	if (ir & AMR_IR_BBUF) {
-		u8 byte;
-
-		if (amd->flags & AMD7930_FLAG_PLAYBACK) {
-			if (amd->p_left > 0) {
-				byte = *(amd->p_cur++);
-				amd->p_left--;
-				sbus_writeb(byte, amd->regs + AMD7930_BBTB);
-				if (amd->p_left == 0)
-					elapsed |= AMD7930_FLAG_PLAYBACK;
-			} else
-				sbus_writeb(0, amd->regs + AMD7930_BBTB);
-		} else if (amd->flags & AMD7930_FLAG_CAPTURE) {
-			byte = sbus_readb(amd->regs + AMD7930_BBRB);
-			if (amd->c_left > 0) {
-				*(amd->c_cur++) = byte;
-				amd->c_left--;
-				if (amd->c_left == 0)
-					elapsed |= AMD7930_FLAG_CAPTURE;
+			if (amd->flags & AMD7930_FLAG_PLAYBACK) {
+				if (amd->p_left > 0) {
+					byte = *(amd->p_cur++);
+					amd->p_left--;
+					sbus_writeb(byte, amd->regs + AMD7930_BBTB);
+					if (amd->p_left == 0)
+						elapsed |= AMD7930_FLAG_PLAYBACK;
+				} else
+					sbus_writeb(0, amd->regs + AMD7930_BBTB);
+			} else if (amd->flags & AMD7930_FLAG_CAPTURE) {
+				byte = sbus_readb(amd->regs + AMD7930_BBRB);
+				if (amd->c_left > 0) {
+					*(amd->c_cur++) = byte;
+					amd->c_left--;
+					if (amd->c_left == 0)
+						elapsed |= AMD7930_FLAG_CAPTURE;
+				}
 			}
 		}
 	}
-	spin_unlock(&amd->lock);
 
 	if (elapsed & AMD7930_FLAG_PLAYBACK)
 		snd_pcm_period_elapsed(amd->playback_substream);
@@ -535,10 +526,9 @@ static irqreturn_t snd_amd7930_interrupt(int irq, void *dev_id)
 
 static int snd_amd7930_trigger(struct snd_amd7930 *amd, unsigned int flag, int cmd)
 {
-	unsigned long flags;
 	int result = 0;
 
-	spin_lock_irqsave(&amd->lock, flags);
+	guard(spinlock_irqsave)(&amd->lock);
 	if (cmd == SNDRV_PCM_TRIGGER_START) {
 		if (!(amd->flags & flag)) {
 			amd->flags |= flag;
@@ -558,7 +548,6 @@ static int snd_amd7930_trigger(struct snd_amd7930 *amd, unsigned int flag, int c
 	} else {
 		result = -EINVAL;
 	}
-	spin_unlock_irqrestore(&amd->lock, flags);
 
 	return result;
 }
@@ -582,10 +571,9 @@ static int snd_amd7930_playback_prepare(struct snd_pcm_substream *substream)
 	struct snd_amd7930 *amd = snd_pcm_substream_chip(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	unsigned int size = snd_pcm_lib_buffer_bytes(substream);
-	unsigned long flags;
 	u8 new_mmr1;
 
-	spin_lock_irqsave(&amd->lock, flags);
+	guard(spinlock_irqsave)(&amd->lock);
 
 	amd->flags |= AMD7930_FLAG_PLAYBACK;
 
@@ -604,8 +592,6 @@ static int snd_amd7930_playback_prepare(struct snd_pcm_substream *substream)
 		__amd7930_update_map(amd);
 	}
 
-	spin_unlock_irqrestore(&amd->lock, flags);
-
 	return 0;
 }
 
@@ -614,10 +600,9 @@ static int snd_amd7930_capture_prepare(struct snd_pcm_substream *substream)
 	struct snd_amd7930 *amd = snd_pcm_substream_chip(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	unsigned int size = snd_pcm_lib_buffer_bytes(substream);
-	unsigned long flags;
 	u8 new_mmr1;
 
-	spin_lock_irqsave(&amd->lock, flags);
+	guard(spinlock_irqsave)(&amd->lock);
 
 	amd->flags |= AMD7930_FLAG_CAPTURE;
 
@@ -635,8 +620,6 @@ static int snd_amd7930_capture_prepare(struct snd_pcm_substream *substream)
 		amd->map.mmr1 = new_mmr1;
 		__amd7930_update_map(amd);
 	}
-
-	spin_unlock_irqrestore(&amd->lock, flags);
 
 	return 0;
 }
@@ -754,7 +737,7 @@ static int snd_amd7930_pcm(struct snd_amd7930 *amd)
 
 	pcm->private_data = amd;
 	pcm->info_flags = 0;
-	strcpy(pcm->name, amd->card->shortname);
+	strscpy(pcm->name, amd->card->shortname);
 	amd->pcm = pcm;
 
 	snd_pcm_set_managed_buffer_all(pcm, SNDRV_DMA_TYPE_CONTINUOUS,
@@ -804,7 +787,6 @@ static int snd_amd7930_get_volume(struct snd_kcontrol *kctl, struct snd_ctl_elem
 static int snd_amd7930_put_volume(struct snd_kcontrol *kctl, struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_amd7930 *amd = snd_kcontrol_chip(kctl);
-	unsigned long flags;
 	int type = kctl->private_value;
 	int *swval, change;
 
@@ -821,7 +803,7 @@ static int snd_amd7930_put_volume(struct snd_kcontrol *kctl, struct snd_ctl_elem
 		break;
 	}
 
-	spin_lock_irqsave(&amd->lock, flags);
+	guard(spinlock_irqsave)(&amd->lock);
 
 	if (*swval != ucontrol->value.integer.value[0]) {
 		*swval = ucontrol->value.integer.value[0] & 0xff;
@@ -829,8 +811,6 @@ static int snd_amd7930_put_volume(struct snd_kcontrol *kctl, struct snd_ctl_elem
 		change = 1;
 	} else
 		change = 0;
-
-	spin_unlock_irqrestore(&amd->lock, flags);
 
 	return change;
 }
@@ -874,7 +854,7 @@ static int snd_amd7930_mixer(struct snd_amd7930 *amd)
 		return -EINVAL;
 
 	card = amd->card;
-	strcpy(card->mixername, card->shortname);
+	strscpy(card->mixername, card->shortname);
 
 	for (idx = 0; idx < ARRAY_SIZE(amd7930_controls); idx++) {
 		if ((err = snd_ctl_add(card,
@@ -920,7 +900,6 @@ static int snd_amd7930_create(struct snd_card *card,
 			      struct snd_amd7930 **ramd)
 {
 	struct snd_amd7930 *amd;
-	unsigned long flags;
 	int err;
 
 	*ramd = NULL;
@@ -954,25 +933,23 @@ static int snd_amd7930_create(struct snd_card *card,
 
 	amd7930_enable_ints(amd);
 
-	spin_lock_irqsave(&amd->lock, flags);
+	scoped_guard(spinlock_irqsave, &amd->lock) {
+		amd->rgain = 128;
+		amd->pgain = 200;
+		amd->mgain = 0;
 
-	amd->rgain = 128;
-	amd->pgain = 200;
-	amd->mgain = 0;
+		memset(&amd->map, 0, sizeof(amd->map));
+		amd->map.mmr1 = (AM_MAP_MMR1_GX | AM_MAP_MMR1_GER |
+				 AM_MAP_MMR1_GR | AM_MAP_MMR1_STG);
+		amd->map.mmr2 = (AM_MAP_MMR2_LS | AM_MAP_MMR2_AINB);
 
-	memset(&amd->map, 0, sizeof(amd->map));
-	amd->map.mmr1 = (AM_MAP_MMR1_GX | AM_MAP_MMR1_GER |
-			 AM_MAP_MMR1_GR | AM_MAP_MMR1_STG);
-	amd->map.mmr2 = (AM_MAP_MMR2_LS | AM_MAP_MMR2_AINB);
+		__amd7930_update_map(amd);
 
-	__amd7930_update_map(amd);
-
-	/* Always MUX audio (Ba) to channel Bb. */
-	sbus_writeb(AMR_MUX_MCR1, amd->regs + AMD7930_CR);
-	sbus_writeb(AM_MUX_CHANNEL_Ba | (AM_MUX_CHANNEL_Bb << 4),
-		    amd->regs + AMD7930_DR);
-
-	spin_unlock_irqrestore(&amd->lock, flags);
+		/* Always MUX audio (Ba) to channel Bb. */
+		sbus_writeb(AMR_MUX_MCR1, amd->regs + AMD7930_CR);
+		sbus_writeb(AM_MUX_CHANNEL_Ba | (AM_MUX_CHANNEL_Bb << 4),
+			    amd->regs + AMD7930_DR);
+	}
 
 	err = snd_device_new(card, SNDRV_DEV_LOWLEVEL,
 			     amd, &snd_amd7930_dev_ops);
@@ -1007,8 +984,8 @@ static int amd7930_sbus_probe(struct platform_device *op)
 	if (err < 0)
 		return err;
 
-	strcpy(card->driver, "AMD7930");
-	strcpy(card->shortname, "Sun AMD7930");
+	strscpy(card->driver, "AMD7930");
+	strscpy(card->shortname, "Sun AMD7930");
 	sprintf(card->longname, "%s at 0x%02lx:0x%08Lx, irq %d",
 		card->shortname,
 		rp->flags & 0xffL,

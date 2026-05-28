@@ -231,9 +231,11 @@ asmlinkage __visible void smp_callin(void)
 	riscv_ipi_enable();
 
 	numa_add_cpu(curr_cpuid);
-	set_cpu_online(curr_cpuid, true);
 
-	riscv_user_isa_enable();
+	pr_debug("CPU%u: Booted secondary hartid %lu\n", curr_cpuid,
+		cpuid_to_hartid_map(curr_cpuid));
+
+	set_cpu_online(curr_cpuid, true);
 
 	/*
 	 * Remote cache and TLB flushes are ignored while the CPU is offline,

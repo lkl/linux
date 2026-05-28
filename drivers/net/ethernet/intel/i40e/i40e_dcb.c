@@ -750,7 +750,7 @@ static int i40e_get_ieee_dcb_config(struct i40e_hw *hw)
 				     I40E_AQ_LLDP_BRIDGE_TYPE_NEAREST_BRIDGE,
 				     &hw->remote_dcbx_config);
 	/* Don't treat ENOENT as an error for Remote MIBs */
-	if (hw->aq.asq_last_status == I40E_AQ_RC_ENOENT)
+	if (hw->aq.asq_last_status == LIBIE_AQ_RC_ENOENT)
 		ret = 0;
 
 out:
@@ -799,7 +799,7 @@ int i40e_get_dcb_config(struct i40e_hw *hw)
 	}
 
 	/* CEE mode not enabled try querying IEEE data */
-	if (hw->aq.asq_last_status == I40E_AQ_RC_ENOENT)
+	if (hw->aq.asq_last_status == LIBIE_AQ_RC_ENOENT)
 		return i40e_get_ieee_dcb_config(hw);
 
 	if (ret)
@@ -816,7 +816,7 @@ int i40e_get_dcb_config(struct i40e_hw *hw)
 				     I40E_AQ_LLDP_BRIDGE_TYPE_NEAREST_BRIDGE,
 				     &hw->remote_dcbx_config);
 	/* Don't treat ENOENT as an error for Remote MIBs */
-	if (hw->aq.asq_last_status == I40E_AQ_RC_ENOENT)
+	if (hw->aq.asq_last_status == LIBIE_AQ_RC_ENOENT)
 		ret = 0;
 
 out:
@@ -925,11 +925,11 @@ i40e_get_fw_lldp_status(struct i40e_hw *hw,
 
 	if (!ret) {
 		*lldp_status = I40E_GET_FW_LLDP_STATUS_ENABLED;
-	} else if (hw->aq.asq_last_status == I40E_AQ_RC_ENOENT) {
+	} else if (hw->aq.asq_last_status == LIBIE_AQ_RC_ENOENT) {
 		/* MIB is not available yet but the agent is running */
 		*lldp_status = I40E_GET_FW_LLDP_STATUS_ENABLED;
 		ret = 0;
-	} else if (hw->aq.asq_last_status == I40E_AQ_RC_EPERM) {
+	} else if (hw->aq.asq_last_status == LIBIE_AQ_RC_EPERM) {
 		*lldp_status = I40E_GET_FW_LLDP_STATUS_DISABLED;
 		ret = 0;
 	}
@@ -1488,19 +1488,6 @@ void i40e_dcb_hw_set_num_tc(struct i40e_hw *hw, u8 num_tc)
 	reg &= ~I40E_PRTDCB_GENC_NUMTC_MASK;
 	reg |= FIELD_PREP(I40E_PRTDCB_GENC_NUMTC_MASK, num_tc);
 	wr32(hw, I40E_PRTDCB_GENC, reg);
-}
-
-/**
- * i40e_dcb_hw_get_num_tc
- * @hw: pointer to the hw struct
- *
- * Returns number of traffic classes configured in HW
- **/
-u8 i40e_dcb_hw_get_num_tc(struct i40e_hw *hw)
-{
-	u32 reg = rd32(hw, I40E_PRTDCB_GENC);
-
-	return FIELD_GET(I40E_PRTDCB_GENC_NUMTC_MASK, reg);
 }
 
 /**

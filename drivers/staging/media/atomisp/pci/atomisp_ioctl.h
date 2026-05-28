@@ -5,17 +5,6 @@
  * Copyright (c) 2010 Intel Corporation. All Rights Reserved.
  *
  * Copyright (c) 2010 Silicon Hive www.siliconhive.com.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- *
  */
 
 #ifndef	__ATOMISP_IOCTL_H__
@@ -43,9 +32,5 @@ int atomisp_start_streaming(struct vb2_queue *vq, unsigned int count);
 void atomisp_stop_streaming(struct vb2_queue *vq);
 
 extern const struct v4l2_ioctl_ops atomisp_ioctl_ops;
-
-/* compat_ioctl for 32bit userland app and 64bit kernel */
-long atomisp_compat_ioctl32(struct file *file,
-			    unsigned int cmd, unsigned long arg);
 
 #endif /* __ATOMISP_IOCTL_H__ */

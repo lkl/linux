@@ -272,7 +272,8 @@ static void brcmf_btcoex_restore_part1(struct brcmf_btcoex_info *btci)
  */
 static void brcmf_btcoex_timerfunc(struct timer_list *t)
 {
-	struct brcmf_btcoex_info *bt_local = from_timer(bt_local, t, timer);
+	struct brcmf_btcoex_info *bt_local = timer_container_of(bt_local, t,
+								timer);
 	brcmf_dbg(TRACE, "enter\n");
 
 	bt_local->timer_on = false;
@@ -289,7 +290,7 @@ static void brcmf_btcoex_handler(struct work_struct *work)
 	btci = container_of(work, struct brcmf_btcoex_info, work);
 	if (btci->timer_on) {
 		btci->timer_on = false;
-		del_timer_sync(&btci->timer);
+		timer_delete_sync(&btci->timer);
 	}
 
 	switch (btci->bt_state) {
@@ -392,10 +393,8 @@ void brcmf_btcoex_detach(struct brcmf_cfg80211_info *cfg)
 	if (!cfg->btcoex)
 		return;
 
-	if (cfg->btcoex->timer_on) {
-		cfg->btcoex->timer_on = false;
-		timer_shutdown_sync(&cfg->btcoex->timer);
-	}
+	timer_shutdown_sync(&cfg->btcoex->timer);
+	cfg->btcoex->timer_on = false;
 
 	cancel_work_sync(&cfg->btcoex->work);
 
@@ -428,7 +427,7 @@ static void brcmf_btcoex_dhcp_end(struct brcmf_btcoex_info *btci)
 	if (btci->timer_on) {
 		brcmf_dbg(INFO, "disable BT DHCP Timer\n");
 		btci->timer_on = false;
-		del_timer_sync(&btci->timer);
+		timer_delete_sync(&btci->timer);
 
 		/* schedule worker if transition to IDLE is needed */
 		if (btci->bt_state != BRCMF_BT_DHCP_IDLE) {

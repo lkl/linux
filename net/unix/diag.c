@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0-only
-#include <linux/types.h>
-#include <linux/spinlock.h>
-#include <linux/sock_diag.h>
-#include <linux/unix_diag.h>
-#include <linux/skbuff.h>
+
+#include <linux/dcache.h>
 #include <linux/module.h>
-#include <linux/uidgid.h>
-#include <net/netlink.h>
+#include <linux/skbuff.h>
+#include <linux/sock_diag.h>
+#include <linux/types.h>
+#include <linux/user_namespace.h>
 #include <net/af_unix.h>
+#include <net/netlink.h>
 #include <net/tcp_states.h>
-#include <net/sock.h>
+#include <uapi/linux/unix_diag.h>
+
+#include "af_unix.h"
 
 static int sk_diag_dump_name(struct sock *sk, struct sk_buff *nlskb)
 {
@@ -104,7 +106,7 @@ static int sk_diag_show_rqlen(struct sock *sk, struct sk_buff *nlskb)
 static int sk_diag_dump_uid(struct sock *sk, struct sk_buff *nlskb,
 			    struct user_namespace *user_ns)
 {
-	uid_t uid = from_kuid_munged(user_ns, sock_i_uid(sk));
+	uid_t uid = from_kuid_munged(user_ns, sk_uid(sk));
 	return nla_put(nlskb, UNIX_DIAG_UID, sizeof(uid_t), &uid);
 }
 

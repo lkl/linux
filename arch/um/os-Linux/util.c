@@ -20,8 +20,7 @@
 
 void stack_protections(unsigned long address)
 {
-	if (mprotect((void *) address, UM_THREAD_SIZE,
-		    PROT_READ | PROT_WRITE | PROT_EXEC) < 0)
+	if (mprotect((void *) address, UM_THREAD_SIZE, PROT_READ | PROT_WRITE) < 0)
 		panic("protecting stack failed, errno = %d", errno);
 }
 
@@ -52,8 +51,8 @@ void setup_machinename(char *machine_out)
 	struct utsname host;
 
 	uname(&host);
-#ifdef UML_CONFIG_UML_X86
-# ifndef UML_CONFIG_64BIT
+#if IS_ENABLED(CONFIG_UML_X86)
+# if !IS_ENABLED(CONFIG_64BIT)
 	if (!strcmp(host.machine, "x86_64")) {
 		strcpy(machine_out, "i686");
 		return;

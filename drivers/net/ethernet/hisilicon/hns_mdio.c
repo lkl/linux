@@ -636,11 +636,11 @@ MODULE_DEVICE_TABLE(acpi, hns_mdio_acpi_match);
 
 static struct platform_driver hns_mdio_driver = {
 	.probe = hns_mdio_probe,
-	.remove_new = hns_mdio_remove,
+	.remove = hns_mdio_remove,
 	.driver = {
 		   .name = MDIO_DRV_NAME,
 		   .of_match_table = hns_mdio_match,
-		   .acpi_match_table = ACPI_PTR(hns_mdio_acpi_match),
+		   .acpi_match_table = hns_mdio_acpi_match,
 		   },
 };
 

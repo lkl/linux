@@ -28,6 +28,7 @@
 #include <asm/rtas.h>
 #include "pseries.h"
 #include "vas.h"	/* vas_migration_handler() */
+#include "papr-hvpipe.h"	/* hvpipe_migration_handler() */
 #include "../../kernel/cacheinfo.h"
 
 static struct kobject *mobility_kobj;
@@ -53,7 +54,7 @@ struct update_props_workarea {
 static unsigned int nmi_wd_lpm_factor = 200;
 
 #ifdef CONFIG_SYSCTL
-static struct ctl_table nmi_wd_lpm_factor_ctl_table[] = {
+static const struct ctl_table nmi_wd_lpm_factor_ctl_table[] = {
 	{
 		.procname	= "nmi_wd_lpm_factor",
 		.data		= &nmi_wd_lpm_factor,
@@ -744,6 +745,7 @@ static int pseries_migrate_partition(u64 handle)
 	 * by closing VAS windows at the beginning of this function.
 	 */
 	vas_migration_handler(VAS_SUSPEND);
+	hvpipe_migration_handler(HVPIPE_SUSPEND);
 
 	ret = wait_for_vasi_session_suspending(handle);
 	if (ret)
@@ -770,6 +772,7 @@ static int pseries_migrate_partition(u64 handle)
 
 out:
 	vas_migration_handler(VAS_RESUME);
+	hvpipe_migration_handler(HVPIPE_RESUME);
 
 	return ret;
 }

@@ -427,12 +427,24 @@ struct uart_icount {
 typedef u64 __bitwise upf_t;
 typedef unsigned int __bitwise upstat_t;
 
+enum uart_iotype {
+	UPIO_UNKNOWN	= -1,
+	UPIO_PORT	= SERIAL_IO_PORT,	/* 8b I/O port access */
+	UPIO_HUB6	= SERIAL_IO_HUB6,	/* Hub6 ISA card */
+	UPIO_MEM	= SERIAL_IO_MEM,	/* driver-specific */
+	UPIO_MEM32	= SERIAL_IO_MEM32,	/* 32b little endian */
+	UPIO_AU		= SERIAL_IO_AU,		/* Au1x00 and RT288x type IO */
+	UPIO_TSI	= SERIAL_IO_TSI,	/* Tsi108/109 type IO */
+	UPIO_MEM32BE	= SERIAL_IO_MEM32BE,	/* 32b big endian */
+	UPIO_MEM16	= SERIAL_IO_MEM16,	/* 16b little endian */
+};
+
 struct uart_port {
 	spinlock_t		lock;			/* port lock */
 	unsigned long		iobase;			/* in/out[bwl] */
 	unsigned char __iomem	*membase;		/* read/write[bwl] */
-	unsigned int		(*serial_in)(struct uart_port *, int);
-	void			(*serial_out)(struct uart_port *, int, int);
+	u32			(*serial_in)(struct uart_port *, unsigned int offset);
+	void			(*serial_out)(struct uart_port *, unsigned int offset, u32 val);
 	void			(*set_termios)(struct uart_port *,
 				               struct ktermios *new,
 				               const struct ktermios *old);
@@ -469,22 +481,12 @@ struct uart_port {
 	unsigned char		x_char;			/* xon/xoff char */
 	unsigned char		regshift;		/* reg offset shift */
 
-	unsigned char		iotype;			/* io access style */
-
-#define UPIO_UNKNOWN		((unsigned char)~0U)	/* UCHAR_MAX */
-#define UPIO_PORT		(SERIAL_IO_PORT)	/* 8b I/O port access */
-#define UPIO_HUB6		(SERIAL_IO_HUB6)	/* Hub6 ISA card */
-#define UPIO_MEM		(SERIAL_IO_MEM)		/* driver-specific */
-#define UPIO_MEM32		(SERIAL_IO_MEM32)	/* 32b little endian */
-#define UPIO_AU			(SERIAL_IO_AU)		/* Au1x00 and RT288x type IO */
-#define UPIO_TSI		(SERIAL_IO_TSI)		/* Tsi108/109 type IO */
-#define UPIO_MEM32BE		(SERIAL_IO_MEM32BE)	/* 32b big endian */
-#define UPIO_MEM16		(SERIAL_IO_MEM16)	/* 16b little endian */
-
 	unsigned char		quirks;			/* internal quirks */
 
 	/* internal quirks must be updated while holding port mutex */
 #define UPQ_NO_TXEN_TEST	BIT(0)
+
+	enum uart_iotype	iotype;			/* io access style */
 
 	unsigned int		read_status_mask;	/* driver specific */
 	unsigned int		ignore_status_mask;	/* driver specific */
@@ -505,7 +507,11 @@ struct uart_port {
 	 * The remaining bits are serial-core specific and not modifiable by
 	 * userspace.
 	 */
+#ifdef CONFIG_HAS_IOPORT
 #define UPF_FOURPORT		((__force upf_t) ASYNC_FOURPORT       /* 1  */ )
+#else
+#define UPF_FOURPORT		0
+#endif
 #define UPF_SAK			((__force upf_t) ASYNC_SAK            /* 2  */ )
 #define UPF_SPD_HI		((__force upf_t) ASYNC_SPD_HI         /* 4  */ )
 #define UPF_SPD_VHI		((__force upf_t) ASYNC_SPD_VHI        /* 5  */ )
@@ -781,6 +787,19 @@ static inline void uart_port_unlock_irqrestore(struct uart_port *up, unsigned lo
 	__uart_port_nbcon_release(up);
 	spin_unlock_irqrestore(&up->lock, flags);
 }
+
+DEFINE_GUARD(uart_port_lock, struct uart_port *, uart_port_lock(_T), uart_port_unlock(_T));
+DEFINE_GUARD_COND(uart_port_lock, _try, uart_port_trylock(_T));
+
+DEFINE_GUARD(uart_port_lock_irq, struct uart_port *, uart_port_lock_irq(_T),
+	     uart_port_unlock_irq(_T));
+
+DEFINE_LOCK_GUARD_1(uart_port_lock_irqsave, struct uart_port,
+                    uart_port_lock_irqsave(_T->lock, &_T->flags),
+                    uart_port_unlock_irqrestore(_T->lock, _T->flags),
+                    unsigned long flags);
+DEFINE_LOCK_GUARD_1_COND(uart_port_lock_irqsave, _try,
+			 uart_port_trylock_irqsave(_T->lock, &_T->flags));
 
 static inline int serial_port_in(struct uart_port *up, int offset)
 {
@@ -1095,10 +1114,8 @@ static inline bool uart_console_registered(struct uart_port *port)
 	return uart_console(port) && console_is_registered(port->cons);
 }
 
-struct uart_port *uart_get_console(struct uart_port *ports, int nr,
-				   struct console *c);
-int uart_parse_earlycon(char *p, unsigned char *iotype, resource_size_t *addr,
-			char **options);
+int uart_parse_earlycon(char *p, enum uart_iotype *iotype,
+			resource_size_t *addr, char **options);
 void uart_parse_options(const char *options, int *baud, int *parity, int *bits,
 			int *flow);
 int uart_set_options(struct uart_port *port, struct console *co, int baud,

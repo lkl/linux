@@ -17,7 +17,6 @@
 
 struct  rt722_sdca_priv {
 	struct regmap *regmap;
-	struct regmap *mbq_regmap;
 	struct snd_soc_component *component;
 	struct sdw_slave *slave;
 	struct sdw_bus_params params;
@@ -40,6 +39,7 @@ struct  rt722_sdca_priv {
 	/* For DMIC */
 	bool fu1e_dapm_mute;
 	bool fu1e_mixer_mute[4];
+	int hw_vid;
 };
 
 struct rt722_sdca_dmic_kctrl_priv {
@@ -184,6 +184,7 @@ struct rt722_sdca_dmic_kctrl_priv {
 #define RT722_SDCA_ENT_PLATFORM_FU44		0x44
 #define RT722_SDCA_ENT_XU03			0x03
 #define RT722_SDCA_ENT_XU0D			0x0d
+#define RT722_SDCA_ENT0 0x00
 
 /* RT722 SDCA control */
 #define RT722_SDCA_CTL_SAMPLE_FREQ_INDEX		0x10
@@ -198,6 +199,8 @@ struct rt722_sdca_dmic_kctrl_priv {
 #define RT722_SDCA_CTL_REQ_POWER_STATE			0x01
 #define RT722_SDCA_CTL_VENDOR_DEF			0x30
 #define RT722_SDCA_CTL_FU_CH_GAIN			0x0b
+#define RT722_SDCA_CTL_FUNC_STATUS			0x10
+#define RT722_SDCA_CTL_ACTUAL_POWER_STATE		0x10
 
 /* RT722 SDCA channel */
 #define CH_L	0x01
@@ -216,6 +219,9 @@ struct rt722_sdca_dmic_kctrl_priv {
 #define RT722_SDCA_RATE_96000HZ		0x0b
 #define RT722_SDCA_RATE_192000HZ	0x0d
 
+/* Function_Status */
+#define FUNCTION_NEEDS_INITIALIZATION		BIT(5)
+
 enum {
 	RT722_AIF1, /* For headset mic and headphone */
 	RT722_AIF2, /* For speaker */
@@ -228,9 +234,13 @@ enum rt722_sdca_jd_src {
 	RT722_JD1,
 };
 
+enum rt722_sdca_version {
+	RT722_VA,
+	RT722_VB,
+};
+
 int rt722_sdca_io_init(struct device *dev, struct sdw_slave *slave);
-int rt722_sdca_init(struct device *dev, struct regmap *regmap,
-			struct regmap *mbq_regmap, struct sdw_slave *slave);
+int rt722_sdca_init(struct device *dev, struct regmap *regmap, struct sdw_slave *slave);
 int rt722_sdca_index_write(struct rt722_sdca_priv *rt722,
 		unsigned int nid, unsigned int reg, unsigned int value);
 int rt722_sdca_index_read(struct rt722_sdca_priv *rt722,

@@ -33,6 +33,7 @@ properties:
       - mips,mips1004Kc
       - mips,mips24KEc
       - mips,mips24Kc
+      - mips,mips34Kc
       - mips,mips4KEc
       - mips,mips4Kc
       - mips,mips74Kc
@@ -50,6 +51,7 @@ properties:
   device_type: true
 
 allOf:
+  - $ref: /schemas/opp/opp-v1.yaml#
   - if:
       properties:
         compatible:
@@ -68,7 +70,7 @@ required:
   - compatible
   - reg
 
-additionalProperties: false
+unevaluatedProperties: false
 
 examples:
   - |

@@ -59,7 +59,7 @@ static int radeon_bl_update_status(struct backlight_device *bd)
 	 */
 	level = backlight_get_brightness(bd);
 
-	del_timer_sync(&rinfo->lvds_timer);
+	timer_delete_sync(&rinfo->lvds_timer);
 	radeon_engine_idle();
 
 	lvds_gen_cntl = INREG(LVDS_GEN_CNTL);
@@ -179,7 +179,7 @@ void radeonfb_bl_init(struct radeonfb_info *rinfo)
 		217 * FB_BACKLIGHT_MAX / MAX_RADEON_LEVEL);
 
 	bd->props.brightness = bd->props.max_brightness;
-	bd->props.power = FB_BLANK_UNBLANK;
+	bd->props.power = BACKLIGHT_POWER_ON;
 	backlight_update_status(bd);
 
 	printk("radeonfb: Backlight initialized (%s)\n", name);

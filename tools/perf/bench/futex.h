@@ -8,6 +8,7 @@
 #ifndef _FUTEX_H
 #define _FUTEX_H
 
+#include <stdbool.h>
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -25,6 +26,7 @@ struct bench_futex_parameters {
 	unsigned int nfutexes;
 	unsigned int nwakes;
 	unsigned int nrequeue;
+	int nbuckets;
 };
 
 /**
@@ -142,5 +144,8 @@ futex_cmp_requeue_pi(u_int32_t *uaddr, u_int32_t val, u_int32_t *uaddr2,
 	return futex_syscall_nr_requeue(uaddr, FUTEX_CMP_REQUEUE_PI, 1, nr_requeue, uaddr2,
 					val, opflags);
 }
+
+void futex_set_nbuckets_param(struct bench_futex_parameters *params);
+void futex_print_nbuckets(struct bench_futex_parameters *params);
 
 #endif /* _FUTEX_H */

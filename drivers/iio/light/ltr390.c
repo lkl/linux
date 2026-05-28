@@ -18,14 +18,19 @@
  *   - Interrupt support
  */
 
+#include <linux/bitfield.h>
+#include <linux/device.h>
 #include <linux/i2c.h>
+#include <linux/irq.h>
+#include <linux/interrupt.h>
 #include <linux/math.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/pm_runtime.h>
 #include <linux/regmap.h>
-#include <linux/bitfield.h>
 
 #include <linux/iio/iio.h>
+#include <linux/iio/events.h>
 
 #include <linux/unaligned.h>
 
@@ -33,18 +38,36 @@
 #define LTR390_ALS_UVS_MEAS_RATE	0x04
 #define LTR390_ALS_UVS_GAIN		0x05
 #define LTR390_PART_ID			0x06
+#define LTR390_MAIN_STATUS		0x07
+
 #define LTR390_ALS_DATA			0x0D
+#define LTR390_ALS_DATA_BYTE(n)		(LTR390_ALS_DATA + (n))
+
 #define LTR390_UVS_DATA			0x10
+#define LTR390_UVS_DATA_BYTE(n)		(LTR390_UVS_DATA + (n))
+
 #define LTR390_INT_CFG			0x19
+#define LTR390_INT_PST			0x1A
+
+#define LTR390_THRESH_UP		0x21
+#define LTR390_THRESH_UP_BYTE(n)	(LTR390_THRESH_UP + (n))
+
+#define LTR390_THRESH_LOW		0x24
+#define LTR390_THRESH_LOW_BYTE(n)	(LTR390_THRESH_LOW + (n))
 
 #define LTR390_PART_NUMBER_ID		0xb
-#define LTR390_ALS_UVS_GAIN_MASK	0x07
-#define LTR390_ALS_UVS_INT_TIME_MASK	0x70
+#define LTR390_ALS_UVS_GAIN_MASK	GENMASK(2, 0)
+#define LTR390_ALS_UVS_MEAS_RATE_MASK	GENMASK(2, 0)
+#define LTR390_ALS_UVS_INT_TIME_MASK	GENMASK(6, 4)
 #define LTR390_ALS_UVS_INT_TIME(x)	FIELD_PREP(LTR390_ALS_UVS_INT_TIME_MASK, (x))
+#define LTR390_INT_PST_MASK		GENMASK(7, 4)
+#define LTR390_INT_PST_VAL(x)		FIELD_PREP(LTR390_INT_PST_MASK, (x))
 
 #define LTR390_SW_RESET	      BIT(4)
 #define LTR390_UVS_MODE	      BIT(3)
 #define LTR390_SENSOR_ENABLE  BIT(1)
+#define LTR390_LS_INT_EN      BIT(2)
+#define LTR390_LS_INT_SEL_UVS BIT(5)
 
 #define LTR390_FRACTIONAL_PRECISION 100
 
@@ -70,6 +93,11 @@ enum ltr390_mode {
 	LTR390_SET_UVS_MODE,
 };
 
+enum ltr390_meas_rate {
+	LTR390_GET_FREQ,
+	LTR390_GET_PERIOD,
+};
+
 struct ltr390_data {
 	struct regmap *regmap;
 	struct i2c_client *client;
@@ -78,6 +106,32 @@ struct ltr390_data {
 	enum ltr390_mode mode;
 	int gain;
 	int int_time_us;
+	bool irq_enabled;
+};
+
+static const struct regmap_range ltr390_readable_reg_ranges[] = {
+	regmap_reg_range(LTR390_MAIN_CTRL, LTR390_MAIN_CTRL),
+	regmap_reg_range(LTR390_ALS_UVS_MEAS_RATE, LTR390_MAIN_STATUS),
+	regmap_reg_range(LTR390_ALS_DATA_BYTE(0), LTR390_UVS_DATA_BYTE(2)),
+	regmap_reg_range(LTR390_INT_CFG, LTR390_INT_PST),
+	regmap_reg_range(LTR390_THRESH_UP_BYTE(0), LTR390_THRESH_LOW_BYTE(2)),
+};
+
+static const struct regmap_access_table ltr390_readable_reg_table = {
+	.yes_ranges = ltr390_readable_reg_ranges,
+	.n_yes_ranges = ARRAY_SIZE(ltr390_readable_reg_ranges),
+};
+
+static const struct regmap_range ltr390_writeable_reg_ranges[] = {
+	regmap_reg_range(LTR390_MAIN_CTRL, LTR390_MAIN_CTRL),
+	regmap_reg_range(LTR390_ALS_UVS_MEAS_RATE, LTR390_ALS_UVS_GAIN),
+	regmap_reg_range(LTR390_INT_CFG, LTR390_INT_PST),
+	regmap_reg_range(LTR390_THRESH_UP_BYTE(0), LTR390_THRESH_LOW_BYTE(2)),
+};
+
+static const struct regmap_access_table ltr390_writeable_reg_table = {
+	.yes_ranges = ltr390_writeable_reg_ranges,
+	.n_yes_ranges = ARRAY_SIZE(ltr390_writeable_reg_ranges),
 };
 
 static const struct regmap_config ltr390_regmap_config = {
@@ -85,6 +139,21 @@ static const struct regmap_config ltr390_regmap_config = {
 	.reg_bits = 8,
 	.reg_stride = 1,
 	.val_bits = 8,
+	.max_register = LTR390_THRESH_LOW_BYTE(2),
+	.rd_table = &ltr390_readable_reg_table,
+	.wr_table = &ltr390_writeable_reg_table,
+};
+
+/* Sampling frequency is in mili Hz and mili Seconds */
+static const int ltr390_samp_freq_table[][2] = {
+		[0] = { 40000, 25 },
+		[1] = { 20000, 50 },
+		[2] = { 10000, 100 },
+		[3] = { 5000, 200 },
+		[4] = { 2000, 500 },
+		[5] = { 1000, 1000 },
+		[6] = { 500, 2000 },
+		[7] = { 500, 2000 },
 };
 
 static int ltr390_register_read(struct ltr390_data *data, u8 register_address)
@@ -135,9 +204,23 @@ static int ltr390_counts_per_uvi(struct ltr390_data *data)
 	return DIV_ROUND_CLOSEST(23 * data->gain * data->int_time_us, 10 * orig_gain * orig_int_time);
 }
 
-static int ltr390_read_raw(struct iio_dev *iio_device,
-			   struct iio_chan_spec const *chan, int *val,
-			   int *val2, long mask)
+static int ltr390_get_samp_freq_or_period(struct ltr390_data *data,
+					enum ltr390_meas_rate option)
+{
+	int ret, value;
+
+	ret = regmap_read(data->regmap, LTR390_ALS_UVS_MEAS_RATE, &value);
+	if (ret < 0)
+		return ret;
+	value = FIELD_GET(LTR390_ALS_UVS_MEAS_RATE_MASK, value);
+
+	return ltr390_samp_freq_table[value][option];
+}
+
+
+static int ltr390_do_read_raw(struct iio_dev *iio_device,
+			      struct iio_chan_spec const *chan, int *val,
+			      int *val2, long mask)
 {
 	int ret;
 	struct ltr390_data *data = iio_priv(iio_device);
@@ -191,14 +274,57 @@ static int ltr390_read_raw(struct iio_dev *iio_device,
 		*val = data->int_time_us;
 		return IIO_VAL_INT;
 
+	case IIO_CHAN_INFO_SAMP_FREQ:
+		*val = ltr390_get_samp_freq_or_period(data, LTR390_GET_FREQ);
+		return IIO_VAL_INT;
+
 	default:
 		return -EINVAL;
 	}
 }
 
+static int ltr390_read_raw(struct iio_dev *iio_device,
+			   struct iio_chan_spec const *chan,
+			   int *val, int *val2, long mask)
+{
+	int ret;
+	struct ltr390_data *data = iio_priv(iio_device);
+	struct device *dev = &data->client->dev;
+
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret < 0) {
+		dev_err(dev, "runtime PM failed to resume: %d\n", ret);
+		return ret;
+	}
+
+	ret = ltr390_do_read_raw(iio_device, chan, val, val2, mask);
+
+	pm_runtime_put_autosuspend(dev);
+
+	return ret;
+}
+
 /* integration time in us */
 static const int ltr390_int_time_map_us[] = { 400000, 200000, 100000, 50000, 25000, 12500 };
 static const int ltr390_gain_map[] = { 1, 3, 6, 9, 18 };
+static const int ltr390_freq_map[] = { 40000, 20000, 10000, 5000, 2000, 1000, 500, 500 };
+
+static const struct iio_event_spec ltr390_event_spec[] = {
+	{
+		.type = IIO_EV_TYPE_THRESH,
+		.dir = IIO_EV_DIR_RISING,
+		.mask_separate = BIT(IIO_EV_INFO_VALUE),
+	}, {
+		.type = IIO_EV_TYPE_THRESH,
+		.dir = IIO_EV_DIR_FALLING,
+		.mask_separate = BIT(IIO_EV_INFO_VALUE),
+	}, {
+		.type = IIO_EV_TYPE_THRESH,
+		.dir = IIO_EV_DIR_EITHER,
+		.mask_separate = BIT(IIO_EV_INFO_ENABLE) |
+				BIT(IIO_EV_INFO_PERIOD),
+	}
+};
 
 static const struct iio_chan_spec ltr390_channels[] = {
 	/* UV sensor */
@@ -206,16 +332,24 @@ static const struct iio_chan_spec ltr390_channels[] = {
 		.type = IIO_UVINDEX,
 		.scan_index = 0,
 		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) | BIT(IIO_CHAN_INFO_SCALE),
-		.info_mask_shared_by_all = BIT(IIO_CHAN_INFO_INT_TIME),
-		.info_mask_shared_by_all_available = BIT(IIO_CHAN_INFO_INT_TIME) | BIT(IIO_CHAN_INFO_SCALE)
+		.info_mask_shared_by_all = BIT(IIO_CHAN_INFO_INT_TIME) | BIT(IIO_CHAN_INFO_SAMP_FREQ),
+		.info_mask_shared_by_all_available = BIT(IIO_CHAN_INFO_INT_TIME) |
+							BIT(IIO_CHAN_INFO_SCALE) |
+							BIT(IIO_CHAN_INFO_SAMP_FREQ),
+		.event_spec = ltr390_event_spec,
+		.num_event_specs = ARRAY_SIZE(ltr390_event_spec),
 	},
 	/* ALS sensor */
 	{
 		.type = IIO_LIGHT,
 		.scan_index = 1,
 		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) | BIT(IIO_CHAN_INFO_SCALE),
-		.info_mask_shared_by_all = BIT(IIO_CHAN_INFO_INT_TIME),
-		.info_mask_shared_by_all_available = BIT(IIO_CHAN_INFO_INT_TIME) | BIT(IIO_CHAN_INFO_SCALE)
+		.info_mask_shared_by_all = BIT(IIO_CHAN_INFO_INT_TIME) | BIT(IIO_CHAN_INFO_SAMP_FREQ),
+		.info_mask_shared_by_all_available = BIT(IIO_CHAN_INFO_INT_TIME) |
+							BIT(IIO_CHAN_INFO_SCALE) |
+							BIT(IIO_CHAN_INFO_SAMP_FREQ),
+		.event_spec = ltr390_event_spec,
+		.num_event_specs = ARRAY_SIZE(ltr390_event_spec),
 	},
 };
 
@@ -264,6 +398,23 @@ static int ltr390_set_int_time(struct ltr390_data *data, int val)
 	return -EINVAL;
 }
 
+static int ltr390_set_samp_freq(struct ltr390_data *data, int val)
+{
+	int idx;
+
+	for (idx = 0; idx < ARRAY_SIZE(ltr390_samp_freq_table); idx++) {
+		if (ltr390_samp_freq_table[idx][0] != val)
+			continue;
+
+		guard(mutex)(&data->lock);
+		return regmap_update_bits(data->regmap,
+					LTR390_ALS_UVS_MEAS_RATE,
+					LTR390_ALS_UVS_MEAS_RATE_MASK, idx);
+	}
+
+	return -EINVAL;
+}
+
 static int ltr390_read_avail(struct iio_dev *indio_dev, struct iio_chan_spec const *chan,
 				const int **vals, int *type, int *length, long mask)
 {
@@ -277,6 +428,11 @@ static int ltr390_read_avail(struct iio_dev *indio_dev, struct iio_chan_spec con
 		*length = ARRAY_SIZE(ltr390_int_time_map_us);
 		*type = IIO_VAL_INT;
 		*vals = ltr390_int_time_map_us;
+		return IIO_AVAIL_LIST;
+	case IIO_CHAN_INFO_SAMP_FREQ:
+		*length = ARRAY_SIZE(ltr390_freq_map);
+		*type = IIO_VAL_INT;
+		*vals = ltr390_freq_map;
 		return IIO_AVAIL_LIST;
 	default:
 		return -EINVAL;
@@ -301,16 +457,319 @@ static int ltr390_write_raw(struct iio_dev *indio_dev, struct iio_chan_spec cons
 
 		return ltr390_set_int_time(data, val);
 
+	case IIO_CHAN_INFO_SAMP_FREQ:
+		if (val2 != 0)
+			return -EINVAL;
+
+		return ltr390_set_samp_freq(data, val);
+
 	default:
 		return -EINVAL;
 	}
+}
+
+static int ltr390_read_intr_prst(struct ltr390_data *data, int *val)
+{
+	int ret, prst, samp_period;
+
+	samp_period = ltr390_get_samp_freq_or_period(data, LTR390_GET_PERIOD);
+	ret = regmap_read(data->regmap, LTR390_INT_PST, &prst);
+	if (ret < 0)
+		return ret;
+	*val = prst * samp_period;
+
+	return IIO_VAL_INT;
+}
+
+static int ltr390_write_intr_prst(struct ltr390_data *data, int val)
+{
+	int ret, samp_period, new_val;
+
+	samp_period = ltr390_get_samp_freq_or_period(data, LTR390_GET_PERIOD);
+
+	/* persist period should be greater than or equal to samp period */
+	if (val < samp_period)
+		return -EINVAL;
+
+	new_val = DIV_ROUND_UP(val, samp_period);
+	if (new_val < 0 || new_val > 0x0f)
+		return -EINVAL;
+
+	guard(mutex)(&data->lock);
+	ret = regmap_update_bits(data->regmap,
+				LTR390_INT_PST,
+				LTR390_INT_PST_MASK,
+				LTR390_INT_PST_VAL(new_val));
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int ltr390_read_threshold(struct iio_dev *indio_dev,
+				enum iio_event_direction dir,
+				int *val, int *val2)
+{
+	struct ltr390_data *data = iio_priv(indio_dev);
+	int ret;
+
+	switch (dir) {
+	case IIO_EV_DIR_RISING:
+		ret = ltr390_register_read(data, LTR390_THRESH_UP);
+		if (ret < 0)
+			return ret;
+		*val = ret;
+		return IIO_VAL_INT;
+
+	case IIO_EV_DIR_FALLING:
+		ret = ltr390_register_read(data, LTR390_THRESH_LOW);
+		if (ret < 0)
+			return ret;
+		*val = ret;
+		return IIO_VAL_INT;
+	default:
+		return -EINVAL;
+	}
+}
+
+static int ltr390_write_threshold(struct iio_dev *indio_dev,
+				enum iio_event_direction dir,
+				int val, int val2)
+{
+	struct ltr390_data *data = iio_priv(indio_dev);
+
+	guard(mutex)(&data->lock);
+	switch (dir) {
+	case IIO_EV_DIR_RISING:
+		return regmap_bulk_write(data->regmap, LTR390_THRESH_UP, &val, 3);
+
+	case IIO_EV_DIR_FALLING:
+		return regmap_bulk_write(data->regmap, LTR390_THRESH_LOW, &val, 3);
+
+	default:
+		return -EINVAL;
+	}
+}
+
+static int ltr390_read_event_value(struct iio_dev *indio_dev,
+				const struct iio_chan_spec *chan,
+				enum iio_event_type type,
+				enum iio_event_direction dir,
+				enum iio_event_info info,
+				int *val, int *val2)
+{
+	switch (info) {
+	case IIO_EV_INFO_VALUE:
+		return ltr390_read_threshold(indio_dev, dir, val, val2);
+
+	case IIO_EV_INFO_PERIOD:
+		return ltr390_read_intr_prst(iio_priv(indio_dev), val);
+
+	default:
+		return -EINVAL;
+	}
+}
+
+static int ltr390_write_event_value(struct iio_dev *indio_dev,
+				const struct iio_chan_spec *chan,
+				enum iio_event_type type,
+				enum iio_event_direction dir,
+				enum iio_event_info info,
+				int val, int val2)
+{
+	switch (info) {
+	case IIO_EV_INFO_VALUE:
+		if (val2 != 0)
+			return -EINVAL;
+
+		return ltr390_write_threshold(indio_dev, dir, val, val2);
+
+	case IIO_EV_INFO_PERIOD:
+		if (val2 != 0)
+			return -EINVAL;
+
+		return ltr390_write_intr_prst(iio_priv(indio_dev), val);
+
+	default:
+		return -EINVAL;
+	}
+}
+
+static int ltr390_read_event_config(struct iio_dev *indio_dev,
+				const struct iio_chan_spec *chan,
+				enum iio_event_type type,
+				enum iio_event_direction dir)
+{
+	struct ltr390_data *data = iio_priv(indio_dev);
+	int ret, status;
+
+	ret = regmap_read(data->regmap, LTR390_INT_CFG, &status);
+	if (ret < 0)
+		return ret;
+
+	return FIELD_GET(LTR390_LS_INT_EN, status);
+}
+
+static int ltr390_do_event_config(struct iio_dev *indio_dev,
+				  const struct iio_chan_spec *chan,
+				  enum iio_event_type type,
+				  enum iio_event_direction dir,
+				  bool state)
+{
+	struct ltr390_data *data = iio_priv(indio_dev);
+	int ret;
+
+	if (!state)
+		return regmap_clear_bits(data->regmap, LTR390_INT_CFG, LTR390_LS_INT_EN);
+
+	ret = regmap_set_bits(data->regmap, LTR390_INT_CFG, LTR390_LS_INT_EN);
+	if (ret < 0)
+		return ret;
+
+	switch (chan->type) {
+	case IIO_LIGHT:
+		ret = ltr390_set_mode(data, LTR390_SET_ALS_MODE);
+		if (ret < 0)
+			return ret;
+
+		return regmap_clear_bits(data->regmap, LTR390_INT_CFG, LTR390_LS_INT_SEL_UVS);
+
+	case IIO_UVINDEX:
+		ret = ltr390_set_mode(data, LTR390_SET_UVS_MODE);
+		if (ret < 0)
+			return ret;
+
+		return regmap_set_bits(data->regmap, LTR390_INT_CFG, LTR390_LS_INT_SEL_UVS);
+
+	default:
+		return -EINVAL;
+	}
+}
+
+static int ltr390_write_event_config(struct iio_dev *indio_dev,
+				     const struct iio_chan_spec *chan,
+				     enum iio_event_type type,
+				     enum iio_event_direction dir,
+				     bool state)
+{
+	int ret;
+	struct ltr390_data *data = iio_priv(indio_dev);
+	struct device *dev = &data->client->dev;
+
+	guard(mutex)(&data->lock);
+
+	if (state && !data->irq_enabled) {
+		ret = pm_runtime_resume_and_get(dev);
+		if (ret < 0) {
+			dev_err(dev, "runtime PM failed to resume: %d\n", ret);
+			return ret;
+		}
+		data->irq_enabled = true;
+	}
+
+	ret = ltr390_do_event_config(indio_dev, chan, type, dir, state);
+
+	if (!state && data->irq_enabled) {
+		data->irq_enabled = false;
+		pm_runtime_put_autosuspend(dev);
+	}
+
+	return ret;
+}
+
+static int ltr390_debugfs_reg_access(struct iio_dev *indio_dev,
+						unsigned int reg, unsigned int writeval,
+						unsigned int *readval)
+{
+	struct ltr390_data *data = iio_priv(indio_dev);
+
+	guard(mutex)(&data->lock);
+
+	if (readval)
+		return regmap_read(data->regmap, reg, readval);
+
+	return regmap_write(data->regmap, reg, writeval);
 }
 
 static const struct iio_info ltr390_info = {
 	.read_raw = ltr390_read_raw,
 	.write_raw = ltr390_write_raw,
 	.read_avail = ltr390_read_avail,
+	.read_event_value = ltr390_read_event_value,
+	.read_event_config = ltr390_read_event_config,
+	.write_event_value = ltr390_write_event_value,
+	.write_event_config = ltr390_write_event_config,
+	.debugfs_reg_access = ltr390_debugfs_reg_access,
 };
+
+static irqreturn_t ltr390_interrupt_handler(int irq, void *private)
+{
+	struct iio_dev *indio_dev = private;
+	struct ltr390_data *data = iio_priv(indio_dev);
+	int ret, status;
+
+	/* Reading the status register to clear the interrupt flag, Datasheet pg: 17*/
+	ret = regmap_read(data->regmap, LTR390_MAIN_STATUS, &status);
+	if (ret < 0)
+		return ret;
+
+	switch (data->mode) {
+	case LTR390_SET_ALS_MODE:
+		iio_push_event(indio_dev,
+				IIO_UNMOD_EVENT_CODE(IIO_LIGHT, 0,
+				IIO_EV_TYPE_THRESH,
+				IIO_EV_DIR_EITHER),
+				iio_get_time_ns(indio_dev));
+		break;
+
+	case LTR390_SET_UVS_MODE:
+		iio_push_event(indio_dev,
+				IIO_UNMOD_EVENT_CODE(IIO_UVINDEX, 0,
+				IIO_EV_TYPE_THRESH,
+				IIO_EV_DIR_EITHER),
+				iio_get_time_ns(indio_dev));
+		break;
+	}
+
+	return IRQ_HANDLED;
+}
+
+static void ltr390_powerdown(void *priv)
+{
+	struct ltr390_data *data = priv;
+	struct device *dev = &data->client->dev;
+	int ret;
+
+	guard(mutex)(&data->lock);
+
+	/* Ensure that power off and interrupts are disabled */
+	if (data->irq_enabled) {
+		ret = regmap_clear_bits(data->regmap, LTR390_INT_CFG, LTR390_LS_INT_EN);
+		if (ret < 0)
+			dev_err(dev, "failed to disable interrupts\n");
+
+		data->irq_enabled = false;
+		pm_runtime_put_autosuspend(dev);
+	}
+
+	ret = regmap_clear_bits(data->regmap, LTR390_MAIN_CTRL, LTR390_SENSOR_ENABLE);
+	if (ret < 0)
+		dev_err(dev, "failed to disable sensor\n");
+}
+
+static int ltr390_pm_init(struct ltr390_data *data)
+{
+	int ret;
+	struct device *dev = &data->client->dev;
+
+	ret = devm_pm_runtime_set_active_enabled(dev);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to enable runtime PM\n");
+
+	pm_runtime_set_autosuspend_delay(dev, 1000);
+	pm_runtime_use_autosuspend(dev);
+	return 0;
+}
 
 static int ltr390_probe(struct i2c_client *client)
 {
@@ -324,8 +783,9 @@ static int ltr390_probe(struct i2c_client *client)
 	if (!indio_dev)
 		return -ENOMEM;
 
-	data = iio_priv(indio_dev);
+	i2c_set_clientdata(client, indio_dev);
 
+	data = iio_priv(indio_dev);
 	data->regmap = devm_regmap_init_i2c(client, &ltr390_regmap_config);
 	if (IS_ERR(data->regmap))
 		return dev_err_probe(dev, PTR_ERR(data->regmap),
@@ -338,6 +798,8 @@ static int ltr390_probe(struct i2c_client *client)
 	data->gain = 3;
 	/* default mode for ltr390 is ALS mode */
 	data->mode = LTR390_SET_ALS_MODE;
+	/* default value of irq_enabled is false */
+	data->irq_enabled = false;
 
 	mutex_init(&data->lock);
 
@@ -365,18 +827,76 @@ static int ltr390_probe(struct i2c_client *client)
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to enable the sensor\n");
 
+	ret = devm_add_action_or_reset(dev, ltr390_powerdown, data);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to add action or reset\n");
+
+	if (client->irq) {
+		ret = devm_request_threaded_irq(dev, client->irq,
+						NULL, ltr390_interrupt_handler,
+						IRQF_ONESHOT,
+						"ltr390_thresh_event",
+						indio_dev);
+		if (ret)
+			return dev_err_probe(dev, ret,
+					     "request irq (%d) failed\n", client->irq);
+	}
+
+	ret = ltr390_pm_init(data);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to initialize runtime PM\n");
+
 	return devm_iio_device_register(dev, indio_dev);
 }
 
+static int ltr390_suspend(struct device *dev)
+{
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+	struct ltr390_data *data = iio_priv(indio_dev);
+
+	return regmap_clear_bits(data->regmap, LTR390_MAIN_CTRL,
+				LTR390_SENSOR_ENABLE);
+}
+
+static int ltr390_resume(struct device *dev)
+{
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+	struct ltr390_data *data = iio_priv(indio_dev);
+
+	return regmap_set_bits(data->regmap, LTR390_MAIN_CTRL,
+				LTR390_SENSOR_ENABLE);
+}
+
+static int ltr390_runtime_suspend(struct device *dev)
+{
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+	struct ltr390_data *data = iio_priv(indio_dev);
+
+	return regmap_clear_bits(data->regmap, LTR390_MAIN_CTRL, LTR390_SENSOR_ENABLE);
+}
+
+static int ltr390_runtime_resume(struct device *dev)
+{
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+	struct ltr390_data *data = iio_priv(indio_dev);
+
+	return regmap_set_bits(data->regmap, LTR390_MAIN_CTRL, LTR390_SENSOR_ENABLE);
+}
+
+static const struct dev_pm_ops ltr390_pm_ops = {
+	SYSTEM_SLEEP_PM_OPS(ltr390_suspend, ltr390_resume)
+	RUNTIME_PM_OPS(ltr390_runtime_suspend, ltr390_runtime_resume, NULL)
+};
+
 static const struct i2c_device_id ltr390_id[] = {
 	{ "ltr390" },
-	{ /* Sentinel */ }
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ltr390_id);
 
 static const struct of_device_id ltr390_of_table[] = {
 	{ .compatible = "liteon,ltr390" },
-	{ /* Sentinel */ }
+	{ }
 };
 MODULE_DEVICE_TABLE(of, ltr390_of_table);
 
@@ -384,6 +904,7 @@ static struct i2c_driver ltr390_driver = {
 	.driver = {
 		.name = "ltr390",
 		.of_match_table = ltr390_of_table,
+		.pm = pm_ptr(&ltr390_pm_ops),
 	},
 	.probe = ltr390_probe,
 	.id_table = ltr390_id,

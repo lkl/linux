@@ -370,7 +370,6 @@ static int mpu3050_read_raw(struct iio_dev *indio_dev,
 
 out_read_raw_unlock:
 	mutex_unlock(&mpu3050->lock);
-	pm_runtime_mark_last_busy(mpu3050->dev);
 	pm_runtime_put_autosuspend(mpu3050->dev);
 
 	return ret;
@@ -474,7 +473,7 @@ static irqreturn_t mpu3050_trigger_handler(int irq, void *p)
 	int ret;
 	struct {
 		__be16 chans[4];
-		s64 timestamp __aligned(8);
+		aligned_s64 timestamp;
 	} scan;
 	s64 timestamp;
 	unsigned int datums_from_fifo = 0;
@@ -662,7 +661,6 @@ static int mpu3050_buffer_postdisable(struct iio_dev *indio_dev)
 {
 	struct mpu3050 *mpu3050 = iio_priv(indio_dev);
 
-	pm_runtime_mark_last_busy(mpu3050->dev);
 	pm_runtime_put_autosuspend(mpu3050->dev);
 
 	return 0;
@@ -684,7 +682,7 @@ mpu3050_get_mount_matrix(const struct iio_dev *indio_dev,
 
 static const struct iio_chan_spec_ext_info mpu3050_ext_info[] = {
 	IIO_MOUNT_MATRIX(IIO_SHARED_BY_TYPE, mpu3050_get_mount_matrix),
-	{ },
+	{ }
 };
 
 #define MPU3050_AXIS_CHANNEL(axis, index)				\
@@ -976,7 +974,6 @@ static int mpu3050_drdy_trigger_set_state(struct iio_trigger *trig,
 		if (ret)
 			dev_err(mpu3050->dev, "error resetting FIFO\n");
 
-		pm_runtime_mark_last_busy(mpu3050->dev);
 		pm_runtime_put_autosuspend(mpu3050->dev);
 		mpu3050->hw_irq_trigger = false;
 
@@ -1059,12 +1056,12 @@ static int mpu3050_trigger_probe(struct iio_dev *indio_dev, int irq)
 	/* Check if IRQ is open drain */
 	mpu3050->irq_opendrain = device_property_read_bool(dev, "drive-open-drain");
 
-	irq_trig = irqd_get_trigger_type(irq_get_irq_data(irq));
 	/*
 	 * Configure the interrupt generator hardware to supply whatever
 	 * the interrupt is configured for, edges low/high level low/high,
 	 * we can provide it all.
 	 */
+	irq_trig = irq_get_trigger_type(irq);
 	switch (irq_trig) {
 	case IRQF_TRIGGER_RISING:
 		dev_info(&indio_dev->dev,

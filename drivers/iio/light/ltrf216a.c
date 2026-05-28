@@ -208,7 +208,6 @@ static int ltrf216a_set_power_state(struct ltrf216a_data *data, bool on)
 			return ret;
 		}
 	} else {
-		pm_runtime_mark_last_busy(dev);
 		pm_runtime_put_autosuspend(dev);
 	}
 
@@ -554,15 +553,16 @@ static const struct ltr_chip_info ltrf216a_chip_info = {
 static const struct i2c_device_id ltrf216a_id[] = {
 	{ "ltr308", .driver_data = (kernel_ulong_t)&ltr308_chip_info },
 	{ "ltrf216a", .driver_data = (kernel_ulong_t)&ltrf216a_chip_info },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ltrf216a_id);
 
 static const struct of_device_id ltrf216a_of_match[] = {
 	{ .compatible = "liteon,ltr308", .data = &ltr308_chip_info },
 	{ .compatible = "liteon,ltrf216a", .data = &ltrf216a_chip_info },
+	/* For Valve's Steamdeck device, an ACPI platform using PRP0001 */
 	{ .compatible = "ltr,ltrf216a", .data = &ltrf216a_chip_info },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(of, ltrf216a_of_match);
 

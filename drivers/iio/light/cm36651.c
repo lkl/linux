@@ -529,7 +529,7 @@ static int cm36651_write_prox_event_config(struct iio_dev *indio_dev,
 					const struct iio_chan_spec *chan,
 					enum iio_event_type type,
 					enum iio_event_direction dir,
-					int state)
+					bool state)
 {
 	struct cm36651_data *cm36651 = iio_priv(indio_dev);
 	int cmd, ret;
@@ -683,7 +683,7 @@ static int cm36651_probe(struct i2c_client *client)
 
 	ret = iio_device_register(indio_dev);
 	if (ret) {
-		dev_err(&client->dev, "%s: regist device failed\n", __func__);
+		dev_err(&client->dev, "%s: register device failed\n", __func__);
 		goto error_free_irq;
 	}
 

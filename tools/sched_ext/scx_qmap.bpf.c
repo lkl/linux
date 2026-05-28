@@ -33,13 +33,14 @@ enum consts {
 
 char _license[] SEC("license") = "GPL";
 
-const volatile u64 slice_ns = SCX_SLICE_DFL;
+const volatile u64 slice_ns;
 const volatile u32 stall_user_nth;
 const volatile u32 stall_kernel_nth;
 const volatile u32 dsp_inf_loop_after;
 const volatile u32 dsp_batch;
 const volatile bool highpri_boosting;
-const volatile bool print_shared_dsq;
+const volatile bool print_dsqs_and_events;
+const volatile bool print_msgs;
 const volatile s32 disallow_tgid;
 const volatile bool suppress_dump;
 
@@ -56,7 +57,8 @@ struct qmap {
   queue1 SEC(".maps"),
   queue2 SEC(".maps"),
   queue3 SEC(".maps"),
-  queue4 SEC(".maps");
+  queue4 SEC(".maps"),
+  dump_store SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY_OF_MAPS);
@@ -226,15 +228,15 @@ void BPF_STRUCT_OPS(qmap_enqueue, struct task_struct *p, u64 enq_flags)
 	 */
 	if (tctx->force_local) {
 		tctx->force_local = false;
-		scx_bpf_dispatch(p, SCX_DSQ_LOCAL, slice_ns, enq_flags);
+		scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, slice_ns, enq_flags);
 		return;
 	}
 
 	/* if select_cpu() wasn't called, try direct dispatch */
-	if (!(enq_flags & SCX_ENQ_CPU_SELECTED) &&
+	if (!__COMPAT_is_enq_cpu_selected(enq_flags) &&
 	    (cpu = pick_direct_dispatch_cpu(p, scx_bpf_task_cpu(p))) >= 0) {
 		__sync_fetch_and_add(&nr_ddsp_from_enq, 1);
-		scx_bpf_dispatch(p, SCX_DSQ_LOCAL_ON | cpu, slice_ns, enq_flags);
+		scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL_ON | cpu, slice_ns, enq_flags);
 		return;
 	}
 
@@ -247,7 +249,7 @@ void BPF_STRUCT_OPS(qmap_enqueue, struct task_struct *p, u64 enq_flags)
 	if (enq_flags & SCX_ENQ_REENQ) {
 		s32 cpu;
 
-		scx_bpf_dispatch(p, SHARED_DSQ, 0, enq_flags);
+		scx_bpf_dsq_insert(p, SHARED_DSQ, 0, enq_flags);
 		cpu = scx_bpf_pick_idle_cpu(p->cpus_ptr, 0);
 		if (cpu >= 0)
 			scx_bpf_kick_cpu(cpu, SCX_KICK_IDLE);
@@ -262,7 +264,7 @@ void BPF_STRUCT_OPS(qmap_enqueue, struct task_struct *p, u64 enq_flags)
 
 	/* Queue on the selected FIFO. If the FIFO overflows, punt to global. */
 	if (bpf_map_push_elem(ring, &pid, 0)) {
-		scx_bpf_dispatch(p, SHARED_DSQ, slice_ns, enq_flags);
+		scx_bpf_dsq_insert(p, SHARED_DSQ, slice_ns, enq_flags);
 		return;
 	}
 
@@ -294,10 +296,10 @@ static void update_core_sched_head_seq(struct task_struct *p)
 }
 
 /*
- * To demonstrate the use of scx_bpf_dispatch_from_dsq(), implement silly
- * selective priority boosting mechanism by scanning SHARED_DSQ looking for
- * highpri tasks, moving them to HIGHPRI_DSQ and then consuming them first. This
- * makes minor difference only when dsp_batch is larger than 1.
+ * To demonstrate the use of scx_bpf_dsq_move(), implement silly selective
+ * priority boosting mechanism by scanning SHARED_DSQ looking for highpri tasks,
+ * moving them to HIGHPRI_DSQ and then consuming them first. This makes minor
+ * difference only when dsp_batch is larger than 1.
  *
  * scx_bpf_dispatch[_vtime]_from_dsq() are allowed both from ops.dispatch() and
  * non-rq-lock holding BPF programs. As demonstration, this function is called
@@ -318,11 +320,11 @@ static bool dispatch_highpri(bool from_timer)
 
 		if (tctx->highpri) {
 			/* exercise the set_*() and vtime interface too */
-			__COMPAT_scx_bpf_dispatch_from_dsq_set_slice(
+			__COMPAT_scx_bpf_dsq_move_set_slice(
 				BPF_FOR_EACH_ITER, slice_ns * 2);
-			__COMPAT_scx_bpf_dispatch_from_dsq_set_vtime(
+			__COMPAT_scx_bpf_dsq_move_set_vtime(
 				BPF_FOR_EACH_ITER, highpri_seq++);
-			__COMPAT_scx_bpf_dispatch_vtime_from_dsq(
+			__COMPAT_scx_bpf_dsq_move_vtime(
 				BPF_FOR_EACH_ITER, p, HIGHPRI_DSQ, 0);
 		}
 	}
@@ -340,9 +342,9 @@ static bool dispatch_highpri(bool from_timer)
 		else
 			cpu = scx_bpf_pick_any_cpu(p->cpus_ptr, 0);
 
-		if (__COMPAT_scx_bpf_dispatch_from_dsq(BPF_FOR_EACH_ITER, p,
-						       SCX_DSQ_LOCAL_ON | cpu,
-						       SCX_ENQ_PREEMPT)) {
+		if (__COMPAT_scx_bpf_dsq_move(BPF_FOR_EACH_ITER, p,
+					      SCX_DSQ_LOCAL_ON | cpu,
+					      SCX_ENQ_PREEMPT)) {
 			if (cpu == this_cpu) {
 				dispatched = true;
 				__sync_fetch_and_add(&nr_expedited_local, 1);
@@ -374,7 +376,7 @@ void BPF_STRUCT_OPS(qmap_dispatch, s32 cpu, struct task_struct *prev)
 	if (dispatch_highpri(false))
 		return;
 
-	if (!nr_highpri_queued && scx_bpf_consume(SHARED_DSQ))
+	if (!nr_highpri_queued && scx_bpf_dsq_move_to_local(SHARED_DSQ))
 		return;
 
 	if (dsp_inf_loop_after && nr_dispatched > dsp_inf_loop_after) {
@@ -385,7 +387,7 @@ void BPF_STRUCT_OPS(qmap_dispatch, s32 cpu, struct task_struct *prev)
 		 */
 		p = bpf_task_from_pid(2);
 		if (p) {
-			scx_bpf_dispatch(p, SCX_DSQ_LOCAL, slice_ns, 0);
+			scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, slice_ns, 0);
 			bpf_task_release(p);
 			return;
 		}
@@ -431,7 +433,7 @@ void BPF_STRUCT_OPS(qmap_dispatch, s32 cpu, struct task_struct *prev)
 			update_core_sched_head_seq(p);
 			__sync_fetch_and_add(&nr_dispatched, 1);
 
-			scx_bpf_dispatch(p, SHARED_DSQ, slice_ns, 0);
+			scx_bpf_dsq_insert(p, SHARED_DSQ, slice_ns, 0);
 			bpf_task_release(p);
 
 			batch--;
@@ -439,7 +441,7 @@ void BPF_STRUCT_OPS(qmap_dispatch, s32 cpu, struct task_struct *prev)
 			if (!batch || !scx_bpf_dispatch_nr_slots()) {
 				if (dispatch_highpri(false))
 					return;
-				scx_bpf_consume(SHARED_DSQ);
+				scx_bpf_dsq_move_to_local(SHARED_DSQ);
 				return;
 			}
 			if (!cpuc->dsp_cnt)
@@ -578,11 +580,26 @@ void BPF_STRUCT_OPS(qmap_dump, struct scx_dump_ctx *dctx)
 			return;
 
 		scx_bpf_dump("QMAP FIFO[%d]:", i);
+
+		/*
+		 * Dump can be invoked anytime and there is no way to iterate in
+		 * a non-destructive way. Pop and store in dump_store and then
+		 * restore afterwards. If racing against new enqueues, ordering
+		 * can get mixed up.
+		 */
 		bpf_repeat(4096) {
 			if (bpf_map_pop_elem(fifo, &pid))
 				break;
+			bpf_map_push_elem(&dump_store, &pid, 0);
 			scx_bpf_dump(" %d", pid);
 		}
+
+		bpf_repeat(4096) {
+			if (bpf_map_pop_elem(&dump_store, &pid))
+				break;
+			bpf_map_push_elem(fifo, &pid, 0);
+		}
+
 		scx_bpf_dump("\n");
 	}
 }
@@ -613,6 +630,29 @@ void BPF_STRUCT_OPS(qmap_dump_task, struct scx_dump_ctx *dctx, struct task_struc
 
 	scx_bpf_dump("QMAP: force_local=%d core_sched_seq=%llu",
 		     taskc->force_local, taskc->core_sched_seq);
+}
+
+s32 BPF_STRUCT_OPS(qmap_cgroup_init, struct cgroup *cgrp, struct scx_cgroup_init_args *args)
+{
+	if (print_msgs)
+		bpf_printk("CGRP INIT %llu weight=%u period=%lu quota=%ld burst=%lu",
+			   cgrp->kn->id, args->weight, args->bw_period_us,
+			   args->bw_quota_us, args->bw_burst_us);
+	return 0;
+}
+
+void BPF_STRUCT_OPS(qmap_cgroup_set_weight, struct cgroup *cgrp, u32 weight)
+{
+	if (print_msgs)
+		bpf_printk("CGRP SET %llu weight=%u", cgrp->kn->id, weight);
+}
+
+void BPF_STRUCT_OPS(qmap_cgroup_set_bandwidth, struct cgroup *cgrp,
+		    u64 period_us, u64 quota_us, u64 burst_us)
+{
+	if (print_msgs)
+		bpf_printk("CGRP SET %llu period=%lu quota=%ld burst=%lu",
+			   cgrp->kn->id, period_us, quota_us, burst_us);
 }
 
 /*
@@ -656,16 +696,20 @@ static void print_cpus(void)
 
 void BPF_STRUCT_OPS(qmap_cpu_online, s32 cpu)
 {
-	bpf_printk("CPU %d coming online", cpu);
-	/* @cpu is already online at this point */
-	print_cpus();
+	if (print_msgs) {
+		bpf_printk("CPU %d coming online", cpu);
+		/* @cpu is already online at this point */
+		print_cpus();
+	}
 }
 
 void BPF_STRUCT_OPS(qmap_cpu_offline, s32 cpu)
 {
-	bpf_printk("CPU %d going offline", cpu);
-	/* @cpu is still online at this point */
-	print_cpus();
+	if (print_msgs) {
+		bpf_printk("CPU %d going offline", cpu);
+		/* @cpu is still online at this point */
+		print_cpus();
+	}
 }
 
 struct monitor_timer {
@@ -769,8 +813,30 @@ static int monitor_timerfn(void *map, int *key, struct bpf_timer *timer)
 
 	monitor_cpuperf();
 
-	if (print_shared_dsq)
+	if (print_dsqs_and_events) {
+		struct scx_event_stats events;
+
 		dump_shared_dsq();
+
+		__COMPAT_scx_bpf_events(&events, sizeof(events));
+
+		bpf_printk("%35s: %lld", "SCX_EV_SELECT_CPU_FALLBACK",
+			   scx_read_event(&events, SCX_EV_SELECT_CPU_FALLBACK));
+		bpf_printk("%35s: %lld", "SCX_EV_DISPATCH_LOCAL_DSQ_OFFLINE",
+			   scx_read_event(&events, SCX_EV_DISPATCH_LOCAL_DSQ_OFFLINE));
+		bpf_printk("%35s: %lld", "SCX_EV_DISPATCH_KEEP_LAST",
+			   scx_read_event(&events, SCX_EV_DISPATCH_KEEP_LAST));
+		bpf_printk("%35s: %lld", "SCX_EV_ENQ_SKIP_EXITING",
+			   scx_read_event(&events, SCX_EV_ENQ_SKIP_EXITING));
+		bpf_printk("%35s: %lld", "SCX_EV_REFILL_SLICE_DFL",
+			   scx_read_event(&events, SCX_EV_REFILL_SLICE_DFL));
+		bpf_printk("%35s: %lld", "SCX_EV_BYPASS_DURATION",
+			   scx_read_event(&events, SCX_EV_BYPASS_DURATION));
+		bpf_printk("%35s: %lld", "SCX_EV_BYPASS_DISPATCH",
+			   scx_read_event(&events, SCX_EV_BYPASS_DISPATCH));
+		bpf_printk("%35s: %lld", "SCX_EV_BYPASS_ACTIVATE",
+			   scx_read_event(&events, SCX_EV_BYPASS_ACTIVATE));
+	}
 
 	bpf_timer_start(timer, ONE_SEC_IN_NS, 0);
 	return 0;
@@ -782,7 +848,8 @@ s32 BPF_STRUCT_OPS_SLEEPABLE(qmap_init)
 	struct bpf_timer *timer;
 	s32 ret;
 
-	print_cpus();
+	if (print_msgs)
+		print_cpus();
 
 	ret = scx_bpf_create_dsq(SHARED_DSQ, -1);
 	if (ret)
@@ -819,6 +886,9 @@ SCX_OPS_DEFINE(qmap_ops,
 	       .dump			= (void *)qmap_dump,
 	       .dump_cpu		= (void *)qmap_dump_cpu,
 	       .dump_task		= (void *)qmap_dump_task,
+	       .cgroup_init		= (void *)qmap_cgroup_init,
+	       .cgroup_set_weight	= (void *)qmap_cgroup_set_weight,
+	       .cgroup_set_bandwidth	= (void *)qmap_cgroup_set_bandwidth,
 	       .cpu_online		= (void *)qmap_cpu_online,
 	       .cpu_offline		= (void *)qmap_cpu_offline,
 	       .init			= (void *)qmap_init,

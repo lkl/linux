@@ -113,7 +113,7 @@ void cw1200_stop(struct ieee80211_hw *dev, bool suspend)
 	cancel_work_sync(&priv->unjoin_work);
 	cancel_delayed_work_sync(&priv->link_id_gc_work);
 	flush_workqueue(priv->workqueue);
-	del_timer_sync(&priv->mcast_timeout);
+	timer_delete_sync(&priv->mcast_timeout);
 	mutex_lock(&priv->conf_mutex);
 	priv->mode = NL80211_IFTYPE_UNSPECIFIED;
 	priv->listening = false;
@@ -321,7 +321,7 @@ int cw1200_change_interface(struct ieee80211_hw *dev,
 	return ret;
 }
 
-int cw1200_config(struct ieee80211_hw *dev, u32 changed)
+int cw1200_config(struct ieee80211_hw *dev, int radio_idx, u32 changed)
 {
 	int ret = 0;
 	struct cw1200_common *priv = dev->priv;
@@ -857,7 +857,8 @@ void cw1200_wep_key_work(struct work_struct *work)
 	wsm_unlock_tx(priv);
 }
 
-int cw1200_set_rts_threshold(struct ieee80211_hw *hw, u32 value)
+int cw1200_set_rts_threshold(struct ieee80211_hw *hw, int radio_idx,
+			     u32 value)
 {
 	int ret = 0;
 	__le32 val32;
@@ -1290,7 +1291,7 @@ static void cw1200_do_join(struct cw1200_common *priv)
 		rcu_read_lock();
 		ssidie = ieee80211_bss_get_ie(bss, WLAN_EID_SSID);
 		if (ssidie) {
-			join.ssid_len = ssidie[1];
+			join.ssid_len = min(ssidie[1], IEEE80211_MAX_SSID_LEN);
 			memcpy(join.ssid, &ssidie[2], join.ssid_len);
 		}
 		rcu_read_unlock();
@@ -2102,7 +2103,7 @@ void cw1200_multicast_stop_work(struct work_struct *work)
 		container_of(work, struct cw1200_common, multicast_stop_work);
 
 	if (priv->aid0_bit_set) {
-		del_timer_sync(&priv->mcast_timeout);
+		timer_delete_sync(&priv->mcast_timeout);
 		wsm_lock_tx(priv);
 		priv->aid0_bit_set = false;
 		cw1200_set_tim_impl(priv, false);
@@ -2112,7 +2113,8 @@ void cw1200_multicast_stop_work(struct work_struct *work)
 
 void cw1200_mcast_timeout(struct timer_list *t)
 {
-	struct cw1200_common *priv = from_timer(priv, t, mcast_timeout);
+	struct cw1200_common *priv = timer_container_of(priv, t,
+							mcast_timeout);
 
 	wiphy_warn(priv->hw->wiphy,
 		   "Multicast delivery timeout.\n");
@@ -2170,7 +2172,7 @@ void cw1200_suspend_resume(struct cw1200_common *priv,
 		}
 		spin_unlock_bh(&priv->ps_state_lock);
 		if (cancel_tmo)
-			del_timer_sync(&priv->mcast_timeout);
+			timer_delete_sync(&priv->mcast_timeout);
 	} else {
 		spin_lock_bh(&priv->ps_state_lock);
 		cw1200_ps_notify(priv, arg->link_id, arg->stop);

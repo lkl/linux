@@ -72,8 +72,9 @@ led_tg(struct sk_buff *skb, const struct xt_action_param *par)
 
 static void led_timeout_callback(struct timer_list *t)
 {
-	struct xt_led_info_internal *ledinternal = from_timer(ledinternal, t,
-							      timer);
+	struct xt_led_info_internal *ledinternal = timer_container_of(ledinternal,
+								      t,
+								      timer);
 
 	led_trigger_event(&ledinternal->netfilter_led_trigger, LED_OFF);
 }
@@ -96,7 +97,9 @@ static int led_tg_check(const struct xt_tgchk_param *par)
 	struct xt_led_info_internal *ledinternal;
 	int err;
 
-	if (ledinfo->id[0] == '\0')
+	/* Bail out if empty string or not a string at all. */
+	if (ledinfo->id[0] == '\0' ||
+	    !memchr(ledinfo->id, '\0', sizeof(ledinfo->id)))
 		return -EINVAL;
 
 	mutex_lock(&xt_led_mutex);

@@ -131,6 +131,8 @@ static inline int cpu_to_coregroup_id(int cpu)
 #ifdef CONFIG_SMP
 #include <asm/cputable.h>
 
+struct cpumask *cpu_coregroup_mask(int cpu);
+
 #ifdef CONFIG_PPC64
 #include <asm/smp.h>
 
@@ -152,6 +154,7 @@ static inline bool topology_is_primary_thread(unsigned int cpu)
 {
 	return cpu == cpu_first_thread_sibling(cpu);
 }
+#define topology_is_primary_thread topology_is_primary_thread
 
 static inline bool topology_smt_thread_allowed(unsigned int cpu)
 {

@@ -9,7 +9,7 @@
  * Copyright 2007, Michael Wu <flamingice@sourmilk.net>
  * Copyright 2007-2010, Intel Corporation
  * Copyright(c) 2015-2017 Intel Deutschland GmbH
- * Copyright (C) 2018-2023 Intel Corporation
+ * Copyright (C) 2018-2024 Intel Corporation
  */
 
 /**
@@ -103,13 +103,13 @@ void __ieee80211_stop_rx_ba_session(struct sta_info *sta, u16 tid,
 	if (!tid_rx)
 		return;
 
-	del_timer_sync(&tid_rx->session_timer);
+	timer_delete_sync(&tid_rx->session_timer);
 
 	/* make sure ieee80211_sta_reorder_release() doesn't re-arm the timer */
 	spin_lock_bh(&tid_rx->reorder_lock);
 	tid_rx->removed = true;
 	spin_unlock_bh(&tid_rx->reorder_lock);
-	del_timer_sync(&tid_rx->reorder_timer);
+	timer_delete_sync(&tid_rx->reorder_timer);
 
 	call_rcu(&tid_rx->rcu_head, ieee80211_free_tid_rx);
 }
@@ -143,7 +143,8 @@ EXPORT_SYMBOL(ieee80211_stop_rx_ba_session);
  */
 static void sta_rx_agg_session_timer_expired(struct timer_list *t)
 {
-	struct tid_ampdu_rx *tid_rx = from_timer(tid_rx, t, session_timer);
+	struct tid_ampdu_rx *tid_rx = timer_container_of(tid_rx, t,
+							 session_timer);
 	struct sta_info *sta = tid_rx->sta;
 	u8 tid = tid_rx->tid;
 	unsigned long timeout;
@@ -163,35 +164,73 @@ static void sta_rx_agg_session_timer_expired(struct timer_list *t)
 
 static void sta_rx_agg_reorder_timer_expired(struct timer_list *t)
 {
-	struct tid_ampdu_rx *tid_rx = from_timer(tid_rx, t, reorder_timer);
+	struct tid_ampdu_rx *tid_rx = timer_container_of(tid_rx, t,
+							 reorder_timer);
 
 	rcu_read_lock();
 	ieee80211_release_reorder_timeout(tid_rx->sta, tid_rx->tid);
 	rcu_read_unlock();
 }
 
-static void ieee80211_add_addbaext(struct ieee80211_sub_if_data *sdata,
-				   struct sk_buff *skb,
-				   const struct ieee80211_addba_ext_ie *req,
-				   u16 buf_size)
+void ieee80211_add_addbaext(struct sk_buff *skb,
+			    const u8 req_addba_ext_data,
+			    u16 buf_size)
 {
-	struct ieee80211_addba_ext_ie *resp;
+	struct ieee80211_addba_ext_ie *addba_ext;
 	u8 *pos;
 
 	pos = skb_put_zero(skb, 2 + sizeof(struct ieee80211_addba_ext_ie));
 	*pos++ = WLAN_EID_ADDBA_EXT;
 	*pos++ = sizeof(struct ieee80211_addba_ext_ie);
-	resp = (struct ieee80211_addba_ext_ie *)pos;
-	resp->data = req->data & IEEE80211_ADDBA_EXT_NO_FRAG;
+	addba_ext = (struct ieee80211_addba_ext_ie *)pos;
 
-	resp->data |= u8_encode_bits(buf_size >> IEEE80211_ADDBA_EXT_BUF_SIZE_SHIFT,
-				     IEEE80211_ADDBA_EXT_BUF_SIZE_MASK);
+	addba_ext->data = IEEE80211_ADDBA_EXT_NO_FRAG;
+	if (req_addba_ext_data)
+		addba_ext->data &= req_addba_ext_data;
+
+	addba_ext->data |=
+		u8_encode_bits(buf_size >> IEEE80211_ADDBA_EXT_BUF_SIZE_SHIFT,
+			       IEEE80211_ADDBA_EXT_BUF_SIZE_MASK);
+}
+
+u8 ieee80211_retrieve_addba_ext_data(struct sta_info *sta,
+				     const void *elem_data, ssize_t elem_len,
+				     u16 *buf_size)
+{
+	struct ieee802_11_elems *elems;
+	u8 buf_size_1k, data = 0;
+
+	if (!sta->sta.deflink.he_cap.has_he)
+		return 0;
+
+	if (elem_len <= 0)
+		return 0;
+
+	elems = ieee802_11_parse_elems(elem_data, elem_len, true, NULL);
+
+	if (!elems || elems->parse_error || !elems->addba_ext_ie)
+		goto free;
+
+	data = elems->addba_ext_ie->data;
+
+	if (buf_size &&
+	    (sta->sta.valid_links || sta->sta.deflink.eht_cap.has_eht)) {
+		buf_size_1k = u8_get_bits(elems->addba_ext_ie->data,
+					  IEEE80211_ADDBA_EXT_BUF_SIZE_MASK);
+		*buf_size |= (u16)buf_size_1k <<
+			     IEEE80211_ADDBA_EXT_BUF_SIZE_SHIFT;
+	}
+
+free:
+	kfree(elems);
+
+	return data;
 }
 
 static void ieee80211_send_addba_resp(struct sta_info *sta, u8 *da, u16 tid,
 				      u8 dialog_token, u16 status, u16 policy,
 				      u16 buf_size, u16 timeout,
-				      const struct ieee80211_addba_ext_ie *addbaext)
+				      const u8 req_addba_ext_data)
 {
 	struct ieee80211_sub_if_data *sdata = sta->sdata;
 	struct ieee80211_local *local = sdata->local;
@@ -223,8 +262,8 @@ static void ieee80211_send_addba_resp(struct sta_info *sta, u8 *da, u16 tid,
 	mgmt->u.action.u.addba_resp.timeout = cpu_to_le16(timeout);
 	mgmt->u.action.u.addba_resp.status = cpu_to_le16(status);
 
-	if (sta->sta.deflink.he_cap.has_he && addbaext)
-		ieee80211_add_addbaext(sdata, skb, addbaext, buf_size);
+	if (sta->sta.valid_links || sta->sta.deflink.he_cap.has_he)
+		ieee80211_add_addbaext(skb, req_addba_ext_data, buf_size);
 
 	ieee80211_tx_skb(sdata, skb);
 }
@@ -233,7 +272,7 @@ void __ieee80211_start_rx_ba_session(struct sta_info *sta,
 				     u8 dialog_token, u16 timeout,
 				     u16 start_seq_num, u16 ba_policy, u16 tid,
 				     u16 buf_size, bool tx, bool auto_seq,
-				     const struct ieee80211_addba_ext_ie *addbaext)
+				     const u8 addba_ext_data)
 {
 	struct ieee80211_local *local = sta->sdata->local;
 	struct tid_ampdu_rx *tid_agg_rx;
@@ -258,8 +297,10 @@ void __ieee80211_start_rx_ba_session(struct sta_info *sta,
 		goto end;
 	}
 
-	if (!sta->sta.deflink.ht_cap.ht_supported &&
-	    !sta->sta.deflink.he_cap.has_he) {
+	if (!sta->sta.valid_links &&
+	    !sta->sta.deflink.ht_cap.ht_supported &&
+	    !sta->sta.deflink.he_cap.has_he &&
+	    !sta->sta.deflink.s1g_cap.s1g) {
 		ht_dbg(sta->sdata,
 		       "STA %pM erroneously requests BA session on tid %d w/o HT\n",
 		       sta->sta.addr, tid);
@@ -274,7 +315,7 @@ void __ieee80211_start_rx_ba_session(struct sta_info *sta,
 		goto end;
 	}
 
-	if (sta->sta.deflink.eht_cap.has_eht)
+	if (sta->sta.valid_links || sta->sta.deflink.eht_cap.has_eht)
 		max_buf_size = IEEE80211_MAX_AMPDU_BUF_EHT;
 	else if (sta->sta.deflink.he_cap.has_he)
 		max_buf_size = IEEE80211_MAX_AMPDU_BUF_HE;
@@ -286,7 +327,9 @@ void __ieee80211_start_rx_ba_session(struct sta_info *sta,
 	 * and if buffer size does not exceeds max value */
 	/* XXX: check own ht delayed BA capability?? */
 	if (((ba_policy != 1) &&
-	     (!(sta->sta.deflink.ht_cap.cap & IEEE80211_HT_CAP_DELAY_BA))) ||
+	     (sta->sta.valid_links ||
+	      !(sta->sta.deflink.ht_cap.cap & IEEE80211_HT_CAP_DELAY_BA) ||
+	      !(sta->sta.deflink.s1g_cap.cap[3] & S1G_CAP3_HT_DELAYED_BA))) ||
 	    (buf_size > max_buf_size)) {
 		status = WLAN_STATUS_INVALID_QOS_PARAM;
 		ht_dbg_ratelimited(sta->sdata,
@@ -419,7 +462,7 @@ end:
 	if (tx)
 		ieee80211_send_addba_resp(sta, sta->sta.addr, tid,
 					  dialog_token, status, 1, buf_size,
-					  timeout, addbaext);
+					  timeout, addba_ext_data);
 }
 
 void ieee80211_process_addba_request(struct ieee80211_local *local,
@@ -428,9 +471,7 @@ void ieee80211_process_addba_request(struct ieee80211_local *local,
 				     size_t len)
 {
 	u16 capab, tid, timeout, ba_policy, buf_size, start_seq_num;
-	struct ieee802_11_elems *elems = NULL;
-	u8 dialog_token;
-	int ies_len;
+	u8 dialog_token, addba_ext_data;
 
 	/* extract session parameters from addba request frame */
 	dialog_token = mgmt->u.action.u.addba_req.dialog_token;
@@ -443,28 +484,17 @@ void ieee80211_process_addba_request(struct ieee80211_local *local,
 	tid = (capab & IEEE80211_ADDBA_PARAM_TID_MASK) >> 2;
 	buf_size = (capab & IEEE80211_ADDBA_PARAM_BUF_SIZE_MASK) >> 6;
 
-	ies_len = len - offsetof(struct ieee80211_mgmt,
-				 u.action.u.addba_req.variable);
-	if (ies_len) {
-		elems = ieee802_11_parse_elems(mgmt->u.action.u.addba_req.variable,
-					       ies_len, true, NULL);
-		if (!elems || elems->parse_error)
-			goto free;
-	}
-
-	if (sta->sta.deflink.eht_cap.has_eht && elems && elems->addba_ext_ie) {
-		u8 buf_size_1k = u8_get_bits(elems->addba_ext_ie->data,
-					     IEEE80211_ADDBA_EXT_BUF_SIZE_MASK);
-
-		buf_size |= buf_size_1k << IEEE80211_ADDBA_EXT_BUF_SIZE_SHIFT;
-	}
+	addba_ext_data =
+		ieee80211_retrieve_addba_ext_data(sta,
+						  mgmt->u.action.u.addba_req.variable,
+						  len -
+						  offsetof(typeof(*mgmt),
+							   u.action.u.addba_req.variable),
+						  &buf_size);
 
 	__ieee80211_start_rx_ba_session(sta, dialog_token, timeout,
 					start_seq_num, ba_policy, tid,
-					buf_size, true, false,
-					elems ? elems->addba_ext_ie : NULL);
-free:
-	kfree(elems);
+					buf_size, true, false, addba_ext_data);
 }
 
 void ieee80211_manage_rx_ba_offl(struct ieee80211_vif *vif,

@@ -153,7 +153,7 @@ static int emit_fiemap_extent(struct fiemap_extent_info *fieinfo,
 	if (cache_end > offset) {
 		if (offset == cache->offset) {
 			/*
-			 * We cached a dealloc range (found in the io tree) for
+			 * We cached a delalloc range (found in the io tree) for
 			 * a hole or prealloc extent and we have now found a
 			 * file extent item for the same offset. What we have
 			 * now is more recent and up to date, so discard what
@@ -186,7 +186,7 @@ static int emit_fiemap_extent(struct fiemap_extent_info *fieinfo,
 			 * we have in the cache is the last delalloc range we
 			 * found while the file extent item we found can be
 			 * either for a whole delalloc range we previously
-			 * emmitted or only a part of that range.
+			 * emitted or only a part of that range.
 			 *
 			 * We have two cases here:
 			 *
@@ -194,13 +194,13 @@ static int emit_fiemap_extent(struct fiemap_extent_info *fieinfo,
 			 *    cached extent's end. In this case just ignore the
 			 *    current file extent item because we don't want to
 			 *    overlap with previous ranges that may have been
-			 *    emmitted already;
+			 *    emitted already;
 			 *
 			 * 2) The file extent item starts behind the currently
 			 *    cached extent but its end offset goes beyond the
 			 *    end offset of the cached extent. We don't want to
 			 *    overlap with a previous range that may have been
-			 *    emmitted already, so we emit the currently cached
+			 *    emitted already, so we emit the currently cached
 			 *    extent and then partially store the current file
 			 *    extent item's range in the cache, for the subrange
 			 *    going the cached extent's end to the end of the
@@ -320,7 +320,7 @@ static int fiemap_next_leaf_item(struct btrfs_inode *inode, struct btrfs_path *p
 	 * the cost of allocating a new one.
 	 */
 	ASSERT(test_bit(EXTENT_BUFFER_UNMAPPED, &clone->bflags));
-	atomic_inc(&clone->refs);
+	refcount_inc(&clone->refs);
 
 	ret = btrfs_next_leaf(inode->root, path);
 	if (ret != 0)
@@ -634,7 +634,7 @@ static int extent_fiemap(struct btrfs_inode *inode,
 	const u64 ino = btrfs_ino(inode);
 	struct extent_state *cached_state = NULL;
 	struct extent_state *delalloc_cached_state = NULL;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct fiemap_cache cache = { 0 };
 	struct btrfs_backref_share_check_ctx *backref_ctx;
 	u64 last_extent_end = 0;
@@ -661,7 +661,7 @@ restart:
 	range_end = round_up(start + len, sectorsize);
 	prev_extent_end = range_start;
 
-	lock_extent(&inode->io_tree, range_start, range_end, &cached_state);
+	btrfs_lock_extent(&inode->io_tree, range_start, range_end, &cached_state);
 
 	ret = fiemap_find_last_extent_offset(inode, path, &last_extent_end);
 	if (ret < 0)
@@ -841,7 +841,7 @@ check_eof_delalloc:
 	}
 
 out_unlock:
-	unlock_extent(&inode->io_tree, range_start, range_end, &cached_state);
+	btrfs_unlock_extent(&inode->io_tree, range_start, range_end, &cached_state);
 
 	if (ret == BTRFS_FIEMAP_FLUSH_CACHE) {
 		btrfs_release_path(path);
@@ -871,10 +871,9 @@ out_unlock:
 
 	ret = emit_last_fiemap_cache(fieinfo, &cache);
 out:
-	free_extent_state(delalloc_cached_state);
+	btrfs_free_extent_state(delalloc_cached_state);
 	kfree(cache.entries);
 	btrfs_free_backref_share_ctx(backref_ctx);
-	btrfs_free_path(path);
 	return ret;
 }
 

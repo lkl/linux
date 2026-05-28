@@ -40,11 +40,6 @@
  *
  * These are the usage functions:
  *
- * tpm2_start_auth_session() which allocates the opaque auth structure
- *	and gets a session from the TPM.  This must be called before
- *	any of the following functions.  The session is protected by a
- *	session_key which is derived from a random salt value
- *	encrypted to the NULL seed.
  * tpm2_end_auth_session() kills the session and frees the resources.
  *	Under normal operation this function is done by
  *	tpm_buf_check_hmac_response(), so this is only to be used on
@@ -74,8 +69,8 @@
 #include <linux/unaligned.h>
 #include <crypto/kpp.h>
 #include <crypto/ecdh.h>
-#include <crypto/hash.h>
-#include <crypto/hmac.h>
+#include <crypto/sha2.h>
+#include <crypto/utils.h>
 
 /* maximum number of names the TPM must remember for authorization */
 #define AUTH_MAX_NAMES	3
@@ -390,51 +385,6 @@ static int tpm2_create_primary(struct tpm_chip *chip, u32 hierarchy,
 			       u32 *handle, u8 *name);
 
 /*
- * It turns out the crypto hmac(sha256) is hard for us to consume
- * because it assumes a fixed key and the TPM seems to change the key
- * on every operation, so we weld the hmac init and final functions in
- * here to give it the same usage characteristics as a regular hash
- */
-static void tpm2_hmac_init(struct sha256_state *sctx, u8 *key, u32 key_len)
-{
-	u8 pad[SHA256_BLOCK_SIZE];
-	int i;
-
-	sha256_init(sctx);
-	for (i = 0; i < sizeof(pad); i++) {
-		if (i < key_len)
-			pad[i] = key[i];
-		else
-			pad[i] = 0;
-		pad[i] ^= HMAC_IPAD_VALUE;
-	}
-	sha256_update(sctx, pad, sizeof(pad));
-}
-
-static void tpm2_hmac_final(struct sha256_state *sctx, u8 *key, u32 key_len,
-			    u8 *out)
-{
-	u8 pad[SHA256_BLOCK_SIZE];
-	int i;
-
-	for (i = 0; i < sizeof(pad); i++) {
-		if (i < key_len)
-			pad[i] = key[i];
-		else
-			pad[i] = 0;
-		pad[i] ^= HMAC_OPAD_VALUE;
-	}
-
-	/* collect the final hash;  use out as temporary storage */
-	sha256_final(sctx, out);
-
-	sha256_init(sctx);
-	sha256_update(sctx, pad, sizeof(pad));
-	sha256_update(sctx, out, SHA256_DIGEST_SIZE);
-	sha256_final(sctx, out);
-}
-
-/*
  * assume hash sha256 and nonces u, v of size SHA256_DIGEST_SIZE but
  * otherwise standard tpm2_KDFa.  Note output is in bytes not bits.
  */
@@ -445,16 +395,16 @@ static void tpm2_KDFa(u8 *key, u32 key_len, const char *label, u8 *u,
 	const __be32 bits = cpu_to_be32(bytes * 8);
 
 	while (bytes > 0) {
-		struct sha256_state sctx;
+		struct hmac_sha256_ctx hctx;
 		__be32 c = cpu_to_be32(counter);
 
-		tpm2_hmac_init(&sctx, key, key_len);
-		sha256_update(&sctx, (u8 *)&c, sizeof(c));
-		sha256_update(&sctx, label, strlen(label)+1);
-		sha256_update(&sctx, u, SHA256_DIGEST_SIZE);
-		sha256_update(&sctx, v, SHA256_DIGEST_SIZE);
-		sha256_update(&sctx, (u8 *)&bits, sizeof(bits));
-		tpm2_hmac_final(&sctx, key, key_len, out);
+		hmac_sha256_init_usingrawkey(&hctx, key, key_len);
+		hmac_sha256_update(&hctx, (u8 *)&c, sizeof(c));
+		hmac_sha256_update(&hctx, label, strlen(label) + 1);
+		hmac_sha256_update(&hctx, u, SHA256_DIGEST_SIZE);
+		hmac_sha256_update(&hctx, v, SHA256_DIGEST_SIZE);
+		hmac_sha256_update(&hctx, (u8 *)&bits, sizeof(bits));
+		hmac_sha256_final(&hctx, out);
 
 		bytes -= SHA256_DIGEST_SIZE;
 		counter++;
@@ -472,7 +422,7 @@ static void tpm2_KDFa(u8 *key, u32 key_len, const char *label, u8 *u,
 static void tpm2_KDFe(u8 z[EC_PT_SZ], const char *str, u8 *pt_u, u8 *pt_v,
 		      u8 *out)
 {
-	struct sha256_state sctx;
+	struct sha256_ctx sctx;
 	/*
 	 * this should be an iterative counter, but because we know
 	 *  we're only taking 32 bytes for the point using a sha256
@@ -597,7 +547,8 @@ void tpm_buf_fill_hmac_session(struct tpm_chip *chip, struct tpm_buf *buf)
 	u8 *hmac = NULL;
 	u32 attrs;
 	u8 cphash[SHA256_DIGEST_SIZE];
-	struct sha256_state sctx;
+	struct sha256_ctx sctx;
+	struct hmac_sha256_ctx hctx;
 
 	if (!auth)
 		return;
@@ -709,14 +660,14 @@ void tpm_buf_fill_hmac_session(struct tpm_chip *chip, struct tpm_buf *buf)
 	sha256_final(&sctx, cphash);
 
 	/* now calculate the hmac */
-	tpm2_hmac_init(&sctx, auth->session_key, sizeof(auth->session_key)
-		       + auth->passphrase_len);
-	sha256_update(&sctx, cphash, sizeof(cphash));
-	sha256_update(&sctx, auth->our_nonce, sizeof(auth->our_nonce));
-	sha256_update(&sctx, auth->tpm_nonce, sizeof(auth->tpm_nonce));
-	sha256_update(&sctx, &auth->attrs, 1);
-	tpm2_hmac_final(&sctx, auth->session_key, sizeof(auth->session_key)
-			+ auth->passphrase_len, hmac);
+	hmac_sha256_init_usingrawkey(&hctx, auth->session_key,
+				     sizeof(auth->session_key) +
+					     auth->passphrase_len);
+	hmac_sha256_update(&hctx, cphash, sizeof(cphash));
+	hmac_sha256_update(&hctx, auth->our_nonce, sizeof(auth->our_nonce));
+	hmac_sha256_update(&hctx, auth->tpm_nonce, sizeof(auth->tpm_nonce));
+	hmac_sha256_update(&hctx, &auth->attrs, 1);
+	hmac_sha256_final(&hctx, hmac);
 }
 EXPORT_SYMBOL(tpm_buf_fill_hmac_session);
 
@@ -755,7 +706,8 @@ int tpm_buf_check_hmac_response(struct tpm_chip *chip, struct tpm_buf *buf,
 	off_t offset_s, offset_p;
 	u8 rphash[SHA256_DIGEST_SIZE];
 	u32 attrs, cc;
-	struct sha256_state sctx;
+	struct sha256_ctx sctx;
+	struct hmac_sha256_ctx hctx;
 	u16 tag = be16_to_cpu(head->tag);
 	int parm_len, len, i, handles;
 
@@ -825,21 +777,20 @@ int tpm_buf_check_hmac_response(struct tpm_chip *chip, struct tpm_buf *buf,
 	sha256_final(&sctx, rphash);
 
 	/* now calculate the hmac */
-	tpm2_hmac_init(&sctx, auth->session_key, sizeof(auth->session_key)
-		       + auth->passphrase_len);
-	sha256_update(&sctx, rphash, sizeof(rphash));
-	sha256_update(&sctx, auth->tpm_nonce, sizeof(auth->tpm_nonce));
-	sha256_update(&sctx, auth->our_nonce, sizeof(auth->our_nonce));
-	sha256_update(&sctx, &auth->attrs, 1);
+	hmac_sha256_init_usingrawkey(&hctx, auth->session_key,
+				     sizeof(auth->session_key) +
+					     auth->passphrase_len);
+	hmac_sha256_update(&hctx, rphash, sizeof(rphash));
+	hmac_sha256_update(&hctx, auth->tpm_nonce, sizeof(auth->tpm_nonce));
+	hmac_sha256_update(&hctx, auth->our_nonce, sizeof(auth->our_nonce));
+	hmac_sha256_update(&hctx, &auth->attrs, 1);
 	/* we're done with the rphash, so put our idea of the hmac there */
-	tpm2_hmac_final(&sctx, auth->session_key, sizeof(auth->session_key)
-			+ auth->passphrase_len, rphash);
-	if (memcmp(rphash, &buf->data[offset_s], SHA256_DIGEST_SIZE) == 0) {
-		rc = 0;
-	} else {
+	hmac_sha256_final(&hctx, rphash);
+	if (crypto_memneq(rphash, &buf->data[offset_s], SHA256_DIGEST_SIZE)) {
 		dev_err(&chip->dev, "TPM: HMAC check failed\n");
 		goto out;
 	}
+	rc = 0;
 
 	/* now do response decryption */
 	if (auth->attrs & TPM2_SA_ENCRYPT) {
@@ -963,16 +914,13 @@ err:
 }
 
 /**
- * tpm2_start_auth_session() - create a HMAC authentication session with the TPM
- * @chip: the TPM chip structure to create the session with
+ * tpm2_start_auth_session() - Create an a HMAC authentication session
+ * @chip:	A TPM chip
  *
- * This function loads the NULL seed from its saved context and starts
- * an authentication session on the null seed, fills in the
- * @chip->auth structure to contain all the session details necessary
- * for performing the HMAC, encrypt and decrypt operations and
- * returns.  The NULL seed is flushed before this function returns.
+ * Loads the ephemeral key (null seed), and starts an HMAC authenticated
+ * session. The null seed is flushed before the return.
  *
- * Return: zero on success or actual error encountered.
+ * Returns zero on success, or a POSIX error code.
  */
 int tpm2_start_auth_session(struct tpm_chip *chip)
 {
@@ -982,7 +930,7 @@ int tpm2_start_auth_session(struct tpm_chip *chip)
 	int rc;
 
 	if (chip->auth) {
-		dev_warn_once(&chip->dev, "auth session is active\n");
+		dev_dbg_once(&chip->dev, "auth session is active\n");
 		return 0;
 	}
 
@@ -1024,7 +972,7 @@ int tpm2_start_auth_session(struct tpm_chip *chip)
 	/* hash algorithm for session */
 	tpm_buf_append_u16(&buf, TPM_ALG_SHA256);
 
-	rc = tpm_transmit_cmd(chip, &buf, 0, "start auth session");
+	rc = tpm_ret_to_err(tpm_transmit_cmd(chip, &buf, 0, "StartAuthSession"));
 	tpm2_flush_context(chip, null_key);
 
 	if (rc == TPM2_RC_SUCCESS)
@@ -1390,5 +1338,4 @@ int tpm2_sessions_init(struct tpm_chip *chip)
 
 	return rc;
 }
-EXPORT_SYMBOL(tpm2_sessions_init);
 #endif /* CONFIG_TCG_TPM2_HMAC */

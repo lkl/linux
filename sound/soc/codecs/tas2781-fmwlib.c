@@ -2,9 +2,10 @@
 //
 // tas2781-fmwlib.c -- TASDEVICE firmware support
 //
-// Copyright 2023 - 2024 Texas Instruments, Inc.
+// Copyright 2023 - 2025 Texas Instruments, Inc.
 //
 // Author: Shenghao Ding <shenghao-ding@ti.com>
+// Author: Baojun Xu <baojun.xu@ti.com>
 
 #include <linux/crc8.h>
 #include <linux/firmware.h>
@@ -49,6 +50,11 @@
 #define TAS2781_YRAM5_START_REG			TAS2781_YRAM3_START_REG
 #define TAS2781_YRAM5_END_REG			TAS2781_YRAM3_END_REG
 
+#define TASDEVICE_CMD_SING_W		0x1
+#define TASDEVICE_CMD_BURST		0x2
+#define TASDEVICE_CMD_DELAY		0x3
+#define TASDEVICE_CMD_FIELD_W		0x4
+
 #define TASDEVICE_MAXPROGRAM_NUM_KERNEL			5
 #define TASDEVICE_MAXCONFIG_NUM_KERNEL_MULTIPLE_AMPS	64
 #define TASDEVICE_MAXCONFIG_NUM_KERNEL			10
@@ -85,7 +91,7 @@ struct blktyp_devidx_map {
 };
 
 static const char deviceNumber[TASDEVICE_DSP_TAS_MAX_DEVICE] = {
-	1, 2, 1, 2, 1, 1, 0, 2, 4, 3, 1, 2, 3, 4
+	1, 2, 1, 2, 1, 1, 0, 2, 4, 3, 1, 2, 3, 4, 1, 2
 };
 
 /* fixed m68k compiling issue: mapping table can save code field */
@@ -173,6 +179,16 @@ static struct tasdevice_config_info *tasdevice_add_config(
 			*status = -EINVAL;
 			dev_err(tas_priv->dev, "add conf: Out of boundary\n");
 			goto out;
+		}
+		/* If in the RCA bin file are several profiles with the
+		 * keyword "init", init_profile_id only store the last
+		 * init profile id.
+		 */
+		if (strnstr(&config_data[config_offset], "init", 64)) {
+			tas_priv->rcabin.init_profile_id =
+				tas_priv->rcabin.ncfgs - 1;
+			dev_dbg(tas_priv->dev, "%s: init profile id = %d\n",
+				__func__, tas_priv->rcabin.init_profile_id);
 		}
 		config_offset += 64;
 	}
@@ -277,6 +293,8 @@ int tasdevice_rca_parser(void *context, const struct firmware *fmw)
 	int i;
 
 	rca = &(tas_priv->rcabin);
+	/* Initialize to none */
+	rca->init_profile_id = -1;
 	fw_hdr = &(rca->fw_hdr);
 	if (!fmw || !fmw->data) {
 		dev_err(tas_priv->dev, "Failed to read %s\n",
@@ -374,7 +392,7 @@ int tasdevice_rca_parser(void *context, const struct firmware *fmw)
 out:
 	return ret;
 }
-EXPORT_SYMBOL_NS_GPL(tasdevice_rca_parser, SND_SOC_TAS2781_FMWLIB);
+EXPORT_SYMBOL_NS_GPL(tasdevice_rca_parser, "SND_SOC_TAS2781_FMWLIB");
 
 /* fixed m68k compiling issue: mapping table can save code field */
 static unsigned char map_dev_idx(struct tasdevice_fw *tas_fmw,
@@ -389,10 +407,10 @@ static unsigned char map_dev_idx(struct tasdevice_fw *tas_fmw,
 	int i, n = ARRAY_SIZE(non_ppc3_mapping_table);
 	unsigned char dev_idx = 0;
 
-	if (fw_fixed_hdr->ppcver >= PPC3_VERSION_TAS2781) {
+	if (fw_fixed_hdr->ppcver >= PPC3_VERSION_TAS2781_BASIC_MIN) {
 		p = (struct blktyp_devidx_map *)ppc3_tas2781_mapping_table;
 		n = ARRAY_SIZE(ppc3_tas2781_mapping_table);
-	} else if (fw_fixed_hdr->ppcver >= PPC3_VERSION) {
+	} else if (fw_fixed_hdr->ppcver >= PPC3_VERSION_BASE) {
 		p = (struct blktyp_devidx_map *)ppc3_mapping_table;
 		n = ARRAY_SIZE(ppc3_mapping_table);
 	}
@@ -503,6 +521,56 @@ out:
 	return offset;
 }
 
+static int fw_parse_tas5825_program_data_kernel(
+	struct tasdevice_priv *tas_priv, struct tasdevice_fw *tas_fmw,
+	const struct firmware *fmw, int offset)
+{
+	struct tasdevice_prog *program;
+	unsigned int i;
+
+	for (i = 0; i < tas_fmw->nr_programs; i++) {
+		program = &(tas_fmw->programs[i]);
+		if (offset + 72 > fmw->size) {
+			dev_err(tas_priv->dev, "%s: mpName error\n", __func__);
+			return -EINVAL;
+		}
+		/* Skip 65 unused byts*/
+		offset += 65;
+		offset = fw_parse_data_kernel(tas_fmw, &(program->dev_data),
+			fmw, offset);
+		if (offset < 0)
+			return offset;
+	}
+
+	return offset;
+}
+
+static int fw_parse_tas5825_configuration_data_kernel(
+	struct tasdevice_priv *tas_priv,
+	struct tasdevice_fw *tas_fmw, const struct firmware *fmw, int offset)
+{
+	const unsigned char *data = fmw->data;
+	struct tasdevice_config *config;
+	unsigned int i;
+
+	for (i = 0; i < tas_fmw->nr_configurations; i++) {
+		config = &(tas_fmw->configs[i]);
+		if (offset + 80 > fmw->size) {
+			dev_err(tas_priv->dev, "%s: mpName error\n", __func__);
+			return -EINVAL;
+		}
+		memcpy(config->name, &data[offset], 64);
+		/* Skip extra 8 bytes*/
+		offset += 72;
+		offset = fw_parse_data_kernel(tas_fmw, &(config->dev_data),
+			fmw, offset);
+		if (offset < 0)
+			return offset;
+	}
+
+	return offset;
+}
+
 static int fw_parse_program_data_kernel(
 	struct tasdevice_priv *tas_priv, struct tasdevice_fw *tas_fmw,
 	const struct firmware *fmw, int offset)
@@ -556,6 +624,124 @@ static int fw_parse_configuration_data_kernel(
 	}
 
 out:
+	return offset;
+}
+
+static void fct_param_address_parser(struct cali_reg *r,
+	struct tasdevice_fw *tas_fmw, const unsigned char *data)
+{
+	struct fct_param_address *p = &tas_fmw->fct_par_addr;
+	unsigned int i;
+
+	/*
+	 * Calibration parameters locations and data schema in dsp firmware.
+	 * The number of items are flexible, but not more than 20. The dsp tool
+	 * will reseve 20*24-byte space for fct params. In some cases, the
+	 * number of fct param is less than 20, the data will be saved from the
+	 * beginning, the rest part will be stuffed with zero.
+	 *
+	 *	fct_param_num (not more than 20)
+	 *	for (i = 0; i < fct_param_num; i++) {
+	 *		Alias of fct param (20 bytes)
+	 *		Book (1 byte)
+	 *		Page (1 byte)
+	 *		Offset (1 byte)
+	 *		CoeffLength (1 byte) = 0x1
+	 *	}
+	 *	if (20 - fct_param_num)
+	 *		24*(20 - fct_param_num) pieces of '0' as stuffing
+	 *
+	 * As follow:
+	 * umg_SsmKEGCye	 = Book, Page, Offset, CoeffLength
+	 * iks_E0 		 = Book, Page, Offset, CoeffLength
+	 * yep_LsqM0		 = Book, Page, Offset, CoeffLength
+	 * oyz_U0_ujx		 = Book, Page, Offset, CoeffLength
+	 * iks_GC_GMgq		 = Book, Page, Offset, CoeffLength
+	 * gou_Yao		 = Book, Page, Offset, CoeffLength
+	 * kgd_Wsc_Qsbp		 = Book, Page, Offset, CoeffLength
+	 * yec_CqseSsqs		 = Book, Page, Offset, CoeffLength
+	 * iks_SogkGgog2	 = Book, Page, Offset, CoeffLength
+	 * yec_Sae_Y		 = Book, Page, Offset, CoeffLength
+	 * Re_Int		 = Book, Page, Offset, CoeffLength
+	 * SigFlag		 = Book, Page, Offset, CoeffLength
+	 * a1_Int		 = Book, Page, Offset, CoeffLength
+	 * a2_Int		 = Book, Page, Offset, CoeffLength
+	 */
+	for (i = 0; i < 20; i++) {
+		const unsigned char *dat = &data[24 * i];
+
+		/*
+		 * check whether current fct param is empty.
+		 */
+		if (dat[23] != 1)
+			break;
+
+		if (!strncmp(dat, "umg_SsmKEGCye", 20))
+			r->pow_reg = TASDEVICE_REG(dat[20], dat[21], dat[22]);
+		/* high 32-bit of real-time spk impedance */
+		else if (!strncmp(dat, "iks_E0", 20))
+			r->r0_reg = TASDEVICE_REG(dat[20], dat[21], dat[22]);
+		/* inverse of real-time spk impedance */
+		else if (!strncmp(dat, "yep_LsqM0", 20))
+			r->invr0_reg =
+				TASDEVICE_REG(dat[20], dat[21], dat[22]);
+		/* low 32-bit of real-time spk impedance */
+		else if (!strncmp(dat, "oyz_U0_ujx", 20))
+			r->r0_low_reg =
+				TASDEVICE_REG(dat[20], dat[21], dat[22]);
+		/* Delta Thermal Limit */
+		else if (!strncmp(dat, "iks_GC_GMgq", 20))
+			r->tlimit_reg =
+				TASDEVICE_REG(dat[20], dat[21], dat[22]);
+		/* Thermal data for PG 1.0 device */
+		else if (!strncmp(dat, "gou_Yao", 20))
+			memcpy(p->thr, &dat[20], 3);
+		/* Pilot tone enable flag, usually the sine wave */
+		else if (!strncmp(dat, "kgd_Wsc_Qsbp", 20))
+			memcpy(p->plt_flg, &dat[20], 3);
+		/* Pilot tone gain for calibration */
+		else if (!strncmp(dat, "yec_CqseSsqs", 20))
+			memcpy(p->sin_gn, &dat[20], 3);
+		/* Pilot tone gain for calibration, useless in PG 2.0 */
+		else if (!strncmp(dat, "iks_SogkGgog2", 20))
+			memcpy(p->sin_gn2, &dat[20], 3);
+		/* Thermal data for PG 2.0 device */
+		else if (!strncmp(dat, "yec_Sae_Y", 20))
+			memcpy(p->thr2, &dat[20], 3);
+		/* Spk Equivalent Resistance in fixed-point format */
+		else if (!strncmp(dat, "Re_Int", 20))
+			memcpy(p->r0_reg, &dat[20], 3);
+		/* Check whether the spk connection is open */
+		else if (!strncmp(dat, "SigFlag", 20))
+			memcpy(p->tf_reg, &dat[20], 3);
+		/* check spk resonant frequency */
+		else if (!strncmp(dat, "a1_Int", 20))
+			memcpy(p->a1_reg, &dat[20], 3);
+		/* check spk resonant frequency */
+		else if (!strncmp(dat, "a2_Int", 20))
+			memcpy(p->a2_reg, &dat[20], 3);
+	}
+}
+
+static int fw_parse_fct_param_address(struct tasdevice_priv *tas_priv,
+	struct tasdevice_fw *tas_fmw, const struct firmware *fmw, int offset)
+{
+	struct calidata *cali_data = &tas_priv->cali_data;
+	struct cali_reg *r = &cali_data->cali_reg_array;
+	const unsigned char *data = fmw->data;
+
+	if (offset + 520 > fmw->size) {
+		dev_err(tas_priv->dev, "%s: File Size error\n", __func__);
+		return -EINVAL;
+	}
+
+	/* skip reserved part */
+	offset += 40;
+
+	fct_param_address_parser(r, tas_fmw, &data[offset]);
+
+	offset += 480;
+
 	return offset;
 }
 
@@ -684,8 +870,13 @@ static int tasdevice_process_block(void *context, unsigned char *data,
 		chn = idx - 1;
 		chnend = idx;
 	} else {
-		chn = 0;
-		chnend = tas_priv->ndev;
+		if (tas_priv->isspi) {
+			chn = tas_priv->index;
+			chnend = chn + 1;
+		} else {
+			chn = 0;
+			chnend = tas_priv->ndev;
+		}
 	}
 
 	for (; chn < chnend; chn++) {
@@ -777,7 +968,7 @@ static int tasdevice_process_block(void *context, unsigned char *data,
 				is_err = true;
 				break;
 			}
-			rc = tasdevice_dev_update_bits(tas_priv, chn,
+			rc = tas_priv->update_bits(tas_priv, chn,
 				TASDEVICE_REG(data[subblk_offset + 2],
 				data[subblk_offset + 3],
 				data[subblk_offset + 4]),
@@ -862,7 +1053,7 @@ void tasdevice_select_cfg_blk(void *pContext, int conf_no,
 				__func__, length, blk_data[j]->block_size);
 	}
 }
-EXPORT_SYMBOL_NS_GPL(tasdevice_select_cfg_blk, SND_SOC_TAS2781_FMWLIB);
+EXPORT_SYMBOL_NS_GPL(tasdevice_select_cfg_blk, "SND_SOC_TAS2781_FMWLIB");
 
 static int tasdevice_load_block_kernel(
 	struct tasdevice_priv *tasdevice, struct tasdev_blk *block)
@@ -1342,7 +1533,7 @@ static int tasdev_multibytes_chksum(struct tasdevice_priv *tasdevice,
 		goto end;
 	}
 
-	ret = tasdevice_dev_bulk_read(tasdevice, chn,
+	ret = tasdevice->dev_bulk_read(tasdevice, chn,
 		TASDEVICE_REG(book, page, crc_data.offset),
 		nBuf1, crc_data.len);
 	if (ret < 0)
@@ -1392,7 +1583,7 @@ static int do_singlereg_checksum(struct tasdevice_priv *tasdevice,
 	in = check_yram(&crc_data, book, page, reg, 1);
 	if (!in)
 		goto end;
-	ret = tasdevice_dev_read(tasdevice, chl,
+	ret = tasdevice->dev_read(tasdevice, chl,
 		TASDEVICE_REG(book, page, reg), &nData1);
 	if (ret < 0)
 		goto end;
@@ -1496,7 +1687,7 @@ static int tasdev_block_chksum(struct tasdevice_priv *tas_priv,
 	unsigned int nr_value;
 	int ret;
 
-	ret = tasdevice_dev_read(tas_priv, chn, TASDEVICE_I2CChecksum,
+	ret = tas_priv->dev_read(tas_priv, chn, TASDEVICE_CHECKSUM_REG,
 		&nr_value);
 	if (ret < 0) {
 		dev_err(tas_priv->dev, "%s: Chn %d\n", __func__, chn);
@@ -1540,7 +1731,7 @@ static int tasdev_load_blk(struct tasdevice_priv *tas_priv,
 	while (block->nr_retry > 0) {
 		if (block->is_pchksum_present) {
 			ret = tasdevice_dev_write(tas_priv, chn,
-				TASDEVICE_I2CChecksum, 0);
+				TASDEVICE_CHECKSUM_REG, 0);
 			if (ret < 0)
 				break;
 		}
@@ -1686,13 +1877,40 @@ static int tasdevice_load_block(struct tasdevice_priv *tas_priv,
 	return rc;
 }
 
+static void dspbin_type_check(struct tasdevice_priv *tas_priv,
+	unsigned int ppcver)
+{
+	if (ppcver >= PPC3_VERSION_TAS2781_ALPHA_MIN) {
+		if (ppcver >= PPC3_VERSION_TAS2781_BETA_MIN)
+			tas_priv->dspbin_typ = TASDEV_BETA;
+		else if (ppcver >= PPC3_VERSION_TAS2781_BASIC_MIN)
+			tas_priv->dspbin_typ = TASDEV_BASIC;
+		else
+			tas_priv->dspbin_typ = TASDEV_ALPHA;
+	}
+	if ((tas_priv->dspbin_typ != TASDEV_BASIC) &&
+		(ppcver < PPC3_VERSION_TAS5825_BASE))
+		tas_priv->fw_parse_fct_param_address =
+			fw_parse_fct_param_address;
+}
+
 static int dspfw_default_callback(struct tasdevice_priv *tas_priv,
 	unsigned int drv_ver, unsigned int ppcver)
 {
 	int rc = 0;
 
 	if (drv_ver == 0x100) {
-		if (ppcver >= PPC3_VERSION) {
+		if (ppcver >= PPC3_VERSION_TAS5825_BASE) {
+			tas_priv->fw_parse_variable_header =
+				fw_parse_variable_header_kernel;
+			tas_priv->fw_parse_program_data =
+				fw_parse_tas5825_program_data_kernel;
+			tas_priv->fw_parse_configuration_data =
+				fw_parse_tas5825_configuration_data_kernel;
+			tas_priv->tasdevice_load_block =
+				tasdevice_load_block_kernel;
+			dspbin_type_check(tas_priv, ppcver);
+		} else if (ppcver >= PPC3_VERSION_BASE) {
 			tas_priv->fw_parse_variable_header =
 				fw_parse_variable_header_kernel;
 			tas_priv->fw_parse_program_data =
@@ -1701,6 +1919,7 @@ static int dspfw_default_callback(struct tasdevice_priv *tas_priv,
 				fw_parse_configuration_data_kernel;
 			tas_priv->tasdevice_load_block =
 				tasdevice_load_block_kernel;
+			dspbin_type_check(tas_priv, ppcver);
 		} else {
 			switch (ppcver) {
 			case 0x00:
@@ -1716,7 +1935,7 @@ static int dspfw_default_callback(struct tasdevice_priv *tas_priv,
 			default:
 				dev_err(tas_priv->dev,
 					"%s: PPCVer must be 0x0 or 0x%02x",
-					__func__, PPC3_VERSION);
+					__func__, PPC3_VERSION_BASE);
 				dev_err(tas_priv->dev, " Current:0x%02x\n",
 					ppcver);
 				rc = -EINVAL;
@@ -1938,12 +2157,11 @@ int tas2781_load_calibration(void *context, char *file_name,
 	}
 
 out:
-	if (fw_entry)
-		release_firmware(fw_entry);
+	release_firmware(fw_entry);
 
 	return ret;
 }
-EXPORT_SYMBOL_NS_GPL(tas2781_load_calibration, SND_SOC_TAS2781_FMWLIB);
+EXPORT_SYMBOL_NS_GPL(tas2781_load_calibration, "SND_SOC_TAS2781_FMWLIB");
 
 static int tasdevice_dspfw_ready(const struct firmware *fmw,
 	void *context)
@@ -1952,28 +2170,25 @@ static int tasdevice_dspfw_ready(const struct firmware *fmw,
 	struct tasdevice_fw_fixed_hdr *fw_fixed_hdr;
 	struct tasdevice_fw *tas_fmw;
 	int offset = 0;
-	int ret = 0;
+	int ret;
 
 	if (!fmw || !fmw->data) {
 		dev_err(tas_priv->dev, "%s: Failed to read firmware %s\n",
 			__func__, tas_priv->coef_binaryname);
-		ret = -EINVAL;
-		goto out;
+		return -EINVAL;
 	}
 
 	tas_priv->fmw = kzalloc(sizeof(struct tasdevice_fw), GFP_KERNEL);
-	if (!tas_priv->fmw) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	if (!tas_priv->fmw)
+		return -ENOMEM;
+
 	tas_fmw = tas_priv->fmw;
 	tas_fmw->dev = tas_priv->dev;
 	offset = fw_parse_header(tas_priv, tas_fmw, fmw, offset);
 
-	if (offset == -EINVAL) {
-		ret = -EINVAL;
-		goto out;
-	}
+	if (offset == -EINVAL)
+		return -EINVAL;
+
 	fw_fixed_hdr = &(tas_fmw->fw_hdr.fixed_hdr);
 	/* Support different versions of firmware */
 	switch (fw_fixed_hdr->drv_ver) {
@@ -2006,28 +2221,32 @@ static int tasdevice_dspfw_ready(const struct firmware *fmw,
 		ret = dspfw_default_callback(tas_priv,
 			fw_fixed_hdr->drv_ver, fw_fixed_hdr->ppcver);
 		if (ret)
-			goto out;
+			return ret;
 		break;
 	}
 
 	offset = tas_priv->fw_parse_variable_header(tas_priv, fmw, offset);
-	if (offset < 0) {
-		ret = offset;
-		goto out;
-	}
+	if (offset < 0)
+		return offset;
+
 	offset = tas_priv->fw_parse_program_data(tas_priv, tas_fmw, fmw,
 		offset);
-	if (offset < 0) {
-		ret = offset;
-		goto out;
-	}
+	if (offset < 0)
+		return offset;
+
 	offset = tas_priv->fw_parse_configuration_data(tas_priv,
 		tas_fmw, fmw, offset);
 	if (offset < 0)
-		ret = offset;
+		return offset;
 
-out:
-	return ret;
+	if (tas_priv->fw_parse_fct_param_address) {
+		offset = tas_priv->fw_parse_fct_param_address(tas_priv,
+			tas_fmw, fmw, offset);
+		if (offset < 0)
+			return offset;
+	}
+
+	return 0;
 }
 
 int tasdevice_dsp_parser(void *context)
@@ -2051,7 +2270,7 @@ int tasdevice_dsp_parser(void *context)
 out:
 	return ret;
 }
-EXPORT_SYMBOL_NS_GPL(tasdevice_dsp_parser, SND_SOC_TAS2781_FMWLIB);
+EXPORT_SYMBOL_NS_GPL(tasdevice_dsp_parser, "SND_SOC_TAS2781_FMWLIB");
 
 static void tas2781_clear_calfirmware(struct tasdevice_fw *tas_fmw)
 {
@@ -2104,7 +2323,7 @@ void tasdevice_calbin_remove(void *context)
 		tasdev->cali_data_fmw = NULL;
 	}
 }
-EXPORT_SYMBOL_NS_GPL(tasdevice_calbin_remove, SND_SOC_TAS2781_FMWLIB);
+EXPORT_SYMBOL_NS_GPL(tasdevice_calbin_remove, "SND_SOC_TAS2781_FMWLIB");
 
 void tasdevice_config_info_remove(void *context)
 {
@@ -2131,7 +2350,7 @@ void tasdevice_config_info_remove(void *context)
 	}
 	kfree(ci);
 }
-EXPORT_SYMBOL_NS_GPL(tasdevice_config_info_remove, SND_SOC_TAS2781_FMWLIB);
+EXPORT_SYMBOL_NS_GPL(tasdevice_config_info_remove, "SND_SOC_TAS2781_FMWLIB");
 
 static int tasdevice_load_data(struct tasdevice_priv *tas_priv,
 	struct tasdevice_data *dev_data)
@@ -2311,8 +2530,7 @@ int tasdevice_select_tuningprm_cfg(void *context, int prm_no,
 out:
 	return prog_status;
 }
-EXPORT_SYMBOL_NS_GPL(tasdevice_select_tuningprm_cfg,
-	SND_SOC_TAS2781_FMWLIB);
+EXPORT_SYMBOL_NS_GPL(tasdevice_select_tuningprm_cfg, "SND_SOC_TAS2781_FMWLIB");
 
 int tasdevice_prmg_load(void *context, int prm_no)
 {
@@ -2357,7 +2575,7 @@ int tasdevice_prmg_load(void *context, int prm_no)
 out:
 	return prog_status;
 }
-EXPORT_SYMBOL_NS_GPL(tasdevice_prmg_load, SND_SOC_TAS2781_FMWLIB);
+EXPORT_SYMBOL_NS_GPL(tasdevice_prmg_load, "SND_SOC_TAS2781_FMWLIB");
 
 void tasdevice_tuning_switch(void *context, int state)
 {
@@ -2393,8 +2611,7 @@ void tasdevice_tuning_switch(void *context, int state)
 			TASDEVICE_BIN_BLK_PRE_SHUTDOWN);
 	}
 }
-EXPORT_SYMBOL_NS_GPL(tasdevice_tuning_switch,
-	SND_SOC_TAS2781_FMWLIB);
+EXPORT_SYMBOL_NS_GPL(tasdevice_tuning_switch, "SND_SOC_TAS2781_FMWLIB");
 
 MODULE_DESCRIPTION("Texas Firmware Support");
 MODULE_AUTHOR("Shenghao Ding, TI, <shenghao-ding@ti.com>");

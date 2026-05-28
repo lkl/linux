@@ -64,54 +64,6 @@ static const struct snd_soc_ops sdw_ops = {
 	.shutdown = asoc_sdw_shutdown,
 };
 
-static int get_acp63_cpu_pin_id(u32 sdw_link_id, int be_id, int *cpu_pin_id, struct device *dev)
-{
-	switch (sdw_link_id) {
-	case AMD_SDW0:
-		switch (be_id) {
-		case SOC_SDW_JACK_OUT_DAI_ID:
-			*cpu_pin_id = ACP63_SW0_AUDIO0_TX;
-			break;
-		case SOC_SDW_JACK_IN_DAI_ID:
-			*cpu_pin_id = ACP63_SW0_AUDIO0_RX;
-			break;
-		case SOC_SDW_AMP_OUT_DAI_ID:
-			*cpu_pin_id = ACP63_SW0_AUDIO1_TX;
-			break;
-		case SOC_SDW_AMP_IN_DAI_ID:
-			*cpu_pin_id = ACP63_SW0_AUDIO1_RX;
-			break;
-		case SOC_SDW_DMIC_DAI_ID:
-			*cpu_pin_id = ACP63_SW0_AUDIO2_RX;
-			break;
-		default:
-			dev_err(dev, "Invalid be id:%d\n", be_id);
-			return -EINVAL;
-		}
-		break;
-	case AMD_SDW1:
-		switch (be_id) {
-		case SOC_SDW_JACK_OUT_DAI_ID:
-		case SOC_SDW_AMP_OUT_DAI_ID:
-			*cpu_pin_id = ACP63_SW1_AUDIO0_TX;
-			break;
-		case SOC_SDW_JACK_IN_DAI_ID:
-		case SOC_SDW_AMP_IN_DAI_ID:
-		case SOC_SDW_DMIC_DAI_ID:
-			*cpu_pin_id = ACP63_SW1_AUDIO0_RX;
-			break;
-		default:
-			dev_err(dev, "invalid be_id:%d\n", be_id);
-			return -EINVAL;
-		}
-		break;
-	default:
-		dev_err(dev, "Invalid link id:%d\n", sdw_link_id);
-		return -EINVAL;
-	}
-	return 0;
-}
-
 static const char * const type_strings[] = {"SimpleJack", "SmartAmp", "SmartMic"};
 
 static int create_sdw_dailink(struct snd_soc_card *card,
@@ -154,7 +106,7 @@ static int create_sdw_dailink(struct snd_soc_card *card,
 		int num_cpus = hweight32(sof_dai->link_mask[stream]);
 		int num_codecs = sof_dai->num_devs[stream];
 		int playback, capture;
-		int i = 0, j = 0;
+		int j = 0;
 		char *name;
 
 		if (!sof_dai->num_devs[stream])
@@ -172,6 +124,14 @@ static int create_sdw_dailink(struct snd_soc_card *card,
 		switch (amd_ctx->acp_rev) {
 		case ACP63_PCI_REV:
 			ret = get_acp63_cpu_pin_id(ffs(sof_end->link_mask - 1),
+						   *be_id, &cpu_pin_id, dev);
+			if (ret)
+				return ret;
+			break;
+		case ACP70_PCI_REV:
+		case ACP71_PCI_REV:
+		case ACP72_PCI_REV:
+			ret = get_acp70_cpu_pin_id(ffs(sof_end->link_mask - 1),
 						   *be_id, &cpu_pin_id, dev);
 			if (ret)
 				return ret;
@@ -213,14 +173,14 @@ static int create_sdw_dailink(struct snd_soc_card *card,
 
 			int link_num = ffs(sof_end->link_mask) - 1;
 
-			cpus[i].dai_name = devm_kasprintf(dev, GFP_KERNEL,
-							  "SDW%d Pin%d",
-							  link_num, cpu_pin_id);
-			dev_dbg(dev, "cpu[%d].dai_name:%s\n", i, cpus[i].dai_name);
-			if (!cpus[i].dai_name)
+			cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL,
+							"SDW%d Pin%d",
+							link_num, cpu_pin_id);
+			if (!cpus->dai_name)
 				return -ENOMEM;
+			dev_dbg(dev, "cpu->dai_name:%s\n", cpus->dai_name);
 
-			codec_maps[j].cpu = i;
+			codec_maps[j].cpu = 0;
 			codec_maps[j].codec = j;
 
 			codecs[j].name = sof_end->codec_name;
@@ -236,7 +196,7 @@ static int create_sdw_dailink(struct snd_soc_card *card,
 		asoc_sdw_init_dai_link(dev, *dai_links, be_id, name, playback, capture,
 				       cpus, num_cpus, platform_component,
 				       ARRAY_SIZE(platform_component), codecs, num_codecs,
-				       asoc_sdw_rtd_init, &sdw_ops);
+				       1, asoc_sdw_rtd_init, &sdw_ops);
 
 		/*
 		 * SoundWire DAILINKs use 'stream' functions and Bank Switch operations
@@ -267,7 +227,7 @@ static int create_sdw_dailinks(struct snd_soc_card *card,
 
 	/* generate DAI links by each sdw link */
 	while (sof_dais->initialised) {
-		int current_be_id;
+		int current_be_id = 0;
 
 		ret = create_sdw_dailink(card, sof_dais, dai_links,
 					 &current_be_id, codec_conf);
@@ -285,7 +245,7 @@ static int create_sdw_dailinks(struct snd_soc_card *card,
 }
 
 static int create_dmic_dailinks(struct snd_soc_card *card,
-				struct snd_soc_dai_link **dai_links, int *be_id)
+				struct snd_soc_dai_link **dai_links, int *be_id, int no_pcm)
 {
 	struct device *dev = card->dev;
 	int ret;
@@ -293,8 +253,7 @@ static int create_dmic_dailinks(struct snd_soc_card *card,
 	ret = asoc_sdw_init_simple_dai_link(dev, *dai_links, be_id, "acp-dmic-codec",
 					    0, 1, // DMIC only supports capture
 					    "acp-sof-dmic", platform_component->name,
-					    ARRAY_SIZE(platform_component),
-					    "dmic-codec", "dmic-hifi",
+					    "dmic-codec", "dmic-hifi", no_pcm,
 					    asoc_sdw_dmic_init, NULL);
 	if (ret)
 		return ret;
@@ -311,9 +270,9 @@ static int sof_card_dai_links_create(struct snd_soc_card *card)
 	int sdw_be_num = 0, dmic_num = 0;
 	struct asoc_sdw_mc_private *ctx = snd_soc_card_get_drvdata(card);
 	struct snd_soc_acpi_mach_params *mach_params = &mach->mach_params;
+	struct asoc_sdw_endpoint *sof_ends __free(kfree) = NULL;
+	struct asoc_sdw_dailink *sof_dais __free(kfree) = NULL;
 	struct snd_soc_codec_conf *codec_conf;
-	struct asoc_sdw_endpoint *sof_ends;
-	struct asoc_sdw_dailink *sof_dais;
 	struct snd_soc_dai_link *dai_links;
 	int num_devs = 0;
 	int num_ends = 0;
@@ -334,14 +293,12 @@ static int sof_card_dai_links_create(struct snd_soc_card *card)
 
 	/* One per endpoint, ie. each DAI on each codec/amp */
 	sof_ends = kcalloc(num_ends, sizeof(*sof_ends), GFP_KERNEL);
-	if (!sof_ends) {
-		ret = -ENOMEM;
-		goto err_dai;
-	}
+	if (!sof_ends)
+		return -ENOMEM;
 
 	ret = asoc_sdw_parse_sdw_endpoints(card, sof_dais, sof_ends, &num_devs);
 	if (ret < 0)
-		goto err_end;
+		return ret;
 
 	sdw_be_num = ret;
 
@@ -352,18 +309,14 @@ static int sof_card_dai_links_create(struct snd_soc_card *card)
 	dev_dbg(dev, "sdw %d, dmic %d", sdw_be_num, dmic_num);
 
 	codec_conf = devm_kcalloc(dev, num_devs, sizeof(*codec_conf), GFP_KERNEL);
-	if (!codec_conf) {
-		ret = -ENOMEM;
-		goto err_end;
-	}
+	if (!codec_conf)
+		return -ENOMEM;
 
 	/* allocate BE dailinks */
 	num_links = sdw_be_num + dmic_num;
 	dai_links = devm_kcalloc(dev, num_links, sizeof(*dai_links), GFP_KERNEL);
-	if (!dai_links) {
-		ret = -ENOMEM;
-	goto err_end;
-	}
+	if (!dai_links)
+		return -ENOMEM;
 
 	card->codec_conf = codec_conf;
 	card->num_configs = num_devs;
@@ -375,7 +328,7 @@ static int sof_card_dai_links_create(struct snd_soc_card *card)
 		ret = create_sdw_dailinks(card, &dai_links, &be_id,
 					  sof_dais, &codec_conf);
 		if (ret)
-			goto err_end;
+			return ret;
 	}
 
 	/* dmic */
@@ -383,19 +336,14 @@ static int sof_card_dai_links_create(struct snd_soc_card *card)
 		if (ctx->ignore_internal_dmic) {
 			dev_warn(dev, "Ignoring ACP DMIC\n");
 		} else {
-			ret = create_dmic_dailinks(card, &dai_links, &be_id);
+			ret = create_dmic_dailinks(card, &dai_links, &be_id, 1);
 			if (ret)
-				goto err_end;
+				return ret;
 		}
 	}
 
 	WARN_ON(codec_conf != card->codec_conf + card->num_configs);
 	WARN_ON(dai_links != card->dai_link + card->num_links);
-
-err_end:
-	kfree(sof_ends);
-err_dai:
-	kfree(sof_dais);
 
 	return ret;
 }
@@ -501,4 +449,5 @@ module_platform_driver(sof_sdw_driver);
 MODULE_DESCRIPTION("ASoC AMD SoundWire Generic Machine driver");
 MODULE_AUTHOR("Vijendar Mukunda <Vijendar.Mukunda@amd.com");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(SND_SOC_SDW_UTILS);
+MODULE_IMPORT_NS("SND_SOC_SDW_UTILS");
+MODULE_IMPORT_NS("SND_SOC_AMD_SDW_MACH");

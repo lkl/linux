@@ -59,7 +59,7 @@ static void serial8250_em_serial_out_helper(struct uart_port *p, int offset,
 	}
 }
 
-static unsigned int serial8250_em_serial_in(struct uart_port *p, int offset)
+static u32 serial8250_em_serial_in(struct uart_port *p, unsigned int offset)
 {
 	switch (offset) {
 	case UART_RX: /* RX @ 0x00 */
@@ -119,7 +119,7 @@ static void serial8250_em_reg_update(struct uart_port *p, int off, int value)
 	serial8250_em_serial_out_helper(p, UART_HCR0_EM, hcr0);
 }
 
-static void serial8250_em_serial_out(struct uart_port *p, int offset, int value)
+static void serial8250_em_serial_out(struct uart_port *p, unsigned int offset, u32 value)
 {
 	switch (offset) {
 	case UART_TX:
@@ -219,7 +219,7 @@ static struct platform_driver serial8250_em_platform_driver = {
 		.of_match_table = serial8250_em_dt_ids,
 	},
 	.probe			= serial8250_em_probe,
-	.remove_new		= serial8250_em_remove,
+	.remove			= serial8250_em_remove,
 };
 
 module_platform_driver(serial8250_em_platform_driver);

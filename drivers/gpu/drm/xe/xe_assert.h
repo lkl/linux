@@ -10,11 +10,12 @@
 
 #include <drm/drm_print.h>
 
-#include "xe_device_types.h"
+#include "xe_gt_types.h"
 #include "xe_step.h"
+#include "xe_vram.h"
 
 /**
- * DOC: Xe ASSERTs
+ * DOC: Xe Asserts
  *
  * While Xe driver aims to be simpler than legacy i915 driver it is still
  * complex enough that some changes introduced while adding new functionality
@@ -103,7 +104,7 @@
  * (&CONFIG_DRM_XE_DEBUG must be enabled) and cannot be used in expressions
  * or as a condition.
  *
- * See `Xe ASSERTs`_ for general usage guidelines.
+ * See `Xe Asserts`_ for general usage guidelines.
  */
 #define xe_assert(xe, condition) xe_assert_msg((xe), condition, "")
 #define xe_assert_msg(xe, condition, msg, arg...) ({						\
@@ -138,14 +139,15 @@
  * (&CONFIG_DRM_XE_DEBUG must be enabled) and cannot be used in expressions
  * or as a condition.
  *
- * See `Xe ASSERTs`_ for general usage guidelines.
+ * See `Xe Asserts`_ for general usage guidelines.
  */
 #define xe_tile_assert(tile, condition) xe_tile_assert_msg((tile), condition, "")
 #define xe_tile_assert_msg(tile, condition, msg, arg...) ({					\
 	const struct xe_tile *__tile = (tile);							\
 	char __buf[10] __maybe_unused;								\
 	xe_assert_msg(tile_to_xe(__tile), condition, "tile: %u VRAM %s\n" msg,			\
-		      __tile->id, ({ string_get_size(__tile->mem.vram.actual_physical_size, 1,	\
+		      __tile->id, ({ string_get_size(						\
+				     xe_vram_region_actual_physical_size(__tile->mem.vram), 1,	\
 				     STRING_UNITS_2, __buf, sizeof(__buf)); __buf; }), ## arg);	\
 })
 
@@ -162,7 +164,7 @@
  * (&CONFIG_DRM_XE_DEBUG must be enabled) and cannot be used in expressions
  * or as a condition.
  *
- * See `Xe ASSERTs`_ for general usage guidelines.
+ * See `Xe Asserts`_ for general usage guidelines.
  */
 #define xe_gt_assert(gt, condition) xe_gt_assert_msg((gt), condition, "")
 #define xe_gt_assert_msg(gt, condition, msg, arg...) ({						\

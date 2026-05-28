@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "debug.h"
+#include "env.h"
 #include "event.h"
 #include "tests.h"
 #include "machine.h"
@@ -155,6 +156,7 @@ static int synth_process(struct machine *machine)
 
 static int mmap_events(synth_cb synth)
 {
+	struct perf_env host_env;
 	struct machine *machine;
 	int err, i;
 
@@ -167,7 +169,8 @@ static int mmap_events(synth_cb synth)
 	 */
 	TEST_ASSERT_VAL("failed to create threads", !threads_create());
 
-	machine = machine__new_host();
+	perf_env__init(&host_env);
+	machine = machine__new_host(&host_env);
 
 	dump_trace = verbose > 1 ? 1 : 0;
 
@@ -209,6 +212,7 @@ static int mmap_events(synth_cb synth)
 	}
 
 	machine__delete(machine);
+	perf_env__exit(&host_env);
 	return err;
 }
 
@@ -229,11 +233,11 @@ static int mmap_events(synth_cb synth)
 static int test__mmap_thread_lookup(struct test_suite *test __maybe_unused, int subtest __maybe_unused)
 {
 	/* perf_event__synthesize_threads synthesize */
-	TEST_ASSERT_VAL("failed with sythesizing all",
+	TEST_ASSERT_VAL("failed with synthesizing all",
 			!mmap_events(synth_all));
 
 	/* perf_event__synthesize_thread_map synthesize */
-	TEST_ASSERT_VAL("failed with sythesizing process",
+	TEST_ASSERT_VAL("failed with synthesizing process",
 			!mmap_events(synth_process));
 
 	return 0;

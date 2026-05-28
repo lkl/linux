@@ -554,7 +554,7 @@ static unsigned long aligned_access_size(size_t offset, size_t count)
 }
 
 static ssize_t fsi_slave_sysfs_raw_read(struct file *file,
-		struct kobject *kobj, struct bin_attribute *attr, char *buf,
+		struct kobject *kobj, const struct bin_attribute *attr, char *buf,
 		loff_t off, size_t count)
 {
 	struct fsi_slave *slave = to_fsi_slave(kobj_to_dev(kobj));
@@ -581,7 +581,7 @@ static ssize_t fsi_slave_sysfs_raw_read(struct file *file,
 }
 
 static ssize_t fsi_slave_sysfs_raw_write(struct file *file,
-		struct kobject *kobj, struct bin_attribute *attr,
+		struct kobject *kobj, const struct bin_attribute *attr,
 		char *buf, loff_t off, size_t count)
 {
 	struct fsi_slave *slave = to_fsi_slave(kobj_to_dev(kobj));
@@ -1404,7 +1404,7 @@ void fsi_driver_unregister(struct fsi_driver *fsi_drv)
 }
 EXPORT_SYMBOL_GPL(fsi_driver_unregister);
 
-struct bus_type fsi_bus_type = {
+const struct bus_type fsi_bus_type = {
 	.name		= "fsi",
 	.match		= fsi_bus_match,
 };

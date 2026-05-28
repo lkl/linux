@@ -831,7 +831,7 @@ next_atomic_cmd:
  */
 static void img_i2c_check_timer(struct timer_list *t)
 {
-	struct img_i2c *i2c = from_timer(i2c, t, check_timer);
+	struct img_i2c *i2c = timer_container_of(i2c, t, check_timer);
 	unsigned long flags;
 	unsigned int line_status;
 
@@ -1122,7 +1122,7 @@ static int img_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 
 		time_left = wait_for_completion_timeout(&i2c->msg_complete,
 						      IMG_I2C_TIMEOUT);
-		del_timer_sync(&i2c->check_timer);
+		timer_delete_sync(&i2c->check_timer);
 
 		if (time_left == 0)
 			i2c->msg_status = -ETIMEDOUT;
@@ -1131,7 +1131,6 @@ static int img_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 			break;
 	}
 
-	pm_runtime_mark_last_busy(adap->dev.parent);
 	pm_runtime_put_autosuspend(adap->dev.parent);
 
 	return i2c->msg_status ? i2c->msg_status : num;
@@ -1143,7 +1142,7 @@ static u32 img_i2c_func(struct i2c_adapter *adap)
 }
 
 static const struct i2c_algorithm img_i2c_algo = {
-	.master_xfer = img_i2c_xfer,
+	.xfer = img_i2c_xfer,
 	.functionality = img_i2c_func,
 };
 
@@ -1165,7 +1164,6 @@ static int img_i2c_init(struct img_i2c *i2c)
 			 "Unknown hardware revision (%d.%d.%d.%d)\n",
 			 (rev >> 24) & 0xff, (rev >> 16) & 0xff,
 			 (rev >> 8) & 0xff, rev & 0xff);
-		pm_runtime_mark_last_busy(i2c->adap.dev.parent);
 		pm_runtime_put_autosuspend(i2c->adap.dev.parent);
 		return -EINVAL;
 	}
@@ -1317,7 +1315,6 @@ static int img_i2c_init(struct img_i2c *i2c)
 	/* Perform a synchronous sequence to reset the bus */
 	ret = img_i2c_reset_bus(i2c);
 
-	pm_runtime_mark_last_busy(i2c->adap.dev.parent);
 	pm_runtime_put_autosuspend(i2c->adap.dev.parent);
 
 	return ret;
@@ -1497,7 +1494,7 @@ static struct platform_driver img_scb_i2c_driver = {
 		.pm		= pm_ptr(&img_i2c_pm),
 	},
 	.probe = img_i2c_probe,
-	.remove_new = img_i2c_remove,
+	.remove = img_i2c_remove,
 };
 module_platform_driver(img_scb_i2c_driver);
 

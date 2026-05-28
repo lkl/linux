@@ -3,7 +3,7 @@
  *
  * Module Name: psopinfo - AML opcode information functions and dispatch tables
  *
- * Copyright (C) 2000 - 2023, Intel Corp.
+ * Copyright (C) 2000 - 2025, Intel Corp.
  *
  *****************************************************************************/
 
@@ -34,7 +34,7 @@ static const u8 acpi_gbl_argument_count[] =
 
 const struct acpi_opcode_info *acpi_ps_get_opcode_info(u16 opcode)
 {
-#ifdef ACPI_DEBUG_OUTPUT
+#if defined ACPI_ASL_COMPILER && defined ACPI_DEBUG_OUTPUT
 	const char *opcode_name = "Unknown AML opcode";
 #endif
 
@@ -102,11 +102,11 @@ const struct acpi_opcode_info *acpi_ps_get_opcode_info(u16 opcode)
 	default:
 		break;
 	}
-#endif
 
 	/* Unknown AML opcode */
 
 	ACPI_DEBUG_PRINT((ACPI_DB_EXEC, "%s [%4.4X]\n", opcode_name, opcode));
+#endif
 
 	return (&acpi_gbl_aml_op_info[_UNK]);
 }

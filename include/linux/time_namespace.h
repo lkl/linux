@@ -12,6 +12,7 @@
 struct user_namespace;
 extern struct user_namespace init_user_ns;
 
+struct seq_file;
 struct vm_area_struct;
 
 struct timens_offsets {
@@ -32,17 +33,22 @@ struct time_namespace {
 extern struct time_namespace init_time_ns;
 
 #ifdef CONFIG_TIME_NS
+static inline struct time_namespace *to_time_ns(struct ns_common *ns)
+{
+	return container_of(ns, struct time_namespace, ns);
+}
+void __init time_ns_init(void);
 extern int vdso_join_timens(struct task_struct *task,
 			    struct time_namespace *ns);
 extern void timens_commit(struct task_struct *tsk, struct time_namespace *ns);
 
 static inline struct time_namespace *get_time_ns(struct time_namespace *ns)
 {
-	refcount_inc(&ns->ns.count);
+	ns_ref_inc(ns);
 	return ns;
 }
 
-struct time_namespace *copy_time_ns(unsigned long flags,
+struct time_namespace *copy_time_ns(u64 flags,
 				    struct user_namespace *user_ns,
 				    struct time_namespace *old_ns);
 void free_time_ns(struct time_namespace *ns);
@@ -51,7 +57,7 @@ struct page *find_timens_vvar_page(struct vm_area_struct *vma);
 
 static inline void put_time_ns(struct time_namespace *ns)
 {
-	if (refcount_dec_and_test(&ns->ns.count))
+	if (ns_ref_put(ns))
 		free_time_ns(ns);
 }
 
@@ -107,6 +113,10 @@ static inline ktime_t timens_ktime_to_host(clockid_t clockid, ktime_t tim)
 }
 
 #else
+static inline void __init time_ns_init(void)
+{
+}
+
 static inline int vdso_join_timens(struct task_struct *task,
 				   struct time_namespace *ns)
 {
@@ -128,7 +138,7 @@ static inline void put_time_ns(struct time_namespace *ns)
 }
 
 static inline
-struct time_namespace *copy_time_ns(unsigned long flags,
+struct time_namespace *copy_time_ns(u64 flags,
 				    struct user_namespace *user_ns,
 				    struct time_namespace *old_ns)
 {
@@ -164,7 +174,5 @@ static inline ktime_t timens_ktime_to_host(clockid_t clockid, ktime_t tim)
 	return tim;
 }
 #endif
-
-struct vdso_data *arch_get_vdso_data(void *vvar_page);
 
 #endif /* _LINUX_TIMENS_H */

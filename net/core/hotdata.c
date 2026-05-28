@@ -2,12 +2,13 @@
 #include <linux/cache.h>
 #include <linux/jiffies.h>
 #include <linux/list.h>
+#include <net/aligned_data.h>
 #include <net/hotdata.h>
+#include <net/ip.h>
 #include <net/proto_memory.h>
 
 struct net_hotdata net_hotdata __cacheline_aligned = {
 	.offload_base = LIST_HEAD_INIT(net_hotdata.offload_base),
-	.ptype_all = LIST_HEAD_INIT(net_hotdata.ptype_all),
 	.gro_normal_batch = 8,
 
 	.netdev_budget = 300,
@@ -23,3 +24,6 @@ struct net_hotdata net_hotdata __cacheline_aligned = {
 	.sysctl_mem_pcpu_rsv = SK_MEMORY_PCPU_RESERVE
 };
 EXPORT_SYMBOL(net_hotdata);
+
+struct net_aligned_data net_aligned_data;
+EXPORT_IPV6_MOD(net_aligned_data);

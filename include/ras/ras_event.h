@@ -252,6 +252,7 @@ TRACE_EVENT(non_standard_event,
 		  __print_hex(__get_dynamic_array(buf), __entry->len))
 );
 
+#ifdef CONFIG_PCIEAER
 /*
  * PCIe AER Trace event
  *
@@ -309,7 +310,7 @@ TRACE_EVENT(aer_event,
 		__field(	u32,		status		)
 		__field(	u8,		severity	)
 		__field(	u8, 		tlp_header_valid)
-		__array(	u32, 		tlp_header, 4	)
+		__array(	u32, 		tlp_header, PCIE_STD_MAX_TLP_HEADERLOG)
 	),
 
 	TP_fast_assign(
@@ -318,10 +319,10 @@ TRACE_EVENT(aer_event,
 		__entry->severity	= severity;
 		__entry->tlp_header_valid = tlp_header_valid;
 		if (tlp_header_valid) {
-			__entry->tlp_header[0] = tlp->dw[0];
-			__entry->tlp_header[1] = tlp->dw[1];
-			__entry->tlp_header[2] = tlp->dw[2];
-			__entry->tlp_header[3] = tlp->dw[3];
+			int i;
+
+			for (i = 0; i < PCIE_STD_MAX_TLP_HEADERLOG; i++)
+				__entry->tlp_header[i] = tlp->dw[i];
 		}
 	),
 
@@ -334,9 +335,10 @@ TRACE_EVENT(aer_event,
 		__print_flags(__entry->status, "|", aer_correctable_errors) :
 		__print_flags(__entry->status, "|", aer_uncorrectable_errors),
 		__entry->tlp_header_valid ?
-			__print_array(__entry->tlp_header, 4, 4) :
+			__print_array(__entry->tlp_header, PCIE_STD_MAX_TLP_HEADERLOG, 4) :
 			"Not available")
 );
+#endif /* CONFIG_PCIEAER */
 
 /*
  * memory-failure recovery action result event

@@ -30,16 +30,6 @@
 
 typedef int bank_handler_t(struct aca_handle *handle, struct aca_bank *bank, enum aca_smu_type type, void *data);
 
-struct aca_banks {
-	int nr_banks;
-	struct list_head list;
-};
-
-struct aca_hwip {
-	int hwid;
-	int mcatype;
-};
-
 static struct aca_hwip aca_hwid_mcatypes[ACA_HWIP_TYPE_COUNT] = {
 	ACA_BANK_HWID(SMU,	0x01,	0x01),
 	ACA_BANK_HWID(PCS_XGMI, 0x50,	0x00),
@@ -86,6 +76,7 @@ static void aca_banks_release(struct aca_banks *banks)
 	list_for_each_entry_safe(node, tmp, &banks->list, node) {
 		list_del(&node->node);
 		kvfree(node);
+		banks->nr_banks--;
 	}
 }
 
@@ -111,7 +102,7 @@ static struct aca_regs_dump {
 	{"STATUS",		ACA_REG_IDX_STATUS},
 	{"ADDR",		ACA_REG_IDX_ADDR},
 	{"MISC",		ACA_REG_IDX_MISC0},
-	{"CONFIG",		ACA_REG_IDX_CONFG},
+	{"CONFIG",		ACA_REG_IDX_CONFIG},
 	{"IPID",		ACA_REG_IDX_IPID},
 	{"SYND",		ACA_REG_IDX_SYND},
 	{"DESTAT",		ACA_REG_IDX_DESTAT},
@@ -125,11 +116,40 @@ static void aca_smu_bank_dump(struct amdgpu_device *adev, int idx, int total, st
 	u64 event_id = qctx ? qctx->evid.event_id : RAS_EVENT_INVALID_ID;
 	int i;
 
+	if (adev->debug_disable_ce_logs &&
+	    bank->smu_err_type == ACA_SMU_TYPE_CE &&
+	    !ACA_BANK_ERR_IS_DEFFERED(bank))
+		return;
+
 	RAS_EVENT_LOG(adev, event_id, HW_ERR "Accelerator Check Architecture events logged\n");
 	/* plus 1 for output format, e.g: ACA[08/08]: xxxx */
 	for (i = 0; i < ARRAY_SIZE(aca_regs); i++)
 		RAS_EVENT_LOG(adev, event_id, HW_ERR "ACA[%02d/%02d].%s=0x%016llx\n",
 			      idx + 1, total, aca_regs[i].name, bank->regs[aca_regs[i].reg_idx]);
+
+	if (ACA_REG__STATUS__SCRUB(bank->regs[ACA_REG_IDX_STATUS]))
+		RAS_EVENT_LOG(adev, event_id, HW_ERR "hardware error logged by the scrubber\n");
+}
+
+static bool aca_bank_hwip_is_matched(struct aca_bank *bank, enum aca_hwip_type type)
+{
+
+	struct aca_hwip *hwip;
+	int hwid, mcatype;
+	u64 ipid;
+
+	if (!bank || type == ACA_HWIP_TYPE_UNKNOW)
+		return false;
+
+	hwip = &aca_hwid_mcatypes[type];
+	if (!hwip->hwid)
+		return false;
+
+	ipid = bank->regs[ACA_REG_IDX_IPID];
+	hwid = ACA_REG__IPID__HARDWAREID(ipid);
+	mcatype = ACA_REG__IPID__MCATYPE(ipid);
+
+	return hwip->hwid == hwid && hwip->mcatype == mcatype;
 }
 
 static int aca_smu_get_valid_aca_banks(struct amdgpu_device *adev, enum aca_smu_type type,
@@ -158,7 +178,7 @@ static int aca_smu_get_valid_aca_banks(struct amdgpu_device *adev, enum aca_smu_
 		return -EINVAL;
 	}
 
-	if (start + count >= max_count)
+	if (start + count > max_count)
 		return -EINVAL;
 
 	count = min_t(int, count, max_count);
@@ -168,7 +188,16 @@ static int aca_smu_get_valid_aca_banks(struct amdgpu_device *adev, enum aca_smu_
 		if (ret)
 			return ret;
 
-		bank.type = type;
+		bank.smu_err_type = type;
+
+		/*
+		 * Poison being consumed when injecting a UE while running background workloads,
+		 * which are unexpected.
+		 */
+		if (type == ACA_SMU_TYPE_UE &&
+		    ACA_REG__STATUS__POISON(bank.regs[ACA_REG_IDX_STATUS]) &&
+		    !aca_bank_hwip_is_matched(&bank, ACA_HWIP_TYPE_UMC))
+			continue;
 
 		aca_smu_bank_dump(adev, i, count, &bank, qctx);
 
@@ -180,30 +209,13 @@ static int aca_smu_get_valid_aca_banks(struct amdgpu_device *adev, enum aca_smu_
 	return 0;
 }
 
-static bool aca_bank_hwip_is_matched(struct aca_bank *bank, enum aca_hwip_type type)
-{
-
-	struct aca_hwip *hwip;
-	int hwid, mcatype;
-	u64 ipid;
-
-	if (!bank || type == ACA_HWIP_TYPE_UNKNOW)
-		return false;
-
-	hwip = &aca_hwid_mcatypes[type];
-	if (!hwip->hwid)
-		return false;
-
-	ipid = bank->regs[ACA_REG_IDX_IPID];
-	hwid = ACA_REG__IPID__HARDWAREID(ipid);
-	mcatype = ACA_REG__IPID__MCATYPE(ipid);
-
-	return hwip->hwid == hwid && hwip->mcatype == mcatype;
-}
-
 static bool aca_bank_is_valid(struct aca_handle *handle, struct aca_bank *bank, enum aca_smu_type type)
 {
 	const struct aca_bank_ops *bank_ops = handle->bank_ops;
+
+	/* Parse all deferred errors with UMC aca handle */
+	if (ACA_BANK_ERR_IS_DEFFERED(bank))
+		return handle->hwip == ACA_HWIP_TYPE_UMC;
 
 	if (!aca_bank_hwip_is_matched(bank, handle->hwip))
 		return false;
@@ -227,6 +239,7 @@ static struct aca_bank_error *new_bank_error(struct aca_error *aerr, struct aca_
 
 	mutex_lock(&aerr->lock);
 	list_add_tail(&bank_error->node, &aerr->list);
+	aerr->nr_errors++;
 	mutex_unlock(&aerr->lock);
 
 	return bank_error;
@@ -394,6 +407,56 @@ static bool aca_bank_should_update(struct amdgpu_device *adev, enum aca_smu_type
 	return ret;
 }
 
+static void aca_banks_generate_cper(struct amdgpu_device *adev,
+				    enum aca_smu_type type,
+				    struct aca_banks *banks,
+				    int count)
+{
+	struct aca_bank_node *node;
+	struct aca_bank *bank;
+	int r;
+
+	if (!adev->cper.enabled)
+		return;
+
+	if (!banks || !count) {
+		dev_warn(adev->dev, "fail to generate cper records\n");
+		return;
+	}
+
+	/* UEs must be encoded into separate CPER entries */
+	if (type == ACA_SMU_TYPE_UE) {
+		struct aca_banks de_banks;
+
+		aca_banks_init(&de_banks);
+		list_for_each_entry(node, &banks->list, node) {
+			bank = &node->bank;
+			if (bank->aca_err_type == ACA_ERROR_TYPE_DEFERRED) {
+				r = aca_banks_add_bank(&de_banks, bank);
+				if (r)
+					dev_warn(adev->dev, "fail to add de banks, ret = %d\n", r);
+			} else {
+				if (amdgpu_cper_generate_ue_record(adev, bank))
+					dev_warn(adev->dev, "fail to generate ue cper records\n");
+			}
+		}
+
+		if (!list_empty(&de_banks.list)) {
+			if (amdgpu_cper_generate_ce_records(adev, &de_banks, de_banks.nr_banks))
+				dev_warn(adev->dev, "fail to generate de cper records\n");
+		}
+
+		aca_banks_release(&de_banks);
+	} else {
+		/*
+		 * SMU_TYPE_CE banks are combined into 1 CPER entries,
+		 * they could be CEs or DEs or both
+		 */
+		if (amdgpu_cper_generate_ce_records(adev, banks, count))
+			dev_warn(adev->dev, "fail to generate ce cper records\n");
+	}
+}
+
 static int aca_banks_update(struct amdgpu_device *adev, enum aca_smu_type type,
 			    bank_handler_t handler, struct ras_query_context *qctx, void *data)
 {
@@ -430,6 +493,8 @@ static int aca_banks_update(struct amdgpu_device *adev, enum aca_smu_type type,
 				 handler, data);
 	if (ret)
 		goto err_release_banks;
+
+	aca_banks_generate_cper(adev, type, &banks, count);
 
 err_release_banks:
 	aca_banks_release(&banks);
@@ -515,6 +580,10 @@ static int __aca_get_error_data(struct amdgpu_device *adev, struct aca_handle *h
 	ret = aca_banks_update(adev, smu_type, handler_aca_log_bank_error, qctx, NULL);
 	if (ret)
 		return ret;
+
+	/* DEs may contain in CEs or UEs */
+	if (type != ACA_ERROR_TYPE_DEFERRED)
+		aca_log_aca_error(handle, ACA_ERROR_TYPE_DEFERRED, err_data);
 
 	return aca_log_aca_error(handle, type, err_data);
 }

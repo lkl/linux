@@ -81,7 +81,8 @@ mlx5_esw_bridge_table_create(int max_fte, u32 level, struct mlx5_eswitch *esw)
 	ft_attr.prio = FDB_BR_OFFLOAD;
 	fdb = mlx5_create_flow_table(ns, &ft_attr);
 	if (IS_ERR(fdb))
-		esw_warn(dev, "Failed to create bridge FDB Table (err=%ld)\n", PTR_ERR(fdb));
+		esw_warn(dev, "Failed to create bridge FDB Table (err=%pe)\n",
+			 fdb);
 
 	return fdb;
 }
@@ -121,8 +122,8 @@ mlx5_esw_bridge_ingress_vlan_proto_fg_create(unsigned int from, unsigned int to,
 	kvfree(in);
 	if (IS_ERR(fg))
 		esw_warn(esw->dev,
-			 "Failed to create VLAN(proto=%x) flow group for bridge ingress table (err=%ld)\n",
-			 vlan_proto, PTR_ERR(fg));
+			 "Failed to create VLAN(proto=%x) flow group for bridge ingress table (err=%pe)\n",
+			 vlan_proto, fg);
 
 	return fg;
 }
@@ -180,8 +181,8 @@ mlx5_esw_bridge_ingress_vlan_proto_filter_fg_create(unsigned int from, unsigned 
 	fg = mlx5_create_flow_group(ingress_ft, in);
 	if (IS_ERR(fg))
 		esw_warn(esw->dev,
-			 "Failed to create bridge ingress table VLAN filter flow group (err=%ld)\n",
-			 PTR_ERR(fg));
+			 "Failed to create bridge ingress table VLAN filter flow group (err=%pe)\n",
+			 fg);
 	kvfree(in);
 	return fg;
 }
@@ -237,8 +238,8 @@ mlx5_esw_bridge_ingress_mac_fg_create(struct mlx5_eswitch *esw, struct mlx5_flow
 	fg = mlx5_create_flow_group(ingress_ft, in);
 	if (IS_ERR(fg))
 		esw_warn(esw->dev,
-			 "Failed to create MAC flow group for bridge ingress table (err=%ld)\n",
-			 PTR_ERR(fg));
+			 "Failed to create MAC flow group for bridge ingress table (err=%pe)\n",
+			 fg);
 
 	kvfree(in);
 	return fg;
@@ -274,8 +275,8 @@ mlx5_esw_bridge_egress_vlan_proto_fg_create(unsigned int from, unsigned int to, 
 	fg = mlx5_create_flow_group(egress_ft, in);
 	if (IS_ERR(fg))
 		esw_warn(esw->dev,
-			 "Failed to create VLAN flow group for bridge egress table (err=%ld)\n",
-			 PTR_ERR(fg));
+			 "Failed to create VLAN flow group for bridge egress table (err=%pe)\n",
+			 fg);
 	kvfree(in);
 	return fg;
 }
@@ -324,8 +325,8 @@ mlx5_esw_bridge_egress_mac_fg_create(struct mlx5_eswitch *esw, struct mlx5_flow_
 	fg = mlx5_create_flow_group(egress_ft, in);
 	if (IS_ERR(fg))
 		esw_warn(esw->dev,
-			 "Failed to create bridge egress table MAC flow group (err=%ld)\n",
-			 PTR_ERR(fg));
+			 "Failed to create bridge egress table MAC flow group (err=%pe)\n",
+			 fg);
 	kvfree(in);
 	return fg;
 }
@@ -354,8 +355,8 @@ mlx5_esw_bridge_egress_miss_fg_create(struct mlx5_eswitch *esw, struct mlx5_flow
 	fg = mlx5_create_flow_group(egress_ft, in);
 	if (IS_ERR(fg))
 		esw_warn(esw->dev,
-			 "Failed to create bridge egress table miss flow group (err=%ld)\n",
-			 PTR_ERR(fg));
+			 "Failed to create bridge egress table miss flow group (err=%pe)\n",
+			 fg);
 	kvfree(in);
 	return fg;
 }
@@ -501,8 +502,8 @@ mlx5_esw_bridge_egress_table_init(struct mlx5_esw_bridge_offloads *br_offloads,
 	if (mlx5_esw_bridge_pkt_reformat_vlan_pop_supported(esw)) {
 		miss_fg = mlx5_esw_bridge_egress_miss_fg_create(esw, egress_ft);
 		if (IS_ERR(miss_fg)) {
-			esw_warn(esw->dev, "Failed to create miss flow group (err=%ld)\n",
-				 PTR_ERR(miss_fg));
+			esw_warn(esw->dev, "Failed to create miss flow group (err=%pe)\n",
+				 miss_fg);
 			miss_fg = NULL;
 			goto skip_miss_flow;
 		}
@@ -510,8 +511,8 @@ mlx5_esw_bridge_egress_table_init(struct mlx5_esw_bridge_offloads *br_offloads,
 		miss_pkt_reformat = mlx5_esw_bridge_pkt_reformat_vlan_pop_create(esw);
 		if (IS_ERR(miss_pkt_reformat)) {
 			esw_warn(esw->dev,
-				 "Failed to alloc packet reformat REMOVE_HEADER (err=%ld)\n",
-				 PTR_ERR(miss_pkt_reformat));
+				 "Failed to alloc packet reformat REMOVE_HEADER (err=%pe)\n",
+				 miss_pkt_reformat);
 			miss_pkt_reformat = NULL;
 			mlx5_destroy_flow_group(miss_fg);
 			miss_fg = NULL;
@@ -522,8 +523,8 @@ mlx5_esw_bridge_egress_table_init(struct mlx5_esw_bridge_offloads *br_offloads,
 								      br_offloads->skip_ft,
 								      miss_pkt_reformat);
 		if (IS_ERR(miss_handle)) {
-			esw_warn(esw->dev, "Failed to create miss flow (err=%ld)\n",
-				 PTR_ERR(miss_handle));
+			esw_warn(esw->dev, "Failed to create miss flow (err=%pe)\n",
+				 miss_handle);
 			miss_handle = NULL;
 			mlx5_packet_reformat_dealloc(esw->dev, miss_pkt_reformat);
 			miss_pkt_reformat = NULL;
@@ -570,7 +571,8 @@ mlx5_esw_bridge_egress_table_cleanup(struct mlx5_esw_bridge *bridge)
 
 static struct mlx5_flow_handle *
 mlx5_esw_bridge_ingress_flow_with_esw_create(u16 vport_num, const unsigned char *addr,
-					     struct mlx5_esw_bridge_vlan *vlan, u32 counter_id,
+					     struct mlx5_esw_bridge_vlan *vlan,
+					     struct mlx5_fc *counter,
 					     struct mlx5_esw_bridge *bridge,
 					     struct mlx5_eswitch *esw)
 {
@@ -628,7 +630,7 @@ mlx5_esw_bridge_ingress_flow_with_esw_create(u16 vport_num, const unsigned char 
 	dests[0].type = MLX5_FLOW_DESTINATION_TYPE_FLOW_TABLE;
 	dests[0].ft = bridge->egress_ft;
 	dests[1].type = MLX5_FLOW_DESTINATION_TYPE_COUNTER;
-	dests[1].counter_id = counter_id;
+	dests[1].counter = counter;
 
 	handle = mlx5_add_flow_rules(br_offloads->ingress_ft, rule_spec, &flow_act, dests,
 				     ARRAY_SIZE(dests));
@@ -639,17 +641,19 @@ mlx5_esw_bridge_ingress_flow_with_esw_create(u16 vport_num, const unsigned char 
 
 static struct mlx5_flow_handle *
 mlx5_esw_bridge_ingress_flow_create(u16 vport_num, const unsigned char *addr,
-				    struct mlx5_esw_bridge_vlan *vlan, u32 counter_id,
+				    struct mlx5_esw_bridge_vlan *vlan,
+				    struct mlx5_fc *counter,
 				    struct mlx5_esw_bridge *bridge)
 {
-	return mlx5_esw_bridge_ingress_flow_with_esw_create(vport_num, addr, vlan, counter_id,
+	return mlx5_esw_bridge_ingress_flow_with_esw_create(vport_num, addr, vlan, counter,
 							    bridge, bridge->br_offloads->esw);
 }
 
 static struct mlx5_flow_handle *
 mlx5_esw_bridge_ingress_flow_peer_create(u16 vport_num, u16 esw_owner_vhca_id,
 					 const unsigned char *addr,
-					 struct mlx5_esw_bridge_vlan *vlan, u32 counter_id,
+					 struct mlx5_esw_bridge_vlan *vlan,
+					 struct mlx5_fc *counter,
 					 struct mlx5_esw_bridge *bridge)
 {
 	struct mlx5_devcom_comp_dev *devcom = bridge->br_offloads->esw->devcom, *pos;
@@ -671,7 +675,7 @@ mlx5_esw_bridge_ingress_flow_peer_create(u16 vport_num, u16 esw_owner_vhca_id,
 		goto out;
 	}
 
-	handle = mlx5_esw_bridge_ingress_flow_with_esw_create(vport_num, addr, vlan, counter_id,
+	handle = mlx5_esw_bridge_ingress_flow_with_esw_create(vport_num, addr, vlan, counter,
 							      bridge, peer_esw);
 
 out:
@@ -1045,8 +1049,8 @@ mlx5_esw_bridge_vlan_push_create(u16 vlan_proto, struct mlx5_esw_bridge_vlan *vl
 						  &reformat_params,
 						  MLX5_FLOW_NAMESPACE_FDB);
 	if (IS_ERR(pkt_reformat)) {
-		esw_warn(esw->dev, "Failed to alloc packet reformat INSERT_HEADER (err=%ld)\n",
-			 PTR_ERR(pkt_reformat));
+		esw_warn(esw->dev, "Failed to alloc packet reformat INSERT_HEADER (err=%pe)\n",
+			 pkt_reformat);
 		return PTR_ERR(pkt_reformat);
 	}
 
@@ -1073,8 +1077,8 @@ mlx5_esw_bridge_vlan_pop_create(struct mlx5_esw_bridge_vlan *vlan, struct mlx5_e
 
 	pkt_reformat = mlx5_esw_bridge_pkt_reformat_vlan_pop_create(esw);
 	if (IS_ERR(pkt_reformat)) {
-		esw_warn(esw->dev, "Failed to alloc packet reformat REMOVE_HEADER (err=%ld)\n",
-			 PTR_ERR(pkt_reformat));
+		esw_warn(esw->dev, "Failed to alloc packet reformat REMOVE_HEADER (err=%pe)\n",
+			 pkt_reformat);
 		return PTR_ERR(pkt_reformat);
 	}
 
@@ -1385,10 +1389,9 @@ mlx5_esw_bridge_fdb_entry_init(struct net_device *dev, u16 vport_num, u16 esw_ow
 
 	handle = peer ?
 		mlx5_esw_bridge_ingress_flow_peer_create(vport_num, esw_owner_vhca_id,
-							 addr, vlan, mlx5_fc_id(counter),
-							 bridge) :
+							 addr, vlan, counter, bridge) :
 		mlx5_esw_bridge_ingress_flow_create(vport_num, addr, vlan,
-						    mlx5_fc_id(counter), bridge);
+						    counter, bridge);
 	if (IS_ERR(handle)) {
 		err = PTR_ERR(handle);
 		esw_warn(esw->dev, "Failed to create ingress flow(vport=%u,err=%d,peer=%d)\n",
@@ -1861,7 +1864,7 @@ int mlx5_esw_bridge_port_mdb_add(struct net_device *dev, u16 vport_num, u16 esw_
 			 "Failed to lookup bridge port to add MDB (MAC=%pM,vport=%u)\n",
 			 addr, vport_num);
 		NL_SET_ERR_MSG_FMT_MOD(extack,
-				       "Failed to lookup bridge port to add MDB (MAC=%pM,vport=%u)\n",
+				       "Failed to lookup bridge port to add MDB (MAC=%pM,vport=%u)",
 				       addr, vport_num);
 		return -EINVAL;
 	}
@@ -1874,7 +1877,7 @@ int mlx5_esw_bridge_port_mdb_add(struct net_device *dev, u16 vport_num, u16 esw_
 				 "Failed to lookup bridge port vlan metadata to create MDB (MAC=%pM,vid=%u,vport=%u)\n",
 				 addr, vid, vport_num);
 			NL_SET_ERR_MSG_FMT_MOD(extack,
-					       "Failed to lookup vlan metadata for MDB (MAC=%pM,vid=%u,vport=%u)\n",
+					       "Failed to lookup vlan metadata for MDB (MAC=%pM,vid=%u,vport=%u)",
 					       addr, vid, vport_num);
 			return -EINVAL;
 		}
@@ -1882,7 +1885,7 @@ int mlx5_esw_bridge_port_mdb_add(struct net_device *dev, u16 vport_num, u16 esw_
 
 	err = mlx5_esw_bridge_port_mdb_attach(dev, port, addr, vid);
 	if (err) {
-		NL_SET_ERR_MSG_FMT_MOD(extack, "Failed to add MDB (MAC=%pM,vid=%u,vport=%u)\n",
+		NL_SET_ERR_MSG_FMT_MOD(extack, "Failed to add MDB (MAC=%pM,vid=%u,vport=%u)",
 				       addr, vid, vport_num);
 		return err;
 	}

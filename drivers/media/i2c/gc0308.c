@@ -18,7 +18,6 @@
 #include <media/v4l2-cci.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
-#include <media/v4l2-event.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 
@@ -975,7 +974,6 @@ static int gc0308_s_ctrl(struct v4l2_ctrl *ctrl)
 	if (ret)
 		dev_err(gc0308->dev, "failed to set control: %d\n", ret);
 
-	pm_runtime_mark_last_busy(gc0308->dev);
 	pm_runtime_put_autosuspend(gc0308->dev);
 
 	return ret;
@@ -987,8 +985,6 @@ static const struct v4l2_ctrl_ops gc0308_ctrl_ops = {
 
 static const struct v4l2_subdev_core_ops gc0308_core_ops = {
 	.log_status = v4l2_ctrl_subdev_log_status,
-	.subscribe_event = v4l2_ctrl_subdev_subscribe_event,
-	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 	.g_register	= gc0308_g_register,
 	.s_register	= gc0308_s_register,
@@ -1160,14 +1156,12 @@ static int gc0308_start_stream(struct gc0308 *gc0308)
 	return 0;
 
 disable_pm:
-	pm_runtime_mark_last_busy(gc0308->dev);
 	pm_runtime_put_autosuspend(gc0308->dev);
 	return ret;
 }
 
 static int gc0308_stop_stream(struct gc0308 *gc0308)
 {
-	pm_runtime_mark_last_busy(gc0308->dev);
 	pm_runtime_put_autosuspend(gc0308->dev);
 	return 0;
 }
@@ -1338,7 +1332,6 @@ static int gc0308_probe(struct i2c_client *client)
 	v4l2_i2c_subdev_init(&gc0308->sd, client, &gc0308_subdev_ops);
 	gc0308->sd.internal_ops = &gc0308_internal_ops;
 	gc0308->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-	gc0308->sd.flags |= V4L2_SUBDEV_FL_HAS_EVENTS;
 
 	ret = gc0308_init_controls(gc0308);
 	if (ret)

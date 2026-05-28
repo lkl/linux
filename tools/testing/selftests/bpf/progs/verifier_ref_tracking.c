@@ -27,7 +27,7 @@ struct bpf_key {} __attribute__((preserve_access_index));
 
 extern void bpf_key_put(struct bpf_key *key) __ksym;
 extern struct bpf_key *bpf_lookup_system_key(__u64 id) __ksym;
-extern struct bpf_key *bpf_lookup_user_key(__u32 serial, __u64 flags) __ksym;
+extern struct bpf_key *bpf_lookup_user_key(__s32 serial, __u64 flags) __ksym;
 
 /* BTF FUNC records are not generated for kfuncs referenced
  * from inline assembly. These records are necessary for
@@ -791,7 +791,7 @@ l0_%=:	r0 = *(u8*)skb[0];				\
 
 SEC("tc")
 __description("reference tracking: forbid LD_ABS while holding reference")
-__failure __msg("BPF_LD_[ABS|IND] cannot be mixed with socket references")
+__failure __msg("BPF_LD_[ABS|IND] would lead to reference leak")
 __naked void ld_abs_while_holding_reference(void)
 {
 	asm volatile ("					\
@@ -836,7 +836,7 @@ l0_%=:	r7 = 1;						\
 
 SEC("tc")
 __description("reference tracking: forbid LD_IND while holding reference")
-__failure __msg("BPF_LD_[ABS|IND] cannot be mixed with socket references")
+__failure __msg("BPF_LD_[ABS|IND] would lead to reference leak")
 __naked void ld_ind_while_holding_reference(void)
 {
 	asm volatile ("					\

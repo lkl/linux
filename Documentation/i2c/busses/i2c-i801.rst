@@ -49,6 +49,8 @@ Supported adapters:
   * Intel Meteor Lake (SOC and PCH)
   * Intel Birch Stream (SOC)
   * Intel Arrow Lake (SOC)
+  * Intel Panther Lake (SOC)
+  * Intel Wildcat Lake (SOC)
 
    Datasheets: Publicly available at the Intel website
 

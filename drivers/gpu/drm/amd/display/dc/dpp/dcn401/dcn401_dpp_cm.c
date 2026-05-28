@@ -88,30 +88,6 @@ enum dscl_mode_sel {
 	DSCL_MODE_DSCL_BYPASS = 6
 };
 
-void dpp401_full_bypass(struct dpp *dpp_base)
-{
-	struct dcn401_dpp *dpp = TO_DCN401_DPP(dpp_base);
-
-	/* Input pixel format: ARGB8888 */
-	REG_SET(CNVC_SURFACE_PIXEL_FORMAT, 0,
-			CNVC_SURFACE_PIXEL_FORMAT, 0x8);
-
-	/* Zero expansion */
-	REG_SET_3(FORMAT_CONTROL, 0,
-			CNVC_BYPASS, 0,
-			FORMAT_CONTROL__ALPHA_EN, 0,
-			FORMAT_EXPANSION_MODE, 0);
-
-	/* COLOR_KEYER_CONTROL.COLOR_KEYER_EN = 0 this should be default */
-	if (dpp->tf_mask->CM_BYPASS_EN)
-		REG_SET(CM_CONTROL, 0, CM_BYPASS_EN, 1);
-	else
-		REG_SET(CM_CONTROL, 0, CM_BYPASS, 1);
-
-	/* Setting degamma bypass for now */
-	REG_SET(CM_DGAM_CONTROL, 0, CM_DGAM_LUT_MODE, 0);
-}
-
 void dpp401_set_cursor_attributes(
 	struct dpp *dpp_base,
 	struct dc_cursor_attributes *cursor_attributes)
@@ -120,10 +96,11 @@ void dpp401_set_cursor_attributes(
 	enum dc_cursor_color_format color_format = cursor_attributes->color_format;
 	int cur_rom_en = 0;
 
-	// DCN4 should always do Cursor degamma for Cursor Color modes
 	if (color_format == CURSOR_MODE_COLOR_PRE_MULTIPLIED_ALPHA ||
 		color_format == CURSOR_MODE_COLOR_UN_PRE_MULTIPLIED_ALPHA) {
-		cur_rom_en = 1;
+		if (cursor_attributes->attribute_flags.bits.ENABLE_CURSOR_DEGAMMA) {
+			cur_rom_en = 1;
+		}
 	}
 
 	REG_UPDATE_3(CURSOR0_CONTROL,
@@ -154,9 +131,11 @@ void dpp401_set_cursor_position(
 	struct dcn401_dpp *dpp = TO_DCN401_DPP(dpp_base);
 	uint32_t cur_en = pos->enable ? 1 : 0;
 
-	REG_UPDATE(CURSOR0_CONTROL, CUR0_ENABLE, cur_en);
+	if (dpp_base->pos.cur0_ctl.bits.cur0_enable != cur_en) {
+		REG_UPDATE(CURSOR0_CONTROL, CUR0_ENABLE, cur_en);
 
-	dpp_base->pos.cur0_ctl.bits.cur0_enable = cur_en;
+		dpp_base->pos.cur0_ctl.bits.cur0_enable = cur_en;
+	}
 }
 
 void dpp401_set_optional_cursor_attributes(

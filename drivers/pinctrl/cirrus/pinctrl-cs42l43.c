@@ -448,7 +448,7 @@ static const struct pinconf_ops cs42l43_pin_conf_ops = {
 	.pin_config_group_set	= cs42l43_pin_config_group_set,
 };
 
-static struct pinctrl_desc cs42l43_pin_desc = {
+static const struct pinctrl_desc cs42l43_pin_desc = {
 	.name		= "cs42l43-pinctrl",
 	.owner		= THIS_MODULE,
 
@@ -483,7 +483,8 @@ static int cs42l43_gpio_get(struct gpio_chip *chip, unsigned int offset)
 	return ret;
 }
 
-static void cs42l43_gpio_set(struct gpio_chip *chip, unsigned int offset, int value)
+static int cs42l43_gpio_set(struct gpio_chip *chip, unsigned int offset,
+			    int value)
 {
 	struct cs42l43_pin *priv = gpiochip_get_data(chip);
 	unsigned int shift = offset + CS42L43_GPIO1_LVL_SHIFT;
@@ -493,23 +494,27 @@ static void cs42l43_gpio_set(struct gpio_chip *chip, unsigned int offset, int va
 		offset + 1, str_high_low(value));
 
 	ret = pm_runtime_resume_and_get(priv->dev);
-	if (ret) {
-		dev_err(priv->dev, "Failed to resume for set: %d\n", ret);
-		return;
-	}
+	if (ret)
+		return ret;
 
 	ret = regmap_update_bits(priv->regmap, CS42L43_GPIO_CTRL1,
 				 BIT(shift), value << shift);
 	if (ret)
-		dev_err(priv->dev, "Failed to set gpio%d: %d\n", offset + 1, ret);
+		return ret;
 
 	pm_runtime_put(priv->dev);
+
+	return 0;
 }
 
 static int cs42l43_gpio_direction_out(struct gpio_chip *chip,
 				      unsigned int offset, int value)
 {
-	cs42l43_gpio_set(chip, offset, value);
+	int ret;
+
+	ret = cs42l43_gpio_set(chip, offset, value);
+	if (ret)
+		return ret;
 
 	return pinctrl_gpio_direction_output(chip, offset);
 }
@@ -525,6 +530,11 @@ static int cs42l43_gpio_add_pin_ranges(struct gpio_chip *chip)
 		dev_err(priv->dev, "Failed to add GPIO pin range: %d\n", ret);
 
 	return ret;
+}
+
+static void cs42l43_fwnode_put(void *data)
+{
+	fwnode_handle_put(data);
 }
 
 static int cs42l43_pin_probe(struct platform_device *pdev)
@@ -558,10 +568,20 @@ static int cs42l43_pin_probe(struct platform_device *pdev)
 	priv->gpio_chip.ngpio = CS42L43_NUM_GPIOS;
 
 	if (is_of_node(fwnode)) {
-		fwnode = fwnode_get_named_child_node(fwnode, "pinctrl");
+		struct fwnode_handle *child;
 
-		if (fwnode && !fwnode->dev)
-			fwnode->dev = priv->dev;
+		child = fwnode_get_named_child_node(fwnode, "pinctrl");
+		if (child) {
+			ret = devm_add_action_or_reset(&pdev->dev,
+				cs42l43_fwnode_put, child);
+			if (ret) {
+				fwnode_handle_put(child);
+				return ret;
+			}
+			if (!child->dev)
+				child->dev = priv->dev;
+			fwnode = child;
+		}
 	}
 
 	priv->gpio_chip.fwnode = fwnode;

@@ -12,7 +12,10 @@ maintainers:
 properties:
   compatible:
     enum:
+      - rockchip,rk3528-naneng-combphy
+      - rockchip,rk3562-naneng-combphy
       - rockchip,rk3568-naneng-combphy
+      - rockchip,rk3576-naneng-combphy
       - rockchip,rk3588-naneng-combphy
 
   reg:
@@ -39,6 +42,12 @@ properties:
     items:
       - const: phy
       - const: apb
+
+  phy-supply:
+    description: Single PHY regulator
+
+  power-domains:
+    maxItems: 1
 
   rockchip,enable-ssc:
     type: boolean
@@ -100,7 +109,9 @@ allOf:
       properties:
         compatible:
           contains:
-            const: rockchip,rk3588-naneng-combphy
+            enum:
+              - rockchip,rk3528-naneng-combphy
+              - rockchip,rk3588-naneng-combphy
     then:
       properties:
         resets:

@@ -3,7 +3,7 @@
  *
  * Module Name: oslinuxtbl - Linux OSL for obtaining ACPI tables
  *
- * Copyright (C) 2000 - 2023, Intel Corp.
+ * Copyright (C) 2000 - 2025, Intel Corp.
  *
  *****************************************************************************/
 
@@ -19,7 +19,7 @@ ACPI_MODULE_NAME("oslinuxtbl")
 typedef struct osl_table_info {
 	struct osl_table_info *next;
 	u32 instance;
-	char signature[ACPI_NAMESEG_SIZE];
+	char signature[ACPI_NAMESEG_SIZE] ACPI_NONSTRING;
 
 } osl_table_info;
 
@@ -995,7 +995,7 @@ static acpi_status osl_list_customized_tables(char *directory)
 {
 	void *table_dir;
 	u32 instance;
-	char temp_name[ACPI_NAMESEG_SIZE];
+	char temp_name[ACPI_NAMESEG_SIZE] ACPI_NONSTRING;
 	char *filename;
 	acpi_status status = AE_OK;
 
@@ -1312,7 +1312,7 @@ osl_get_customized_table(char *pathname,
 {
 	void *table_dir;
 	u32 current_instance = 0;
-	char temp_name[ACPI_NAMESEG_SIZE];
+	char temp_name[ACPI_NAMESEG_SIZE] ACPI_NONSTRING;
 	char table_filename[PATH_MAX];
 	char *filename;
 	acpi_status status;

@@ -4,7 +4,7 @@
  *
  *  Derived from ivtv-gpio.h
  *
- *  Copyright (C) 2007  Hans Verkuil <hverkuil@xs4all.nl>
+ *  Copyright (C) 2007  Hans Verkuil <hverkuil@kernel.org>
  *  Copyright (C) 2008  Andy Walls <awalls@md.metrocast.net>
  */
 
@@ -17,5 +17,4 @@ enum cx18_gpio_reset_type {
 	CX18_GPIO_RESET_XC2028  = 2,
 };
 
-void cx18_reset_ir_gpio(void *data);
 int cx18_reset_tuner_gpio(void *dev, int component, int cmd, int value);

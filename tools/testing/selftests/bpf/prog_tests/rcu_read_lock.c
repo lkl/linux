@@ -21,7 +21,7 @@ static void test_success(void)
 	if (!ASSERT_OK_PTR(skel, "skel_open"))
 		return;
 
-	skel->bss->target_pid = syscall(SYS_gettid);
+	skel->bss->target_pid = sys_gettid();
 
 	bpf_program__set_autoload(skel->progs.get_cgroup_id, true);
 	bpf_program__set_autoload(skel->progs.task_succ, true);
@@ -58,7 +58,7 @@ static void test_rcuptr_acquire(void)
 	if (!ASSERT_OK_PTR(skel, "skel_open"))
 		return;
 
-	skel->bss->target_pid = syscall(SYS_gettid);
+	skel->bss->target_pid = sys_gettid();
 
 	bpf_program__set_autoload(skel->progs.task_acquire, true);
 	err = rcu_read_lock__load(skel);
@@ -81,6 +81,9 @@ static const char * const inproper_region_tests[] = {
 	"nested_rcu_region",
 	"rcu_read_lock_global_subprog_lock",
 	"rcu_read_lock_global_subprog_unlock",
+	"rcu_read_lock_sleepable_helper_global_subprog",
+	"rcu_read_lock_sleepable_kfunc_global_subprog",
+	"rcu_read_lock_sleepable_global_subprog_indirect",
 };
 
 static void test_inproper_region(void)

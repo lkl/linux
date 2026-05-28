@@ -817,8 +817,8 @@ static int cxusb_medion_v_start_streaming(struct vb2_queue *q,
 		 * doing a large continuous allocation when (if)
 		 * s-g isochronous USB transfers are supported
 		 */
-		streambuf = kmalloc(npackets * CXUSB_VIDEO_PKT_SIZE,
-				    GFP_KERNEL);
+		streambuf = kmalloc_array(npackets, CXUSB_VIDEO_PKT_SIZE,
+					  GFP_KERNEL);
 		if (!streambuf) {
 			if (i < 2) {
 				ret = -ENOMEM;
@@ -956,8 +956,6 @@ static const struct vb2_ops cxdev_video_qops = {
 	.start_streaming = cxusb_medion_v_start_streaming,
 	.stop_streaming = cxusb_medion_v_stop_streaming,
 	.buf_queue = cxusub_medion_v_buf_queue,
-	.wait_prepare = vb2_ops_wait_prepare,
-	.wait_finish = vb2_ops_wait_finish
 };
 
 static const __u32 videocaps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_TUNER |

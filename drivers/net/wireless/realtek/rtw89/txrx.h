@@ -73,6 +73,7 @@ static inline u8 rtw89_get_data_nss(struct rtw89_dev *rtwdev, u16 hw_rate)
 #define RTW89_TXWD_BODY0_FW_DL BIT(20)
 #define RTW89_TXWD_BODY0_CHANNEL_DMA GENMASK(19, 16)
 #define RTW89_TXWD_BODY0_HDR_LLC_LEN GENMASK(15, 11)
+#define RTW89_TXWD_BODY0_STF_MODE BIT(10)
 #define RTW89_TXWD_BODY0_WD_PAGE BIT(7)
 #define RTW89_TXWD_BODY0_HW_AMSDU BIT(5)
 #define RTW89_TXWD_BODY0_HW_SSN_SEL GENMASK(3, 2)
@@ -560,6 +561,9 @@ struct rtw89_phy_sts_iehdr {
 #define BE_RXD_HDR_OFFSET_MASK GENMASK(20, 16)
 #define BE_RXD_WL_HD_IV_LEN_MASK GENMASK(26, 21)
 
+/* BE RXD - PHY RPT dword0 */
+#define BE_RXD_PHY_RSSI GENMASK(11, 0)
+
 struct rtw89_phy_sts_ie00 {
 	__le32 w0;
 	__le32 w1;
@@ -568,6 +572,7 @@ struct rtw89_phy_sts_ie00 {
 } __packed;
 
 #define RTW89_PHY_STS_IE00_W0_RPL GENMASK(15, 7)
+#define RTW89_PHY_STS_IE00_W3_RX_PATH_EN GENMASK(31, 28)
 
 struct rtw89_phy_sts_ie00_v2 {
 	__le32 w0;
@@ -709,29 +714,23 @@ static inline u8 rtw89_core_get_qsel(struct rtw89_dev *rtwdev, u8 tid)
 	}
 }
 
-static inline u8 rtw89_core_get_ch_dma(struct rtw89_dev *rtwdev, u8 qsel)
+static inline u8
+rtw89_core_get_qsel_mgmt(struct rtw89_dev *rtwdev, struct rtw89_core_tx_request *tx_req)
 {
-	switch (qsel) {
-	default:
-		rtw89_warn(rtwdev, "Cannot map qsel to dma: %d\n", qsel);
-		fallthrough;
-	case RTW89_TX_QSEL_BE_0:
-		return RTW89_TXCH_ACH0;
-	case RTW89_TX_QSEL_BK_0:
-		return RTW89_TXCH_ACH1;
-	case RTW89_TX_QSEL_VI_0:
-		return RTW89_TXCH_ACH2;
-	case RTW89_TX_QSEL_VO_0:
-		return RTW89_TXCH_ACH3;
-	case RTW89_TX_QSEL_B0_MGMT:
-		return RTW89_TXCH_CH8;
-	case RTW89_TX_QSEL_B0_HI:
-		return RTW89_TXCH_CH9;
-	case RTW89_TX_QSEL_B1_MGMT:
-		return RTW89_TXCH_CH10;
-	case RTW89_TX_QSEL_B1_HI:
-		return RTW89_TXCH_CH11;
+	struct rtw89_tx_desc_info *desc_info = &tx_req->desc_info;
+	struct rtw89_vif_link *rtwvif_link = tx_req->rtwvif_link;
+
+	if (desc_info->hiq) {
+		if (rtwvif_link->mac_idx == RTW89_MAC_1)
+			return RTW89_TX_QSEL_B1_HI;
+		else
+			return RTW89_TX_QSEL_B0_HI;
 	}
+
+	if (rtwvif_link->mac_idx == RTW89_MAC_1)
+		return RTW89_TX_QSEL_B1_MGMT;
+	else
+		return RTW89_TX_QSEL_B0_MGMT;
 }
 
 static inline u8 rtw89_core_get_tid_indicate(struct rtw89_dev *rtwdev, u8 tid)

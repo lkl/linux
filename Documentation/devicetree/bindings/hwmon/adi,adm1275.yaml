@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
 %YAML 1.2
 ---
-
 $id: http://devicetree.org/schemas/hwmon/adi,adm1275.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
@@ -19,17 +18,26 @@ description: |
   Datasheets:
     https://www.analog.com/en/products/adm1294.html
 
+  The SQ24905C is also a Hot-swap controller compatibility to the ADM1278,
+  the PMBUS_MFR_MODEL is MC09C
+
+  Datasheets:
+    https://www.silergy.com/
+    download/downloadFile?id=5669&type=product&ftype=note
+
 properties:
   compatible:
     enum:
       - adi,adm1075
       - adi,adm1272
+      - adi,adm1273
       - adi,adm1275
       - adi,adm1276
       - adi,adm1278
       - adi,adm1281
       - adi,adm1293
       - adi,adm1294
+      - silergy,mc09c
 
   reg:
     maxItems: 1
@@ -79,6 +87,7 @@ allOf:
           contains:
             enum:
               - adi,adm1272
+              - adi,adm1273
     then:
       properties:
         adi,volt-curr-sample-average:
@@ -95,6 +104,7 @@ allOf:
               - adi,adm1281
               - adi,adm1293
               - adi,adm1294
+              - silergy,mc09c
     then:
       properties:
         adi,volt-curr-sample-average:

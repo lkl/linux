@@ -527,11 +527,6 @@ There are some functions to help manage credentials:
      This gets a reference on a live set of credentials, returning a pointer to
      that set of credentials.
 
- - ``struct cred *get_new_cred(struct cred *cred);``
-
-     This gets a reference on a set of credentials that is under construction
-     and is thus still mutable, returning a pointer to that set of credentials.
-
 
 Open File Credentials
 =====================
@@ -560,5 +555,5 @@ the VFS, and that can be done by calling into such as ``vfs_mkdir()`` with a
 different set of credentials.  This is done in the following places:
 
  * ``sys_faccessat()``.
- * ``do_coredump()``.
+ * ``vfs_coredump()``.
  * nfs4recover.c.

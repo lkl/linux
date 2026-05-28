@@ -9,7 +9,6 @@
 #include <linux/string.h>
 #include <linux/slab.h>
 #include <linux/file.h>
-#include <linux/fdtable.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/fs.h>
@@ -40,25 +39,32 @@ static struct files_stat_struct files_stat = {
 
 /* SLAB cache for file structures */
 static struct kmem_cache *filp_cachep __ro_after_init;
+static struct kmem_cache *bfilp_cachep __ro_after_init;
 
 static struct percpu_counter nr_files __cacheline_aligned_in_smp;
 
 /* Container for backing file with optional user path */
 struct backing_file {
 	struct file file;
-	struct path user_path;
+	union {
+		struct path user_path;
+		freeptr_t bf_freeptr;
+	};
 };
 
-static inline struct backing_file *backing_file(struct file *f)
-{
-	return container_of(f, struct backing_file, file);
-}
+#define backing_file(f) container_of(f, struct backing_file, file)
 
-struct path *backing_file_user_path(struct file *f)
+const struct path *backing_file_user_path(const struct file *f)
 {
 	return &backing_file(f)->user_path;
 }
 EXPORT_SYMBOL_GPL(backing_file_user_path);
+
+void backing_file_set_user_path(struct file *f, const struct path *path)
+{
+	backing_file(f)->user_path = *path;
+}
+EXPORT_SYMBOL_GPL(backing_file_set_user_path);
 
 static inline void file_free(struct file *f)
 {
@@ -68,7 +74,7 @@ static inline void file_free(struct file *f)
 	put_cred(f->f_cred);
 	if (unlikely(f->f_mode & FMODE_BACKING)) {
 		path_put(backing_file_user_path(f));
-		kfree(backing_file(f));
+		kmem_cache_free(bfilp_cachep, backing_file(f));
 	} else {
 		kmem_cache_free(filp_cachep, f);
 	}
@@ -99,11 +105,11 @@ EXPORT_SYMBOL_GPL(get_max_files);
 static int proc_nr_files(const struct ctl_table *table, int write, void *buffer,
 			 size_t *lenp, loff_t *ppos)
 {
-	files_stat.nr_files = get_nr_files();
+	files_stat.nr_files = percpu_counter_sum_positive(&nr_files);
 	return proc_doulongvec_minmax(table, write, buffer, lenp, ppos);
 }
 
-static struct ctl_table fs_stat_sysctls[] = {
+static const struct ctl_table fs_stat_sysctls[] = {
 	{
 		.procname	= "file-nr",
 		.data		= &files_stat,
@@ -125,7 +131,7 @@ static struct ctl_table fs_stat_sysctls[] = {
 		.data		= &sysctl_nr_open,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
+		.proc_handler	= proc_douintvec_minmax,
 		.extra1		= &sysctl_nr_open_min,
 		.extra2		= &sysctl_nr_open_max,
 	},
@@ -165,16 +171,37 @@ static int init_file(struct file *f, int flags, const struct cred *cred)
 	 * the respective member when opening the file.
 	 */
 	mutex_init(&f->f_pos_lock);
-	f->f_flags = flags;
-	f->f_mode = OPEN_FMODE(flags);
-	/* f->f_version: 0 */
+	memset(&f->__f_path, 0, sizeof(f->f_path));
+	memset(&f->f_ra, 0, sizeof(f->f_ra));
+
+	f->f_flags	= flags;
+	f->f_mode	= OPEN_FMODE(flags);
+
+	f->f_op		= NULL;
+	f->f_mapping	= NULL;
+	f->private_data = NULL;
+	f->f_inode	= NULL;
+	f->f_owner	= NULL;
+#ifdef CONFIG_EPOLL
+	f->f_ep		= NULL;
+#endif
+
+	f->f_iocb_flags = 0;
+	f->f_pos	= 0;
+	f->f_wb_err	= 0;
+	f->f_sb_err	= 0;
 
 	/*
-	 * We're SLAB_TYPESAFE_BY_RCU so initialize f_count last. While
+	 * We're SLAB_TYPESAFE_BY_RCU so initialize f_ref last. While
 	 * fget-rcu pattern users need to be able to handle spurious
 	 * refcount bumps we should reinitialize the reused file first.
 	 */
-	atomic_long_set(&f->f_count, 1);
+	file_ref_init(&f->f_ref, 1);
+	/*
+	 * Disable permission and pre-content events for all files by default.
+	 * They may be enabled later by fsnotify_open_perm_and_set_mode().
+	 */
+	file_set_fsnotify_mode(f, FMODE_NONOTIFY_PERM);
 	return 0;
 }
 
@@ -197,7 +224,8 @@ struct file *alloc_empty_file(int flags, const struct cred *cred)
 	/*
 	 * Privileged users can go above max_files
 	 */
-	if (get_nr_files() >= files_stat.max_files && !capable(CAP_SYS_ADMIN)) {
+	if (unlikely(get_nr_files() >= files_stat.max_files) &&
+	    !capable(CAP_SYS_ADMIN)) {
 		/*
 		 * percpu_counters are inaccurate.  Do an expensive check before
 		 * we go and fail.
@@ -206,7 +234,7 @@ struct file *alloc_empty_file(int flags, const struct cred *cred)
 			goto over;
 	}
 
-	f = kmem_cache_zalloc(filp_cachep, GFP_KERNEL);
+	f = kmem_cache_alloc(filp_cachep, GFP_KERNEL);
 	if (unlikely(!f))
 		return ERR_PTR(-ENOMEM);
 
@@ -240,7 +268,7 @@ struct file *alloc_empty_file_noaccount(int flags, const struct cred *cred)
 	struct file *f;
 	int error;
 
-	f = kmem_cache_zalloc(filp_cachep, GFP_KERNEL);
+	f = kmem_cache_alloc(filp_cachep, GFP_KERNEL);
 	if (unlikely(!f))
 		return ERR_PTR(-ENOMEM);
 
@@ -267,13 +295,13 @@ struct file *alloc_empty_backing_file(int flags, const struct cred *cred)
 	struct backing_file *ff;
 	int error;
 
-	ff = kzalloc(sizeof(struct backing_file), GFP_KERNEL);
+	ff = kmem_cache_alloc(bfilp_cachep, GFP_KERNEL);
 	if (unlikely(!ff))
 		return ERR_PTR(-ENOMEM);
 
 	error = init_file(&ff->file, flags, cred);
 	if (unlikely(error)) {
-		kfree(ff);
+		kmem_cache_free(bfilp_cachep, ff);
 		return ERR_PTR(error);
 	}
 
@@ -291,7 +319,7 @@ struct file *alloc_empty_backing_file(int flags, const struct cred *cred)
 static void file_init_path(struct file *file, const struct path *path,
 			   const struct file_operations *fop)
 {
-	file->f_path = *path;
+	file->__f_path = *path;
 	file->f_inode = path->dentry->d_inode;
 	file->f_mapping = path->dentry->d_inode->i_mapping;
 	file->f_wb_err = filemap_sample_wb_err(file->f_mapping);
@@ -332,9 +360,7 @@ static struct file *alloc_file(const struct path *path, int flags,
 static inline int alloc_path_pseudo(const char *name, struct inode *inode,
 				    struct vfsmount *mnt, struct path *path)
 {
-	struct qstr this = QSTR_INIT(name, strlen(name));
-
-	path->dentry = d_alloc_pseudo(mnt->mnt_sb, &this);
+	path->dentry = d_alloc_pseudo(mnt->mnt_sb, &QSTR(name));
 	if (!path->dentry)
 		return -ENOMEM;
 	path->mnt = mntget(mnt);
@@ -358,7 +384,13 @@ struct file *alloc_file_pseudo(struct inode *inode, struct vfsmount *mnt,
 	if (IS_ERR(file)) {
 		ihold(inode);
 		path_put(&path);
+		return file;
 	}
+	/*
+	 * Disable all fsnotify events for pseudo files by default.
+	 * They may be enabled by caller with file_set_fsnotify_mode().
+	 */
+	file_set_fsnotify_mode(file, FMODE_NONOTIFY);
 	return file;
 }
 EXPORT_SYMBOL(alloc_file_pseudo);
@@ -383,6 +415,11 @@ struct file *alloc_file_pseudo_noaccount(struct inode *inode,
 		return file;
 	}
 	file_init_path(file, &path, fops);
+	/*
+	 * Disable all fsnotify events for pseudo files by default.
+	 * They may be enabled by caller with file_set_fsnotify_mode().
+	 */
+	file_set_fsnotify_mode(file, FMODE_NONOTIFY);
 	return file;
 }
 EXPORT_SYMBOL_GPL(alloc_file_pseudo_noaccount);
@@ -459,6 +496,8 @@ static void ____fput(struct callback_head *work)
 	__fput(container_of(work, struct file, f_task_work));
 }
 
+static DECLARE_DELAYED_WORK(delayed_fput_work, delayed_fput);
+
 /*
  * If kernel thread really needs to have the final fput() it has done
  * to complete, call this.  The only user right now is the boot - we
@@ -472,35 +511,40 @@ static void ____fput(struct callback_head *work)
 void flush_delayed_fput(void)
 {
 	delayed_fput(NULL);
+	flush_delayed_work(&delayed_fput_work);
 }
 EXPORT_SYMBOL_GPL(flush_delayed_fput);
 
-static DECLARE_DELAYED_WORK(delayed_fput_work, delayed_fput);
+static void __fput_deferred(struct file *file)
+{
+	struct task_struct *task = current;
+
+	if (unlikely(!(file->f_mode & (FMODE_BACKING | FMODE_OPENED)))) {
+		file_free(file);
+		return;
+	}
+
+	if (likely(!in_interrupt() && !(task->flags & PF_KTHREAD))) {
+		init_task_work(&file->f_task_work, ____fput);
+		if (!task_work_add(task, &file->f_task_work, TWA_RESUME))
+			return;
+		/*
+		 * After this task has run exit_task_work(),
+		 * task_work_add() will fail.  Fall through to delayed
+		 * fput to avoid leaking *file.
+		 */
+	}
+
+	if (llist_add(&file->f_llist, &delayed_fput_list))
+		schedule_delayed_work(&delayed_fput_work, 1);
+}
 
 void fput(struct file *file)
 {
-	if (atomic_long_dec_and_test(&file->f_count)) {
-		struct task_struct *task = current;
-
-		if (unlikely(!(file->f_mode & (FMODE_BACKING | FMODE_OPENED)))) {
-			file_free(file);
-			return;
-		}
-		if (likely(!in_interrupt() && !(task->flags & PF_KTHREAD))) {
-			init_task_work(&file->f_task_work, ____fput);
-			if (!task_work_add(task, &file->f_task_work, TWA_RESUME))
-				return;
-			/*
-			 * After this task has run exit_task_work(),
-			 * task_work_add() will fail.  Fall through to delayed
-			 * fput to avoid leaking *file.
-			 */
-		}
-
-		if (llist_add(&file->f_llist, &delayed_fput_list))
-			schedule_delayed_work(&delayed_fput_work, 1);
-	}
+	if (unlikely(file_ref_put(&file->f_ref)))
+		__fput_deferred(file);
 }
+EXPORT_SYMBOL(fput);
 
 /*
  * synchronous analog of fput(); for kernel threads that might be needed
@@ -512,12 +556,34 @@ void fput(struct file *file)
  */
 void __fput_sync(struct file *file)
 {
-	if (atomic_long_dec_and_test(&file->f_count))
+	if (file_ref_put(&file->f_ref))
+		__fput(file);
+}
+EXPORT_SYMBOL(__fput_sync);
+
+/*
+ * Equivalent to __fput_sync(), but optimized for being called with the last
+ * reference.
+ *
+ * See file_ref_put_close() for details.
+ */
+void fput_close_sync(struct file *file)
+{
+	if (likely(file_ref_put_close(&file->f_ref)))
 		__fput(file);
 }
 
-EXPORT_SYMBOL(fput);
-EXPORT_SYMBOL(__fput_sync);
+/*
+ * Equivalent to fput(), but optimized for being called with the last
+ * reference.
+ *
+ * See file_ref_put_close() for details.
+ */
+void fput_close(struct file *file)
+{
+	if (file_ref_put_close(&file->f_ref))
+		__fput_deferred(file);
+}
 
 void __init files_init(void)
 {
@@ -528,6 +594,11 @@ void __init files_init(void)
 
 	filp_cachep = kmem_cache_create("filp", sizeof(struct file), &args,
 				SLAB_HWCACHE_ALIGN | SLAB_PANIC |
+				SLAB_ACCOUNT | SLAB_TYPESAFE_BY_RCU);
+
+	args.freeptr_offset = offsetof(struct backing_file, bf_freeptr);
+	bfilp_cachep = kmem_cache_create("bfilp", sizeof(struct backing_file),
+				&args, SLAB_HWCACHE_ALIGN | SLAB_PANIC |
 				SLAB_ACCOUNT | SLAB_TYPESAFE_BY_RCU);
 	percpu_counter_init(&nr_files, 0, GFP_KERNEL);
 }

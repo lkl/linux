@@ -326,10 +326,14 @@ struct sof_ipc4_base_module_cfg {
 #define SOF_IPC4_MOD_INSTANCE_SHIFT		16
 #define SOF_IPC4_MOD_INSTANCE_MASK		GENMASK(23, 16)
 #define SOF_IPC4_MOD_INSTANCE(x)		((x) << SOF_IPC4_MOD_INSTANCE_SHIFT)
+#define SOF_IPC4_MOD_INSTANCE_GET(x)		(((x) & SOF_IPC4_MOD_INSTANCE_MASK) \
+						 >> SOF_IPC4_MOD_INSTANCE_SHIFT)
 
 #define SOF_IPC4_MOD_ID_SHIFT			0
 #define SOF_IPC4_MOD_ID_MASK			GENMASK(15, 0)
 #define SOF_IPC4_MOD_ID(x)			((x) << SOF_IPC4_MOD_ID_SHIFT)
+#define SOF_IPC4_MOD_ID_GET(x)			(((x) & SOF_IPC4_MOD_ID_MASK) \
+						 >> SOF_IPC4_MOD_ID_SHIFT)
 
 /* init module ipc msg */
 #define SOF_IPC4_MOD_EXT_PARAM_SIZE_SHIFT	0
@@ -396,6 +400,7 @@ enum sof_ipc4_base_fw_params {
 	SOF_IPC4_FW_PARAM_MODULES_INFO_GET,
 	SOF_IPC4_FW_PARAM_LIBRARIES_INFO_GET = 16,
 	SOF_IPC4_FW_PARAM_SYSTEM_TIME = 20,
+	SOF_IPC4_FW_PARAM_MIC_PRIVACY_STATE_CHANGE = 35,
 };
 
 enum sof_ipc4_fw_config_params {
@@ -446,6 +451,18 @@ struct sof_ipc4_dx_state_info {
 	uint32_t dx_mask;
 } __packed __aligned(4);
 
+enum sof_ipc4_hw_config_params {
+	SOF_IPC4_HW_CFG_INTEL_MIC_PRIVACY_CAPS = 11,
+};
+
+#define SOF_IPC_INTEL_MIC_PRIVACY_VERSION_PTL	1
+
+struct sof_ipc4_intel_mic_privacy_cap {
+	uint32_t version;
+	uint32_t capabilities_length;
+	uint32_t capabilities[];
+} __packed;
+
 /* Reply messages */
 
 /*
@@ -484,6 +501,8 @@ struct sof_ipc4_dx_state_info {
 #define SOF_IPC4_LOG_CORE_MASK			GENMASK(15, 12)
 #define SOF_IPC4_LOG_CORE_GET(x)		(((x) & SOF_IPC4_LOG_CORE_MASK) >> \
 						 SOF_IPC4_LOG_CORE_SHIFT)
+
+#define SOF_IPC4_FW_READY_LIB_RESTORED		BIT(15)
 
 /* Value of notification type field - must fit into 8 bits */
 enum sof_ipc4_notification_type {

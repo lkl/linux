@@ -59,16 +59,11 @@ static int cros_ec_mkbp_proximity_parse_state(const void *data)
 static int cros_ec_mkbp_proximity_query(struct cros_ec_device *ec_dev,
 					int *state)
 {
-	struct {
-		struct cros_ec_command msg;
-		union {
-			struct ec_params_mkbp_info params;
-			u32 switches;
-		};
-	} __packed buf = { };
-	struct ec_params_mkbp_info *params = &buf.params;
-	struct cros_ec_command *msg = &buf.msg;
-	u32 *switches = &buf.switches;
+	DEFINE_RAW_FLEX(struct cros_ec_command, buf, data,
+			MAX(sizeof(u32), sizeof(struct ec_params_mkbp_info)));
+	struct ec_params_mkbp_info *params = (struct ec_params_mkbp_info *)buf->data;
+	struct cros_ec_command *msg = buf;
+	u32 *switches = (u32 *)buf->data;
 	size_t insize = sizeof(*switches);
 	int ret;
 
@@ -167,7 +162,7 @@ static int cros_ec_mkbp_proximity_read_event_config(struct iio_dev *indio_dev,
 static int cros_ec_mkbp_proximity_write_event_config(struct iio_dev *indio_dev,
 				     const struct iio_chan_spec *chan,
 				     enum iio_event_type type,
-				     enum iio_event_direction dir, int state)
+				     enum iio_event_direction dir, bool state)
 {
 	struct cros_ec_mkbp_proximity_data *data = iio_priv(indio_dev);
 
@@ -250,7 +245,7 @@ static void cros_ec_mkbp_proximity_remove(struct platform_device *pdev)
 
 static const struct of_device_id cros_ec_mkbp_proximity_of_match[] = {
 	{ .compatible = "google,cros-ec-mkbp-proximity" },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(of, cros_ec_mkbp_proximity_of_match);
 
@@ -261,7 +256,7 @@ static struct platform_driver cros_ec_mkbp_proximity_driver = {
 		.pm = pm_sleep_ptr(&cros_ec_mkbp_proximity_pm_ops),
 	},
 	.probe = cros_ec_mkbp_proximity_probe,
-	.remove_new = cros_ec_mkbp_proximity_remove,
+	.remove = cros_ec_mkbp_proximity_remove,
 };
 module_platform_driver(cros_ec_mkbp_proximity_driver);
 

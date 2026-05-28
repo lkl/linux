@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <linux/bitops.h>
 #include "build-id.h"
+#include "debuginfo.h"
 #include "mutex.h"
 #include <internal/rc_check.h>
 
@@ -20,30 +21,88 @@ struct perf_env;
 #define DSO__NAME_KALLSYMS	"[kernel.kallsyms]"
 #define DSO__NAME_KCORE		"[kernel.kcore]"
 
+/**
+ * enum dso_binary_type - The kind of DSO generally associated with a memory
+ *                        region (struct map).
+ */
 enum dso_binary_type {
+	/** @DSO_BINARY_TYPE__KALLSYMS: Symbols from /proc/kallsyms file. */
 	DSO_BINARY_TYPE__KALLSYMS = 0,
+	/** @DSO_BINARY_TYPE__GUEST_KALLSYMS: Guest /proc/kallsyms file. */
 	DSO_BINARY_TYPE__GUEST_KALLSYMS,
+	/** @DSO_BINARY_TYPE__VMLINUX: Path to kernel /boot/vmlinux file. */
 	DSO_BINARY_TYPE__VMLINUX,
+	/** @DSO_BINARY_TYPE__GUEST_VMLINUX: Path to guest kernel /boot/vmlinux file. */
 	DSO_BINARY_TYPE__GUEST_VMLINUX,
+	/** @DSO_BINARY_TYPE__JAVA_JIT: Symbols from /tmp/perf.map file. */
 	DSO_BINARY_TYPE__JAVA_JIT,
+	/**
+	 * @DSO_BINARY_TYPE__DEBUGLINK: Debug file readable from the file path
+	 * in the .gnu_debuglink ELF section of the dso.
+	 */
 	DSO_BINARY_TYPE__DEBUGLINK,
+	/**
+	 * @DSO_BINARY_TYPE__BUILD_ID_CACHE: File named after buildid located in
+	 * the buildid cache with an elf filename.
+	 */
 	DSO_BINARY_TYPE__BUILD_ID_CACHE,
+	/**
+	 * @DSO_BINARY_TYPE__BUILD_ID_CACHE_DEBUGINFO: File named after buildid
+	 * located in the buildid cache with a debug filename.
+	 */
 	DSO_BINARY_TYPE__BUILD_ID_CACHE_DEBUGINFO,
+	/**
+	 * @DSO_BINARY_TYPE__FEDORA_DEBUGINFO: Debug file in /usr/lib/debug
+	 * with .debug suffix.
+	 */
 	DSO_BINARY_TYPE__FEDORA_DEBUGINFO,
+	/** @DSO_BINARY_TYPE__UBUNTU_DEBUGINFO: Debug file in /usr/lib/debug. */
 	DSO_BINARY_TYPE__UBUNTU_DEBUGINFO,
+	/**
+	 * @DSO_BINARY_TYPE__MIXEDUP_UBUNTU_DEBUGINFO: dso__long_name debuginfo
+	 * file in /usr/lib/debug/lib rather than the expected
+	 * /usr/lib/debug/usr/lib.
+	 */
 	DSO_BINARY_TYPE__MIXEDUP_UBUNTU_DEBUGINFO,
+	/**
+	 * @DSO_BINARY_TYPE__BUILDID_DEBUGINFO: File named after buildid located
+	 * in /usr/lib/debug/.build-id/.
+	 */
 	DSO_BINARY_TYPE__BUILDID_DEBUGINFO,
+	/**
+	 * @DSO_BINARY_TYPE__GNU_DEBUGDATA: MiniDebuginfo where a compressed
+	 * ELF file is placed in a .gnu_debugdata section.
+	 */
+	DSO_BINARY_TYPE__GNU_DEBUGDATA,
+	/** @DSO_BINARY_TYPE__SYSTEM_PATH_DSO: A regular executable/shared-object file. */
 	DSO_BINARY_TYPE__SYSTEM_PATH_DSO,
+	/** @DSO_BINARY_TYPE__GUEST_KMODULE: Guest kernel module .ko file. */
 	DSO_BINARY_TYPE__GUEST_KMODULE,
+	/** @DSO_BINARY_TYPE__GUEST_KMODULE_COMP: Guest kernel module .ko.gz file. */
 	DSO_BINARY_TYPE__GUEST_KMODULE_COMP,
+	/** @DSO_BINARY_TYPE__SYSTEM_PATH_KMODULE: Kernel module .ko file. */
 	DSO_BINARY_TYPE__SYSTEM_PATH_KMODULE,
+	/** @DSO_BINARY_TYPE__SYSTEM_PATH_KMODULE_COMP: Kernel module .ko.gz file. */
 	DSO_BINARY_TYPE__SYSTEM_PATH_KMODULE_COMP,
+	/** @DSO_BINARY_TYPE__KCORE: /proc/kcore file. */
 	DSO_BINARY_TYPE__KCORE,
+	/** @DSO_BINARY_TYPE__GUEST_KCORE: Guest /proc/kcore file. */
 	DSO_BINARY_TYPE__GUEST_KCORE,
+	/**
+	 * @DSO_BINARY_TYPE__OPENEMBEDDED_DEBUGINFO: Openembedded/Yocto -dbg
+	 * package debug info.
+	 */
 	DSO_BINARY_TYPE__OPENEMBEDDED_DEBUGINFO,
+	/** @DSO_BINARY_TYPE__BPF_PROG_INFO: jitted BPF code. */
 	DSO_BINARY_TYPE__BPF_PROG_INFO,
+	/** @DSO_BINARY_TYPE__BPF_IMAGE: jitted BPF trampoline or dispatcher code. */
 	DSO_BINARY_TYPE__BPF_IMAGE,
+	/**
+	 * @DSO_BINARY_TYPE__OOL: out of line code such as kprobe-replaced
+	 * instructions or optimized kprobes or ftrace trampolines.
+	 */
 	DSO_BINARY_TYPE__OOL,
+	/** @DSO_BINARY_TYPE__NOT_FOUND: Unknown DSO kind. */
 	DSO_BINARY_TYPE__NOT_FOUND,
 };
 
@@ -127,14 +186,33 @@ enum dso_load_errno {
 #define DSO__DATA_CACHE_SIZE 4096
 #define DSO__DATA_CACHE_MASK ~(DSO__DATA_CACHE_SIZE - 1)
 
-/*
- * Data about backing storage DSO, comes from PERF_RECORD_MMAP2 meta events
+/**
+ * struct dso_id
+ *
+ * Data about backing storage DSO, comes from PERF_RECORD_MMAP2 meta events,
+ * reading from /proc/pid/maps or synthesis of build_ids from DSOs. Possibly
+ * incomplete at any particular use.
  */
 struct dso_id {
-	u32	maj;
-	u32	min;
-	u64	ino;
-	u64	ino_generation;
+	/* Data related to the mmap2 event or read from /proc/pid/maps. */
+	struct {
+		u32	maj;
+		u32	min;
+		u64	ino;
+		u64	ino_generation;
+	};
+	/** @mmap2_valid: Are the maj, min and ino fields valid? */
+	bool	mmap2_valid;
+	/**
+	 * @mmap2_ino_generation_valid: Is the ino_generation valid? Generally
+	 * false for /proc/pid/maps mmap event.
+	 */
+	bool	mmap2_ino_generation_valid;
+	/**
+	 * @build_id: A possibly populated build_id. build_id__is_defined checks
+	 * whether it is populated.
+	 */
+	struct build_id build_id;
 };
 
 struct dso_cache {
@@ -154,10 +232,12 @@ struct dso_data {
 	int		 status;
 	u32		 status_seen;
 	u64		 file_size;
+#ifdef HAVE_LIBUNWIND_SUPPORT
 	u64		 elf_base_addr;
 	u64		 debug_frame_offset;
 	u64		 eh_frame_hdr_addr;
 	u64		 eh_frame_hdr_offset;
+#endif
 };
 
 struct dso_bpf_prog {
@@ -183,7 +263,6 @@ DECLARE_RC_STRUCT(dso) {
 		u64		addr;
 		struct symbol	*symbol;
 	} last_find_result;
-	struct build_id	 bid;
 	u64		 text_offset;
 	u64		 text_end;
 	const char	 *short_name;
@@ -216,12 +295,12 @@ DECLARE_RC_STRUCT(dso) {
 	enum dso_swap_type	needs_swap:2;
 	bool			is_kmod:1;
 	u8		 adjust_symbols:1;
-	u8		 has_build_id:1;
 	u8		 header_build_id:1;
 	u8		 has_srcline:1;
 	u8		 hit:1;
 	u8		 annotate_warned:1;
 	u8		 auxtrace_warned:1;
+	u8		 debuginfo_warned:1;
 	u8		 short_name_allocated:1;
 	u8		 long_name_allocated:1;
 	u8		 is_64_bit:1;
@@ -230,6 +309,11 @@ DECLARE_RC_STRUCT(dso) {
 	u8		 rel;
 	char		 name[];
 };
+
+extern struct mutex _dso__data_open_lock;
+extern const struct dso_id dso_id_empty;
+
+int dso_id__cmp(const struct dso_id *a, const struct dso_id *b);
 
 /* dso__for_each_symbol - iterate over the symbols of given type
  *
@@ -280,6 +364,16 @@ static inline void dso__set_annotate_warned(struct dso *dso)
 	RC_CHK_ACCESS(dso)->annotate_warned = 1;
 }
 
+static inline bool dso__debuginfo_warned(const struct dso *dso)
+{
+	return RC_CHK_ACCESS(dso)->debuginfo_warned;
+}
+
+static inline void dso__set_debuginfo_warned(struct dso *dso)
+{
+	RC_CHK_ACCESS(dso)->debuginfo_warned = 1;
+}
+
 static inline bool dso__auxtrace_warned(const struct dso *dso)
 {
 	return RC_CHK_ACCESS(dso)->auxtrace_warned;
@@ -300,29 +394,9 @@ static inline void dso__set_auxtrace_cache(struct dso *dso, struct auxtrace_cach
 	RC_CHK_ACCESS(dso)->auxtrace_cache = cache;
 }
 
-static inline struct build_id *dso__bid(struct dso *dso)
-{
-	return &RC_CHK_ACCESS(dso)->bid;
-}
-
-static inline const struct build_id *dso__bid_const(const struct dso *dso)
-{
-	return &RC_CHK_ACCESS(dso)->bid;
-}
-
 static inline struct dso_bpf_prog *dso__bpf_prog(struct dso *dso)
 {
 	return &RC_CHK_ACCESS(dso)->bpf_prog;
-}
-
-static inline bool dso__has_build_id(const struct dso *dso)
-{
-	return RC_CHK_ACCESS(dso)->has_build_id;
-}
-
-static inline void dso__set_has_build_id(struct dso *dso)
-{
-	RC_CHK_ACCESS(dso)->has_build_id = true;
 }
 
 static inline bool dso__has_srcline(const struct dso *dso)
@@ -398,6 +472,16 @@ static inline struct dso_id *dso__id(struct dso *dso)
 static inline const struct dso_id *dso__id_const(const struct dso *dso)
 {
 	return &RC_CHK_ACCESS(dso)->id;
+}
+
+static inline const struct build_id *dso__bid(const struct dso *dso)
+{
+	return &dso__id_const(dso)->build_id;
+}
+
+static inline bool dso__has_build_id(const struct dso *dso)
+{
+	return build_id__is_defined(dso__bid(dso));
 }
 
 static inline struct rb_root_cached *dso__inlined_nodes(struct dso *dso)
@@ -637,9 +721,6 @@ static inline void dso__set_text_offset(struct dso *dso, u64 val)
 	RC_CHK_ACCESS(dso)->text_offset = val;
 }
 
-int dso_id__cmp(const struct dso_id *a, const struct dso_id *b);
-bool dso_id__empty(const struct dso_id *id);
-
 struct dso *dso__new_id(const char *name, const struct dso_id *id);
 struct dso *dso__new(const char *name);
 void dso__delete(struct dso *dso);
@@ -647,12 +728,12 @@ void dso__delete(struct dso *dso);
 int dso__cmp_id(struct dso *a, struct dso *b);
 void dso__set_short_name(struct dso *dso, const char *name, bool name_allocated);
 void dso__set_long_name(struct dso *dso, const char *name, bool name_allocated);
-void __dso__inject_id(struct dso *dso, const struct dso_id *id);
+void __dso__improve_id(struct dso *dso, const struct dso_id *id);
 
 int dso__name_len(const struct dso *dso);
 
 struct dso *dso__get(struct dso *dso);
-void dso__put(struct dso *dso);
+void dso__put(struct dso *dso) LOCKS_EXCLUDED(_dso__data_open_lock);
 
 static inline void __dso__zput(struct dso **dso)
 {
@@ -675,8 +756,10 @@ bool dso__sorted_by_name(const struct dso *dso);
 void dso__set_sorted_by_name(struct dso *dso);
 void dso__sort_by_name(struct dso *dso);
 
-void dso__set_build_id(struct dso *dso, struct build_id *bid);
-bool dso__build_id_equal(const struct dso *dso, struct build_id *bid);
+int dso__swap_init(struct dso *dso, unsigned char eidata);
+
+void dso__set_build_id(struct dso *dso, const struct build_id *bid);
+bool dso__build_id_equal(const struct dso *dso, const struct build_id *bid);
 void dso__read_running_kernel_build_id(struct dso *dso,
 				       struct machine *machine);
 int dso__kernel_module_get_build_id(struct dso *dso, const char *root_dir);
@@ -732,8 +815,8 @@ void dso__set_module_info(struct dso *dso, struct kmod_path *m,
  * The current usage of the dso__data_* interface is as follows:
  *
  * Get DSO's fd:
- *   int fd = dso__data_get_fd(dso, machine);
- *   if (fd >= 0) {
+ *   int fd;
+ *   if (dso__data_get_fd(dso, machine, &fd)) {
  *       USE 'fd' SOMEHOW
  *       dso__data_put_fd(dso);
  *   }
@@ -755,14 +838,16 @@ void dso__set_module_info(struct dso *dso, struct kmod_path *m,
  *
  * TODO
 */
-int dso__data_get_fd(struct dso *dso, struct machine *machine);
-void dso__data_put_fd(struct dso *dso);
-void dso__data_close(struct dso *dso);
+bool dso__data_get_fd(struct dso *dso, struct machine *machine, int *fd)
+	EXCLUSIVE_TRYLOCK_FUNCTION(true, _dso__data_open_lock);
+void dso__data_put_fd(struct dso *dso) UNLOCK_FUNCTION(_dso__data_open_lock);
+void dso__data_close(struct dso *dso) LOCKS_EXCLUDED(_dso__data_open_lock);
 
 int dso__data_file_size(struct dso *dso, struct machine *machine);
 off_t dso__data_size(struct dso *dso, struct machine *machine);
 ssize_t dso__data_read_offset(struct dso *dso, struct machine *machine,
 			      u64 offset, u8 *data, ssize_t size);
+uint16_t dso__e_machine(struct dso *dso, struct machine *machine);
 ssize_t dso__data_read_addr(struct dso *dso, struct map *map,
 			    struct machine *machine, u64 addr,
 			    u8 *data, ssize_t size);
@@ -808,7 +893,9 @@ static inline bool dso__is_kcore(const struct dso *dso)
 
 static inline bool dso__is_kallsyms(const struct dso *dso)
 {
-	return RC_CHK_ACCESS(dso)->kernel && RC_CHK_ACCESS(dso)->long_name[0] != '/';
+	enum dso_binary_type bt = dso__binary_type(dso);
+
+	return bt == DSO_BINARY_TYPE__KALLSYMS || bt == DSO_BINARY_TYPE__GUEST_KALLSYMS;
 }
 
 bool dso__is_object_file(const struct dso *dso);
@@ -827,5 +914,18 @@ u64 dso__findnew_global_type(struct dso *dso, u64 addr, u64 offset);
 /* Check if dso name is of format "/tmp/perf-%d.map" */
 bool perf_pid_map_tid(const char *dso_name, int *tid);
 bool is_perf_pid_map_name(const char *dso_name);
+
+/*
+ * In the future, we may get debuginfo using build-ID (w/o path).
+ * Add this helper is for the smooth conversion.
+ */
+static inline struct debuginfo *dso__debuginfo(struct dso *dso)
+{
+	return debuginfo__new(dso__long_name(dso));
+}
+
+const u8 *dso__read_symbol(struct dso *dso, const char *symfs_filename,
+			   const struct map *map, const struct symbol *sym,
+			   u8 **out_buf, u64 *out_buf_len, bool *is_64bit);
 
 #endif /* __PERF_DSO */

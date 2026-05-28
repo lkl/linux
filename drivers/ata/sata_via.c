@@ -25,6 +25,7 @@
 #include <scsi/scsi_cmnd.h>
 #include <scsi/scsi_host.h>
 #include <linux/libata.h>
+#include <linux/string_choices.h>
 
 #define DRV_NAME	"sata_via"
 #define DRV_VERSION	"2.6"
@@ -119,7 +120,7 @@ static struct ata_port_operations svia_base_ops = {
 static struct ata_port_operations vt6420_sata_ops = {
 	.inherits		= &svia_base_ops,
 	.freeze			= svia_noop_freeze,
-	.prereset		= vt6420_prereset,
+	.reset.prereset		= vt6420_prereset,
 	.bmdma_start		= vt6420_bmdma_start,
 };
 
@@ -139,7 +140,7 @@ static struct ata_port_operations vt6421_sata_ops = {
 
 static struct ata_port_operations vt8251_ops = {
 	.inherits		= &svia_base_ops,
-	.hardreset		= sata_std_hardreset,
+	.reset.hardreset	= sata_std_hardreset,
 	.scr_read		= vt8251_scr_read,
 	.scr_write		= vt8251_scr_write,
 };
@@ -359,7 +360,7 @@ static int vt6420_prereset(struct ata_link *link, unsigned long deadline)
 
 	ata_port_info(ap,
 		      "SATA link %s 1.5 Gbps (SStatus %X SControl %X)\n",
-		      online ? "up" : "down", sstatus, scontrol);
+		      str_up_down(online), sstatus, scontrol);
 
 	/* SStatus is read one more time */
 	svia_scr_read(link, SCR_STATUS, &sstatus);

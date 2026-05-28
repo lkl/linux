@@ -32,8 +32,8 @@
 #define ALT_CTX_ALL		(ALT_CTX_EARLY | ALT_CTX_LATE)
 
 #define ALT_TYPE_FACILITY	0
-#define ALT_TYPE_SPEC		1
-#define ALT_TYPE_LOWCORE	2
+#define ALT_TYPE_FEATURE	1
+#define ALT_TYPE_SPEC		2
 
 #define ALT_DATA_SHIFT		0
 #define ALT_TYPE_SHIFT		20
@@ -43,14 +43,15 @@
 					 ALT_TYPE_FACILITY << ALT_TYPE_SHIFT	| \
 					 (facility) << ALT_DATA_SHIFT)
 
+#define ALT_FEATURE(feature)		(ALT_CTX_EARLY << ALT_CTX_SHIFT		| \
+					 ALT_TYPE_FEATURE << ALT_TYPE_SHIFT	| \
+					 (feature) << ALT_DATA_SHIFT)
+
 #define ALT_SPEC(facility)		(ALT_CTX_LATE << ALT_CTX_SHIFT		| \
 					 ALT_TYPE_SPEC << ALT_TYPE_SHIFT	| \
 					 (facility) << ALT_DATA_SHIFT)
 
-#define ALT_LOWCORE			(ALT_CTX_EARLY << ALT_CTX_SHIFT		| \
-					 ALT_TYPE_LOWCORE << ALT_TYPE_SHIFT)
-
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #include <linux/types.h>
 #include <linux/stddef.h>
@@ -182,7 +183,7 @@ static inline void apply_alternatives(struct alt_instr *start, struct alt_instr 
 /* Use this macro if clobbers are needed without inputs. */
 #define ASM_NO_INPUT_CLOBBER(clobber...) : clobber
 
-#else  /* __ASSEMBLY__ */
+#else  /* __ASSEMBLER__ */
 
 /*
  * Issue one struct alt_instr descriptor entry (need to put it into
@@ -232,6 +233,6 @@ static inline void apply_alternatives(struct alt_instr *start, struct alt_instr 
 	.popsection
 .endm
 
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 
 #endif /* _ASM_S390_ALTERNATIVE_H */

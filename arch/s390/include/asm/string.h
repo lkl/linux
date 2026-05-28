@@ -26,11 +26,9 @@ void *memmove(void *dest, const void *src, size_t n);
 #define __HAVE_ARCH_MEMSCAN	/* inline & arch function */
 #define __HAVE_ARCH_STRCAT	/* inline & arch function */
 #define __HAVE_ARCH_STRCMP	/* arch function */
-#define __HAVE_ARCH_STRCPY	/* inline & arch function */
 #define __HAVE_ARCH_STRLCAT	/* arch function */
 #define __HAVE_ARCH_STRLEN	/* inline & arch function */
 #define __HAVE_ARCH_STRNCAT	/* arch function */
-#define __HAVE_ARCH_STRNCPY	/* arch function */
 #define __HAVE_ARCH_STRNLEN	/* inline & arch function */
 #define __HAVE_ARCH_STRSTR	/* arch function */
 #define __HAVE_ARCH_MEMSET16	/* arch function */
@@ -42,7 +40,6 @@ int memcmp(const void *s1, const void *s2, size_t n);
 int strcmp(const char *s1, const char *s2);
 size_t strlcat(char *dest, const char *src, size_t n);
 char *strncat(char *dest, const char *src, size_t n);
-char *strncpy(char *dest, const char *src, size_t n);
 char *strstr(const char *s1, const char *s2);
 #endif /* !defined(CONFIG_KASAN) && !defined(CONFIG_KMSAN) */
 
@@ -128,7 +125,7 @@ static inline void *memscan(void *s, int c, size_t n)
 	asm volatile(
 		"	lgr	0,%[c]\n"
 		"0:	srst	%[ret],%[s]\n"
-		"	jo	0b\n"
+		"	jo	0b"
 		: [ret] "+&a" (ret), [s] "+&a" (s)
 		: [c] "d" (c)
 		: "cc", "memory", "0");
@@ -149,22 +146,6 @@ static inline char *strcat(char *dst, const char *src)
 		"1:	mvst	%[dummy],%[src]\n"
 		"	jo	1b"
 		: [dummy] "+&a" (dummy), [dst] "+&a" (dst), [src] "+&a" (src)
-		:
-		: "cc", "memory", "0");
-	return ret;
-}
-#endif
-
-#ifdef __HAVE_ARCH_STRCPY
-static inline char *strcpy(char *dst, const char *src)
-{
-	char *ret = dst;
-
-	asm volatile(
-		"	lghi	0,0\n"
-		"0:	mvst	%[dst],%[src]\n"
-		"	jo	0b"
-		: [dst] "+&a" (dst), [src] "+&a" (src)
 		:
 		: "cc", "memory", "0");
 	return ret;
@@ -208,7 +189,6 @@ static inline size_t strnlen(const char * s, size_t n)
 void *memchr(const void * s, int c, size_t n);
 void *memscan(void *s, int c, size_t n);
 char *strcat(char *dst, const char *src);
-char *strcpy(char *dst, const char *src);
 size_t strlen(const char *s);
 size_t strnlen(const char * s, size_t n);
 #endif /* !IN_ARCH_STRING_C */

@@ -25,7 +25,6 @@ static const struct regmap_config zpa2326_regmap_i2c_config = {
 	.precious_reg   = zpa2326_isreg_precious,
 	.max_register   = ZPA2326_TEMP_OUT_H_REG,
 	.read_flag_mask = BIT(7),
-	.cache_type     = REGCACHE_NONE,
 };
 
 static unsigned int zpa2326_i2c_hwid(const struct i2c_client *client)
@@ -85,4 +84,4 @@ module_i2c_driver(zpa2326_i2c_driver);
 MODULE_AUTHOR("Gregor Boirie <gregor.boirie@parrot.com>");
 MODULE_DESCRIPTION("I2C driver for Murata ZPA2326 pressure sensor");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(IIO_ZPA2326);
+MODULE_IMPORT_NS("IIO_ZPA2326");

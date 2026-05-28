@@ -192,7 +192,7 @@ int aa_audit(int type, struct aa_profile *profile,
 	aa_audit_msg(type, ad, cb);
 
 	if (ad->type == AUDIT_APPARMOR_KILL)
-		(void)send_sig_info(SIGKILL, NULL,
+		(void)send_sig_info(profile->signal, NULL,
 			ad->common.type == LSM_AUDIT_DATA_TASK &&
 			ad->common.u.tsk ? ad->common.u.tsk : current);
 
@@ -264,13 +264,13 @@ int aa_audit_rule_known(struct audit_krule *rule)
 	return 0;
 }
 
-int aa_audit_rule_match(u32 sid, u32 field, u32 op, void *vrule)
+int aa_audit_rule_match(struct lsm_prop *prop, u32 field, u32 op, void *vrule)
 {
 	struct aa_audit_rule *rule = vrule;
 	struct aa_label *label;
 	int found = 0;
 
-	label = aa_secid_to_label(sid);
+	label = prop->apparmor.label;
 
 	if (!label)
 		return -ENOENT;

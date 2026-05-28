@@ -238,7 +238,7 @@ static cycles_t exynos4_read_current_timer(void)
 static int __init exynos4_clocksource_init(bool frc_shared)
 {
 	/*
-	 * When the frc is shared, the main processer should have already
+	 * When the frc is shared, the main processor should have already
 	 * turned it on and we shouldn't be writing to TCON.
 	 */
 	if (frc_shared)
@@ -496,7 +496,6 @@ static int exynos4_mct_dying_cpu(unsigned int cpu)
 		per_cpu_ptr(&percpu_mct_tick, cpu);
 	struct clock_event_device *evt = &mevt->evt;
 
-	evt->set_state_shutdown(evt);
 	if (mct_int_type == MCT_INT_SPI) {
 		if (evt->irq != -1)
 			disable_irq_nosync(evt->irq);

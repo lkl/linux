@@ -97,7 +97,7 @@ static int leases_enable = 1;
 static int lease_break_time = 45;
 
 #ifdef CONFIG_SYSCTL
-static struct ctl_table locks_sysctls[] = {
+static const struct ctl_table locks_sysctls[] = {
 	{
 		.procname	= "leases-enable",
 		.data		= &leases_enable,
@@ -712,7 +712,7 @@ static void __locks_wake_up_blocks(struct file_lock_core *blocker)
 		    fl->fl_lmops && fl->fl_lmops->lm_notify)
 			fl->fl_lmops->lm_notify(fl);
 		else
-			locks_wake_up(fl);
+			locks_wake_up_waiter(waiter);
 
 		/*
 		 * The setting of flc_blocker to NULL marks the "done"
@@ -1794,7 +1794,7 @@ generic_add_lease(struct file *filp, int arg, struct file_lease **flp, void **pr
 
 	/*
 	 * In the delegation case we need mutual exclusion with
-	 * a number of operations that take the i_mutex.  We trylock
+	 * a number of operations that take the i_rwsem.  We trylock
 	 * because delegations are an optional optimization, and if
 	 * there's some chance of a conflict--we'd rather not
 	 * bother, maybe that's a sign this just isn't a good file to
@@ -2136,7 +2136,6 @@ SYSCALL_DEFINE2(flock, unsigned int, fd, unsigned int, cmd)
 {
 	int can_sleep, error, type;
 	struct file_lock fl;
-	struct fd f;
 
 	/*
 	 * LOCK_MAND locks were broken for a long time in that they never
@@ -2155,19 +2154,18 @@ SYSCALL_DEFINE2(flock, unsigned int, fd, unsigned int, cmd)
 	if (type < 0)
 		return type;
 
-	error = -EBADF;
-	f = fdget(fd);
-	if (!fd_file(f))
-		return error;
+	CLASS(fd, f)(fd);
+	if (fd_empty(f))
+		return -EBADF;
 
 	if (type != F_UNLCK && !(fd_file(f)->f_mode & (FMODE_READ | FMODE_WRITE)))
-		goto out_putf;
+		return -EBADF;
 
 	flock_make_lock(fd_file(f), &fl, type);
 
 	error = security_file_lock(fd_file(f), fl.c.flc_type);
 	if (error)
-		goto out_putf;
+		return error;
 
 	can_sleep = !(cmd & LOCK_NB);
 	if (can_sleep)
@@ -2181,9 +2179,6 @@ SYSCALL_DEFINE2(flock, unsigned int, fd, unsigned int, cmd)
 		error = locks_lock_file_wait(fd_file(f), &fl);
 
 	locks_release_private(&fl);
- out_putf:
-	fdput(f);
-
 	return error;
 }
 
@@ -2333,8 +2328,8 @@ out:
  * To avoid blocking kernel daemons, such as lockd, that need to acquire POSIX
  * locks, the ->lock() interface may return asynchronously, before the lock has
  * been granted or denied by the underlying filesystem, if (and only if)
- * lm_grant is set. Additionally EXPORT_OP_ASYNC_LOCK in export_operations
- * flags need to be set.
+ * lm_grant is set. Additionally FOP_ASYNC_LOCK in file_operations fop_flags
+ * need to be set.
  *
  * Callers expecting ->lock() to return asynchronously will only use F_SETLK,
  * not F_SETLKW; they will set FL_SLEEP if (and only if) the request is for a

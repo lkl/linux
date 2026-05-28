@@ -4,13 +4,11 @@
 
 #include <linux/const.h>
 
-#define PAGE_SHIFT	CONFIG_PAGE_SHIFT
-#define PAGE_SIZE	(_AC(1,UL) << PAGE_SHIFT)
-#define PAGE_MASK	(~(PAGE_SIZE-1))
+#include <vdso/page.h>
 
 #define HAVE_ARCH_HUGETLB_UNMAPPED_AREA
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #include <asm/types.h>
 #include <asm/cache.h>
@@ -95,7 +93,7 @@ typedef struct __physmem_range {
 extern physmem_range_t pmem_ranges[];
 extern int npmem_ranges;
 
-#endif /* !__ASSEMBLY__ */
+#endif /* !__ASSEMBLER__ */
 
 /* WARNING: The definitions below must match exactly to sizeof(pte_t)
  * etc
@@ -141,7 +139,7 @@ extern int npmem_ranges;
 #define KERNEL_BINARY_TEXT_START	(__PAGE_OFFSET + 0x100000)
 
 /* These macros don't work for 64-bit C code -- don't allow in C at all */
-#ifdef __ASSEMBLY__
+#ifdef __ASSEMBLER__
 #   define PA(x)	((x)-__PAGE_OFFSET)
 #   define VA(x)	((x)+__PAGE_OFFSET)
 #endif
@@ -168,7 +166,6 @@ extern int npmem_ranges;
 
 #define virt_addr_valid(kaddr)	pfn_valid(__pa(kaddr) >> PAGE_SHIFT)
 
-#define page_to_phys(page)	(page_to_pfn(page) << PAGE_SHIFT)
 #define virt_to_page(kaddr)     pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
 
 #include <asm-generic/memory_model.h>

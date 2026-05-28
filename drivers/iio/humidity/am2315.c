@@ -35,7 +35,7 @@ struct am2315_data {
 	/* Ensure timestamp is naturally aligned */
 	struct {
 		s16 chans[2];
-		s64 timestamp __aligned(8);
+		aligned_s64 timestamp;
 	} scan;
 };
 
@@ -224,10 +224,8 @@ static int am2315_probe(struct i2c_client *client)
 	struct am2315_data *data;
 
 	indio_dev = devm_iio_device_alloc(&client->dev, sizeof(*data));
-	if (!indio_dev) {
-		dev_err(&client->dev, "iio allocation failed!\n");
+	if (!indio_dev)
 		return -ENOMEM;
-	}
 
 	data = iio_priv(indio_dev);
 	data->client = client;
@@ -253,7 +251,7 @@ static int am2315_probe(struct i2c_client *client)
 
 static const struct i2c_device_id am2315_i2c_id[] = {
 	{ "am2315" },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, am2315_i2c_id);
 

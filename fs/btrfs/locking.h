@@ -74,7 +74,7 @@ enum btrfs_lock_nesting {
 	BTRFS_NESTING_NEW_ROOT,
 
 	/*
-	 * We are limited to MAX_LOCKDEP_SUBLCLASSES number of subclasses, so
+	 * We are limited to MAX_LOCKDEP_SUBCLASSES number of subclasses, so
 	 * add this in here and add a static_assert to keep us from going over
 	 * the limit.  As of this writing we're limited to 8, and we're
 	 * definitely using 8, hence this check to keep us from messing up in
@@ -129,6 +129,16 @@ enum btrfs_lockdep_trans_states {
 	rwsem_release(&owner->lock##_map, _THIS_IP_)
 
 /*
+ * Used to account for the fact that when doing io_uring encoded I/O, we can
+ * return to userspace with the inode lock still held.
+ */
+#define btrfs_lockdep_inode_acquire(owner, lock)				\
+	rwsem_acquire_read(&owner->vfs_inode.lock.dep_map, 0, 0, _THIS_IP_)
+
+#define btrfs_lockdep_inode_release(owner, lock)				\
+	rwsem_release(&owner->vfs_inode.lock.dep_map, _THIS_IP_)
+
+/*
  * Macros for the transaction states wait events, similar to the generic wait
  * event macros.
  */
@@ -179,8 +189,7 @@ static inline void btrfs_tree_read_lock(struct extent_buffer *eb)
 }
 
 void btrfs_tree_read_unlock(struct extent_buffer *eb);
-int btrfs_try_tree_read_lock(struct extent_buffer *eb);
-int btrfs_try_tree_write_lock(struct extent_buffer *eb);
+bool btrfs_try_tree_read_lock(struct extent_buffer *eb);
 struct extent_buffer *btrfs_lock_root_node(struct btrfs_root *root);
 struct extent_buffer *btrfs_read_lock_root_node(struct btrfs_root *root);
 struct extent_buffer *btrfs_try_read_lock_root_node(struct btrfs_root *root);
@@ -190,8 +199,13 @@ static inline void btrfs_assert_tree_write_locked(struct extent_buffer *eb)
 {
 	lockdep_assert_held_write(&eb->lock);
 }
+static inline void btrfs_assert_tree_read_locked(struct extent_buffer *eb)
+{
+	lockdep_assert_held_read(&eb->lock);
+}
 #else
 static inline void btrfs_assert_tree_write_locked(struct extent_buffer *eb) { }
+static inline void btrfs_assert_tree_read_locked(struct extent_buffer *eb) { }
 #endif
 
 void btrfs_unlock_up_safe(struct btrfs_path *path, int level);

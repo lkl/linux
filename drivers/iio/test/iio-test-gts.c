@@ -499,7 +499,7 @@ static struct kunit_case iio_gts_test_cases[] = {
 	KUNIT_CASE(test_iio_find_closest_gain_low),
 	KUNIT_CASE(test_iio_gts_total_gain_to_scale),
 	KUNIT_CASE(test_iio_gts_avail_test),
-	{}
+	{ }
 };
 
 static struct kunit_suite iio_gts_test_suite = {
@@ -512,4 +512,4 @@ kunit_test_suite(iio_gts_test_suite);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Matti Vaittinen <mazziesaccount@gmail.com>");
 MODULE_DESCRIPTION("Test IIO light sensor gain-time-scale helpers");
-MODULE_IMPORT_NS(IIO_GTS_HELPER);
+MODULE_IMPORT_NS("IIO_GTS_HELPER");

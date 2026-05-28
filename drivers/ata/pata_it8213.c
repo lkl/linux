@@ -81,7 +81,7 @@ static void it8213_set_piomode (struct ata_port *ap, struct ata_device *adev)
 	int control = 0;
 
 	/*
-	 *	See Intel Document 298600-004 for the timing programing rules
+	 *	See Intel Document 298600-004 for the timing programming rules
 	 *	for PIIX/ICH. The 8213 is a clone so very similar
 	 */
 
@@ -238,7 +238,7 @@ static struct ata_port_operations it8213_ops = {
 	.cable_detect		= it8213_cable_detect,
 	.set_piomode		= it8213_set_piomode,
 	.set_dmamode		= it8213_set_dmamode,
-	.prereset		= it8213_pre_reset,
+	.reset.prereset		= it8213_pre_reset,
 };
 
 

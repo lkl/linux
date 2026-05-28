@@ -58,7 +58,6 @@
 #include <linux/platform_device.h>	/* For platform_driver framework */
 #include <linux/pci.h>			/* For pci functions */
 #include <linux/ioport.h>		/* For io-port access */
-#include <linux/spinlock.h>		/* For spin_lock/spin_unlock/... */
 #include <linux/uaccess.h>		/* For copy_to_user/put_user/... */
 #include <linux/io.h>			/* For inb/outb/... */
 #include <linux/platform_data/itco_wdt.h>
@@ -82,6 +81,13 @@
 #define TCO2_CNT(p)	(TCOBASE(p) + 0x0a) /* TCO2 Control Register	*/
 #define TCOv2_TMR(p)	(TCOBASE(p) + 0x12) /* TCOv2 Timer Initial Value*/
 
+/*
+ * NMI_NOW is bit 8 of TCO1_CNT register
+ * Read/Write
+ * This bit is implemented as RW but has no effect on HW.
+ */
+#define NMI_NOW		BIT(8)
+
 /* internal variables */
 struct iTCO_wdt_private {
 	struct watchdog_device wddev;
@@ -95,8 +101,6 @@ struct iTCO_wdt_private {
 	 * or memory-mapped PMC register bit 4 (TCO version 3).
 	 */
 	unsigned long __iomem *gcs_pmc;
-	/* the lock for io operations */
-	spinlock_t io_lock;
 	/* the PCI-device */
 	struct pci_dev *pci_dev;
 	/* whether or not the watchdog has been suspended */
@@ -219,13 +223,23 @@ static int update_no_reboot_bit_cnt(void *priv, bool set)
 	struct iTCO_wdt_private *p = priv;
 	u16 val, newval;
 
-	val = inw(TCO1_CNT(p));
+	/*
+	 * writing back 1b1 to NMI_NOW of TCO1_CNT register
+	 * causes NMI_NOW bit inversion what consequently does
+	 * not allow to perform the register's value comparison
+	 * properly.
+	 *
+	 * NMI_NOW bit masking for TCO1_CNT register values
+	 * helps to avoid possible NMI_NOW bit inversions on
+	 * following write operation.
+	 */
+	val = inw(TCO1_CNT(p)) & ~NMI_NOW;
 	if (set)
 		val |= BIT(0);
 	else
 		val &= ~BIT(0);
 	outw(val, TCO1_CNT(p));
-	newval = inw(TCO1_CNT(p));
+	newval = inw(TCO1_CNT(p)) & ~NMI_NOW;
 
 	/* make sure the update is successful */
 	return val != newval ? -EIO : 0;
@@ -269,13 +283,10 @@ static int iTCO_wdt_start(struct watchdog_device *wd_dev)
 	struct iTCO_wdt_private *p = watchdog_get_drvdata(wd_dev);
 	unsigned int val;
 
-	spin_lock(&p->io_lock);
-
 	iTCO_vendor_pre_start(p->smi_res, wd_dev->timeout);
 
 	/* disable chipset's NO_REBOOT bit */
 	if (p->update_no_reboot_bit(p->no_reboot_priv, false)) {
-		spin_unlock(&p->io_lock);
 		dev_err(wd_dev->parent, "failed to reset NO_REBOOT flag, reboot disabled by hardware/BIOS\n");
 		return -EIO;
 	}
@@ -292,7 +303,6 @@ static int iTCO_wdt_start(struct watchdog_device *wd_dev)
 	val &= 0xf7ff;
 	outw(val, TCO1_CNT(p));
 	val = inw(TCO1_CNT(p));
-	spin_unlock(&p->io_lock);
 
 	if (val & 0x0800)
 		return -1;
@@ -303,8 +313,6 @@ static int iTCO_wdt_stop(struct watchdog_device *wd_dev)
 {
 	struct iTCO_wdt_private *p = watchdog_get_drvdata(wd_dev);
 	unsigned int val;
-
-	spin_lock(&p->io_lock);
 
 	iTCO_vendor_pre_stop(p->smi_res);
 
@@ -317,8 +325,6 @@ static int iTCO_wdt_stop(struct watchdog_device *wd_dev)
 	/* Set the NO_REBOOT bit to prevent later reboots, just for sure */
 	p->update_no_reboot_bit(p->no_reboot_priv, true);
 
-	spin_unlock(&p->io_lock);
-
 	if ((val & 0x0800) == 0)
 		return -1;
 	return 0;
@@ -327,8 +333,6 @@ static int iTCO_wdt_stop(struct watchdog_device *wd_dev)
 static int iTCO_wdt_ping(struct watchdog_device *wd_dev)
 {
 	struct iTCO_wdt_private *p = watchdog_get_drvdata(wd_dev);
-
-	spin_lock(&p->io_lock);
 
 	/* Reload the timer by writing to the TCO Timer Counter register */
 	if (p->iTCO_version >= 2) {
@@ -341,7 +345,6 @@ static int iTCO_wdt_ping(struct watchdog_device *wd_dev)
 		outb(0x01, TCO_RLD(p));
 	}
 
-	spin_unlock(&p->io_lock);
 	return 0;
 }
 
@@ -368,24 +371,20 @@ static int iTCO_wdt_set_timeout(struct watchdog_device *wd_dev, unsigned int t)
 
 	/* Write new heartbeat to watchdog */
 	if (p->iTCO_version >= 2) {
-		spin_lock(&p->io_lock);
 		val16 = inw(TCOv2_TMR(p));
 		val16 &= 0xfc00;
 		val16 |= tmrval;
 		outw(val16, TCOv2_TMR(p));
 		val16 = inw(TCOv2_TMR(p));
-		spin_unlock(&p->io_lock);
 
 		if ((val16 & 0x3ff) != tmrval)
 			return -EINVAL;
 	} else if (p->iTCO_version == 1) {
-		spin_lock(&p->io_lock);
 		val8 = inb(TCOv1_TMR(p));
 		val8 &= 0xc0;
 		val8 |= (tmrval & 0xff);
 		outb(val8, TCOv1_TMR(p));
 		val8 = inb(TCOv1_TMR(p));
-		spin_unlock(&p->io_lock);
 
 		if ((val8 & 0x3f) != tmrval)
 			return -EINVAL;
@@ -404,19 +403,15 @@ static unsigned int iTCO_wdt_get_timeleft(struct watchdog_device *wd_dev)
 
 	/* read the TCO Timer */
 	if (p->iTCO_version >= 2) {
-		spin_lock(&p->io_lock);
 		val16 = inw(TCO_RLD(p));
 		val16 &= 0x3ff;
-		spin_unlock(&p->io_lock);
 
 		time_left = ticks_to_seconds(p, val16);
 	} else if (p->iTCO_version == 1) {
-		spin_lock(&p->io_lock);
 		val8 = inb(TCO_RLD(p));
 		val8 &= 0x3f;
 		if (!(inw(TCO1_STS(p)) & 0x0008))
 			val8 += (inb(TCOv1_TMR(p)) & 0x3f);
-		spin_unlock(&p->io_lock);
 
 		time_left = ticks_to_seconds(p, val8);
 	}
@@ -475,8 +470,6 @@ static int iTCO_wdt_probe(struct platform_device *pdev)
 	p = devm_kzalloc(dev, sizeof(*p), GFP_KERNEL);
 	if (!p)
 		return -ENOMEM;
-
-	spin_lock_init(&p->io_lock);
 
 	p->tco_res = platform_get_resource(pdev, IORESOURCE_IO, ICH_RES_IO_TCO);
 	if (!p->tco_res)
@@ -584,18 +577,21 @@ static int iTCO_wdt_probe(struct platform_device *pdev)
 	/* Check that the heartbeat value is within it's range;
 	   if not reset to the default */
 	if (iTCO_wdt_set_timeout(&p->wddev, heartbeat)) {
-		iTCO_wdt_set_timeout(&p->wddev, WATCHDOG_TIMEOUT);
+		ret = iTCO_wdt_set_timeout(&p->wddev, WATCHDOG_TIMEOUT);
+		if (ret != 0) {
+			dev_err(dev, "Failed to set watchdog timeout (%d)\n", WATCHDOG_TIMEOUT);
+			return ret;
+		}
 		dev_info(dev, "timeout value out of range, using %d\n",
 			WATCHDOG_TIMEOUT);
+		heartbeat = WATCHDOG_TIMEOUT;
 	}
 
 	watchdog_stop_on_reboot(&p->wddev);
 	watchdog_stop_on_unregister(&p->wddev);
 	ret = devm_watchdog_register_device(dev, &p->wddev);
-	if (ret != 0) {
-		dev_err(dev, "cannot register watchdog device (err=%d)\n", ret);
+	if (ret != 0)
 		return ret;
-	}
 
 	dev_info(dev, "initialized. heartbeat=%d sec (nowayout=%d)\n",
 		heartbeat, nowayout);

@@ -25,9 +25,6 @@
 
 #include "bmc150-accel.h"
 
-#define BMC150_ACCEL_DRV_NAME			"bmc150_accel"
-#define BMC150_ACCEL_IRQ_NAME			"bmc150_accel_event"
-
 #define BMC150_ACCEL_REG_CHIP_ID		0x00
 
 #define BMC150_ACCEL_REG_INT_STATUS_2		0x0B
@@ -203,7 +200,7 @@ const struct regmap_config bmc150_regmap_conf = {
 	.val_bits = 8,
 	.max_register = 0x3f,
 };
-EXPORT_SYMBOL_NS_GPL(bmc150_regmap_conf, IIO_BMC150);
+EXPORT_SYMBOL_NS_GPL(bmc150_regmap_conf, "IIO_BMC150");
 
 static int bmc150_accel_set_mode(struct bmc150_accel_data *data,
 				 enum bmc150_power_modes mode,
@@ -335,13 +332,10 @@ static int bmc150_accel_set_power_state(struct bmc150_accel_data *data, bool on)
 	struct device *dev = regmap_get_device(data->regmap);
 	int ret;
 
-	if (on) {
+	if (on)
 		ret = pm_runtime_resume_and_get(dev);
-	} else {
-		pm_runtime_mark_last_busy(dev);
+	else
 		ret = pm_runtime_put_autosuspend(dev);
-	}
-
 	if (ret < 0) {
 		dev_err(dev,
 			"Failed: %s for %d\n", __func__, on);
@@ -528,6 +522,10 @@ static int bmc150_accel_set_interrupt(struct bmc150_accel_data *data, int i,
 	struct bmc150_accel_interrupt *intr = &data->interrupts[i];
 	const struct bmc150_accel_interrupt_info *info = intr->info;
 	int ret;
+
+	/* We do not always have an IRQ */
+	if (data->irq <= 0)
+		return 0;
 
 	if (state) {
 		if (atomic_inc_return(&intr->users) > 1)
@@ -804,7 +802,7 @@ static int bmc150_accel_write_event_config(struct iio_dev *indio_dev,
 					   const struct iio_chan_spec *chan,
 					   enum iio_event_type type,
 					   enum iio_event_direction dir,
-					   int state)
+					   bool state)
 {
 	struct bmc150_accel_data *data = iio_priv(indio_dev);
 	int ret;
@@ -1702,11 +1700,12 @@ int bmc150_accel_core_probe(struct device *dev, struct regmap *regmap, int irq,
 	}
 
 	if (irq > 0) {
+		data->irq = irq;
 		ret = devm_request_threaded_irq(dev, irq,
 						bmc150_accel_irq_handler,
 						bmc150_accel_irq_thread_handler,
 						IRQF_TRIGGER_RISING,
-						BMC150_ACCEL_IRQ_NAME,
+						"bmc150_accel_event",
 						indio_dev);
 		if (ret)
 			goto err_buffer_cleanup;
@@ -1760,7 +1759,7 @@ err_disable_regulators:
 
 	return ret;
 }
-EXPORT_SYMBOL_NS_GPL(bmc150_accel_core_probe, IIO_BMC150);
+EXPORT_SYMBOL_NS_GPL(bmc150_accel_core_probe, "IIO_BMC150");
 
 void bmc150_accel_core_remove(struct device *dev)
 {
@@ -1783,7 +1782,7 @@ void bmc150_accel_core_remove(struct device *dev)
 	regulator_bulk_disable(ARRAY_SIZE(data->regulators),
 			       data->regulators);
 }
-EXPORT_SYMBOL_NS_GPL(bmc150_accel_core_remove, IIO_BMC150);
+EXPORT_SYMBOL_NS_GPL(bmc150_accel_core_remove, "IIO_BMC150");
 
 #ifdef CONFIG_PM_SLEEP
 static int bmc150_accel_suspend(struct device *dev)
@@ -1858,7 +1857,7 @@ const struct dev_pm_ops bmc150_accel_pm_ops = {
 	SET_RUNTIME_PM_OPS(bmc150_accel_runtime_suspend,
 			   bmc150_accel_runtime_resume, NULL)
 };
-EXPORT_SYMBOL_NS_GPL(bmc150_accel_pm_ops, IIO_BMC150);
+EXPORT_SYMBOL_NS_GPL(bmc150_accel_pm_ops, "IIO_BMC150");
 
 MODULE_AUTHOR("Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>");
 MODULE_LICENSE("GPL v2");

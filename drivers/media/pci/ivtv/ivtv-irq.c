@@ -2,7 +2,7 @@
 /* interrupt handling
     Copyright (C) 2003-2004  Kevin Thayer <nufan_wfk at yahoo.com>
     Copyright (C) 2004  Chris Kennedy <c@groovy.org>
-    Copyright (C) 2005-2007  Hans Verkuil <hverkuil@xs4all.nl>
+    Copyright (C) 2005-2007  Hans Verkuil <hverkuil@kernel.org>
 
  */
 
@@ -305,7 +305,7 @@ static void dma_post(struct ivtv_stream *s)
 			ivtv_process_vbi_data(itv, buf, 0, s->type);
 			s->q_dma.bytesused += buf->bytesused;
 		}
-		if (s->fh == NULL) {
+		if (s->id == NULL) {
 			ivtv_queue_move(s, &s->q_dma, NULL, &s->q_free, 0);
 			return;
 		}
@@ -330,7 +330,7 @@ static void dma_post(struct ivtv_stream *s)
 		set_bit(IVTV_F_I_HAVE_WORK, &itv->i_flags);
 	}
 
-	if (s->fh)
+	if (s->id)
 		wake_up(&s->waitq);
 }
 
@@ -351,7 +351,7 @@ void ivtv_dma_stream_dec_prepare(struct ivtv_stream *s, u32 offset, int lock)
 
 	/* Insert buffer block for YUV if needed */
 	if (s->type == IVTV_DEC_STREAM_TYPE_YUV && f->offset_y) {
-		if (yi->blanking_dmaptr) {
+		if (yi->blanking_ptr) {
 			s->sg_pending[idx].src = yi->blanking_dmaptr;
 			s->sg_pending[idx].dst = offset;
 			s->sg_pending[idx].size = 720 * 16;
@@ -532,7 +532,7 @@ static void ivtv_irq_dma_read(struct ivtv *itv)
 
 	IVTV_DEBUG_HI_IRQ("DEC DMA READ\n");
 
-	del_timer(&itv->dma_timer);
+	timer_delete(&itv->dma_timer);
 
 	if (!test_bit(IVTV_F_I_UDMA, &itv->i_flags) && itv->cur_dma_stream < 0)
 		return;
@@ -597,7 +597,7 @@ static void ivtv_irq_enc_dma_complete(struct ivtv *itv)
 	ivtv_api_get_data(&itv->enc_mbox, IVTV_MBOX_DMA_END, 2, data);
 	IVTV_DEBUG_HI_IRQ("ENC DMA COMPLETE %x %d (%d)\n", data[0], data[1], itv->cur_dma_stream);
 
-	del_timer(&itv->dma_timer);
+	timer_delete(&itv->dma_timer);
 
 	if (itv->cur_dma_stream < 0)
 		return;
@@ -670,7 +670,7 @@ static void ivtv_irq_dma_err(struct ivtv *itv)
 	u32 data[CX2341X_MBOX_MAX_DATA];
 	u32 status;
 
-	del_timer(&itv->dma_timer);
+	timer_delete(&itv->dma_timer);
 
 	ivtv_api_get_data(&itv->enc_mbox, IVTV_MBOX_DMA_END, 2, data);
 	status = read_reg(IVTV_REG_DMASTATUS);
@@ -1064,7 +1064,7 @@ irqreturn_t ivtv_irq_handler(int irq, void *dev_id)
 
 void ivtv_unfinished_dma(struct timer_list *t)
 {
-	struct ivtv *itv = from_timer(itv, t, dma_timer);
+	struct ivtv *itv = timer_container_of(itv, t, dma_timer);
 
 	if (!test_bit(IVTV_F_I_DMA, &itv->i_flags))
 		return;

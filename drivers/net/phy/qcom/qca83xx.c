@@ -42,10 +42,8 @@ static void qca83xx_get_strings(struct phy_device *phydev, u8 *data)
 {
 	int i;
 
-	for (i = 0; i < ARRAY_SIZE(qca83xx_hw_stats); i++) {
-		strscpy(data + i * ETH_GSTRING_LEN,
-			qca83xx_hw_stats[i].string, ETH_GSTRING_LEN);
-	}
+	for (i = 0; i < ARRAY_SIZE(qca83xx_hw_stats); i++)
+		ethtool_puts(&data, qca83xx_hw_stats[i].string);
 }
 
 static u64 qca83xx_get_stat(struct phy_device *phydev, int i)
@@ -261,7 +259,7 @@ static struct phy_driver qca83xx_driver[] = {
 
 module_phy_driver(qca83xx_driver);
 
-static struct mdio_device_id __maybe_unused qca83xx_tbl[] = {
+static const struct mdio_device_id __maybe_unused qca83xx_tbl[] = {
 	{ PHY_ID_MATCH_EXACT(QCA8337_PHY_ID) },
 	{ PHY_ID_MATCH_EXACT(QCA8327_A_PHY_ID) },
 	{ PHY_ID_MATCH_EXACT(QCA8327_B_PHY_ID) },

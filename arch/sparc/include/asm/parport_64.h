@@ -9,6 +9,7 @@
 
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/string.h>
 
 #include <asm/ebus_dma.h>
 #include <asm/ns87303.h>
@@ -149,7 +150,7 @@ static int ecpp_probe(struct platform_device *op)
 	sparc_ebus_dmas[slot].info.callback = NULL;
 	sparc_ebus_dmas[slot].info.client_cookie = NULL;
 	sparc_ebus_dmas[slot].info.irq = 0xdeadbeef;
-	strcpy(sparc_ebus_dmas[slot].info.name, "parport");
+	strscpy(sparc_ebus_dmas[slot].info.name, "parport");
 	if (ebus_dma_register(&sparc_ebus_dmas[slot].info))
 		goto out_unmap_regs;
 
@@ -243,7 +244,7 @@ static struct platform_driver ecpp_driver = {
 		.of_match_table = ecpp_match,
 	},
 	.probe			= ecpp_probe,
-	.remove_new		= ecpp_remove,
+	.remove			= ecpp_remove,
 };
 
 static int parport_pc_find_nonpci_ports(int autoirq, int autodma)

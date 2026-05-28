@@ -24,6 +24,7 @@
 #include <linux/filter.h>
 #include <sys/prctl.h>
 #include <sys/ptrace.h>
+#include <sys/time.h>
 #include <sys/user.h>
 #include <linux/prctl.h>
 #include <linux/ptrace.h>
@@ -47,6 +48,7 @@
 #include <linux/kcmp.h>
 #include <sys/resource.h>
 #include <sys/capability.h>
+#include <linux/perf_event.h>
 
 #include <unistd.h>
 #include <sys/syscall.h>
@@ -66,6 +68,18 @@
 
 #ifndef PR_SET_PTRACER
 # define PR_SET_PTRACER 0x59616d61
+#endif
+
+#ifndef noinline
+#define noinline __attribute__((noinline))
+#endif
+
+#ifndef __nocf_check
+#define __nocf_check __attribute__((nocf_check))
+#endif
+
+#ifndef __naked
+#define __naked __attribute__((__naked__))
 #endif
 
 #ifndef PR_SET_NO_NEW_PRIVS
@@ -147,6 +161,12 @@ struct seccomp_data {
 # else
 #  warning "seccomp syscall number unknown for this architecture"
 #  define __NR_seccomp 0xffff
+# endif
+#endif
+
+#ifndef __NR_uretprobe
+# if defined(__x86_64__)
+#  define __NR_uretprobe 335
 # endif
 #endif
 
@@ -1618,14 +1638,8 @@ void teardown_trace_fixture(struct __test_metadata *_metadata,
 {
 	if (tracer) {
 		int status;
-		/*
-		 * Extract the exit code from the other process and
-		 * adopt it for ourselves in case its asserts failed.
-		 */
 		ASSERT_EQ(0, kill(tracer, SIGUSR1));
 		ASSERT_EQ(tracer, waitpid(tracer, &status, 0));
-		if (WEXITSTATUS(status))
-			_metadata->exit_code = KSFT_FAIL;
 	}
 }
 
@@ -3155,12 +3169,15 @@ TEST(syscall_restart)
 	ret = get_syscall(_metadata, child_pid);
 #if defined(__arm__)
 	/*
-	 * FIXME:
 	 * - native ARM registers do NOT expose true syscall.
 	 * - compat ARM registers on ARM64 DO expose true syscall.
+	 * - values of utsbuf.machine include 'armv8l' or 'armb8b'
+	 *   for ARM64 running in compat mode.
 	 */
 	ASSERT_EQ(0, uname(&utsbuf));
-	if (strncmp(utsbuf.machine, "arm", 3) == 0) {
+	if ((strncmp(utsbuf.machine, "arm", 3) == 0) &&
+	    (strncmp(utsbuf.machine, "armv8l", 6) != 0) &&
+	    (strncmp(utsbuf.machine, "armv8b", 6) != 0)) {
 		EXPECT_EQ(__NR_nanosleep, ret);
 	} else
 #endif
@@ -3537,6 +3554,10 @@ static void signal_handler(int signal)
 {
 	if (write(handled, "c", 1) != 1)
 		perror("write from signal");
+}
+
+static void signal_handler_nop(int signal)
+{
 }
 
 TEST(user_notification_signal)
@@ -4811,6 +4832,132 @@ TEST(user_notification_wait_killable_fatal)
 	EXPECT_EQ(SIGTERM, WTERMSIG(status));
 }
 
+/* Ensure signals after the reply do not interrupt */
+TEST(user_notification_wait_killable_after_reply)
+{
+	int i, max_iter = 100000;
+	int listener, status;
+	int pipe_fds[2];
+	pid_t pid;
+	long ret;
+
+	ret = prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+	ASSERT_EQ(0, ret)
+	{
+		TH_LOG("Kernel does not support PR_SET_NO_NEW_PRIVS!");
+	}
+
+	listener = user_notif_syscall(
+		__NR_dup, SECCOMP_FILTER_FLAG_NEW_LISTENER |
+			  SECCOMP_FILTER_FLAG_WAIT_KILLABLE_RECV);
+	ASSERT_GE(listener, 0);
+
+	/*
+	 * Used to count invocations. One token is transferred from the child
+	 * to the parent per syscall invocation, the parent tries to take
+	 * one token per successful RECV. If the syscall is restarted after
+	 * RECV the parent will try to get two tokens while the child only
+	 * provided one.
+	 */
+	ASSERT_EQ(pipe(pipe_fds), 0);
+
+	pid = fork();
+	ASSERT_GE(pid, 0);
+
+	if (pid == 0) {
+		struct sigaction new_action = {
+			.sa_handler = signal_handler_nop,
+			.sa_flags = SA_RESTART,
+		};
+		struct itimerval timer = {
+			.it_value = { .tv_usec = 1000 },
+			.it_interval = { .tv_usec = 1000 },
+		};
+		char c = 'a';
+
+		close(pipe_fds[0]);
+
+		/* Setup the sigaction with SA_RESTART */
+		if (sigaction(SIGALRM, &new_action, NULL)) {
+			perror("sigaction");
+			exit(1);
+		}
+
+		/*
+		 * Kill with SIGALRM repeatedly, to try to hit the race when
+		 * handling the syscall.
+		 */
+		if (setitimer(ITIMER_REAL, &timer, NULL) < 0)
+			perror("setitimer");
+
+		for (i = 0; i < max_iter; ++i) {
+			int fd;
+
+			/* Send one token per iteration to catch repeats. */
+			if (write(pipe_fds[1], &c, sizeof(c)) != 1) {
+				perror("write");
+				exit(1);
+			}
+
+			fd = syscall(__NR_dup, 0);
+			if (fd < 0) {
+				perror("dup");
+				exit(1);
+			}
+			close(fd);
+		}
+
+		exit(0);
+	}
+
+	close(pipe_fds[1]);
+
+	for (i = 0; i < max_iter; ++i) {
+		struct seccomp_notif req = {};
+		struct seccomp_notif_addfd addfd = {};
+		struct pollfd pfd = {
+			.fd = pipe_fds[0],
+			.events = POLLIN,
+		};
+		char c;
+
+		/*
+		 * Try to receive one token. If it failed, one child syscall
+		 * was restarted after RECV and needed to be handled twice.
+		 */
+		ASSERT_EQ(poll(&pfd, 1, 1000), 1)
+			kill(pid, SIGKILL);
+
+		ASSERT_EQ(read(pipe_fds[0], &c, sizeof(c)), 1)
+			kill(pid, SIGKILL);
+
+		/*
+		 * Get the notification, reply to it as fast as possible to test
+		 * whether the child wrongly skips going into the non-preemptible
+		 * (TASK_KILLABLE) state.
+		 */
+		do
+			ret = ioctl(listener, SECCOMP_IOCTL_NOTIF_RECV, &req);
+		while (ret < 0 && errno == ENOENT); /* Accept interruptions before RECV */
+		ASSERT_EQ(ret, 0)
+			kill(pid, SIGKILL);
+
+		addfd.id = req.id;
+		addfd.flags = SECCOMP_ADDFD_FLAG_SEND;
+		addfd.srcfd = 0;
+		ASSERT_GE(ioctl(listener, SECCOMP_IOCTL_NOTIF_ADDFD, &addfd), 0)
+			kill(pid, SIGKILL);
+	}
+
+	/*
+	 * Wait for the process to exit, and make sure the process terminated
+	 * with a zero exit code..
+	 */
+	EXPECT_EQ(waitpid(pid, &status, 0), pid);
+	EXPECT_EQ(true, WIFEXITED(status));
+	EXPECT_EQ(0, WEXITSTATUS(status));
+}
+
 struct tsync_vs_thread_leader_args {
 	pthread_t leader;
 };
@@ -4886,6 +5033,257 @@ TEST(tsync_vs_dead_thread_leader)
 
 	EXPECT_EQ(pid, waitpid(pid, &status, 0));
 	EXPECT_EQ(0, status);
+}
+
+#ifdef __x86_64__
+
+/*
+ * We need naked probed_uprobe function. Using __nocf_check
+ * check to skip possible endbr64 instruction and ignoring
+ * -Wattributes, otherwise the compilation might fail.
+ */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
+
+__naked __nocf_check noinline int probed_uprobe(void)
+{
+	/*
+	 * Optimized uprobe is possible only on top of nop5 instruction.
+	 */
+	asm volatile ("                                 \n"
+		".byte 0x0f, 0x1f, 0x44, 0x00, 0x00     \n"
+		"ret                                    \n"
+	);
+}
+#pragma GCC diagnostic pop
+
+#else
+noinline int probed_uprobe(void)
+{
+	return 1;
+}
+#endif
+
+noinline int probed_uretprobe(void)
+{
+	return 1;
+}
+
+static int parse_uint_from_file(const char *file, const char *fmt)
+{
+	int err = -1, ret;
+	FILE *f;
+
+	f = fopen(file, "re");
+	if (f) {
+		err = fscanf(f, fmt, &ret);
+		fclose(f);
+	}
+	return err == 1 ? ret : err;
+}
+
+static int determine_uprobe_perf_type(void)
+{
+	const char *file = "/sys/bus/event_source/devices/uprobe/type";
+
+	return parse_uint_from_file(file, "%d\n");
+}
+
+static int determine_uprobe_retprobe_bit(void)
+{
+	const char *file = "/sys/bus/event_source/devices/uprobe/format/retprobe";
+
+	return parse_uint_from_file(file, "config:%d\n");
+}
+
+static ssize_t get_uprobe_offset(const void *addr)
+{
+	size_t start, base, end;
+	bool found = false;
+	char buf[256];
+	FILE *f;
+
+	f = fopen("/proc/self/maps", "r");
+	if (!f)
+		return -1;
+
+	while (fscanf(f, "%zx-%zx %s %zx %*[^\n]\n", &start, &end, buf, &base) == 4) {
+		if (buf[2] == 'x' && (uintptr_t)addr >= start && (uintptr_t)addr < end) {
+			found = true;
+			break;
+		}
+	}
+	fclose(f);
+	return found ? (uintptr_t)addr - start + base : -1;
+}
+
+FIXTURE(UPROBE) {
+	int fd;
+};
+
+FIXTURE_VARIANT(UPROBE) {
+	/*
+	 * All of the U(RET)PROBE behaviors can be tested with either
+	 * u(ret)probe attached or not
+	 */
+	bool attach;
+	/*
+	 * Test both uprobe and uretprobe.
+	 */
+	bool uretprobe;
+};
+
+FIXTURE_VARIANT_ADD(UPROBE, not_attached) {
+	.attach = false,
+	.uretprobe = false,
+};
+
+FIXTURE_VARIANT_ADD(UPROBE, uprobe_attached) {
+	.attach = true,
+	.uretprobe = false,
+};
+
+FIXTURE_VARIANT_ADD(UPROBE, uretprobe_attached) {
+	.attach = true,
+	.uretprobe = true,
+};
+
+FIXTURE_SETUP(UPROBE)
+{
+	const size_t attr_sz = sizeof(struct perf_event_attr);
+	struct perf_event_attr attr;
+	ssize_t offset;
+	int type, bit;
+
+#if !defined(__NR_uprobe) || !defined(__NR_uretprobe)
+	SKIP(return, "__NR_uprobe ot __NR_uretprobe syscalls not defined");
+#endif
+
+	if (!variant->attach)
+		return;
+
+	memset(&attr, 0, attr_sz);
+
+	type = determine_uprobe_perf_type();
+	ASSERT_GE(type, 0);
+
+	if (variant->uretprobe) {
+		bit = determine_uprobe_retprobe_bit();
+		ASSERT_GE(bit, 0);
+	}
+
+	offset = get_uprobe_offset(variant->uretprobe ? probed_uretprobe : probed_uprobe);
+	ASSERT_GE(offset, 0);
+
+	if (variant->uretprobe)
+		attr.config |= 1 << bit;
+	attr.size = attr_sz;
+	attr.type = type;
+	attr.config1 = ptr_to_u64("/proc/self/exe");
+	attr.config2 = offset;
+
+	self->fd = syscall(__NR_perf_event_open, &attr,
+			   getpid() /* pid */, -1 /* cpu */, -1 /* group_fd */,
+			   PERF_FLAG_FD_CLOEXEC);
+}
+
+FIXTURE_TEARDOWN(UPROBE)
+{
+	/* we could call close(self->fd), but we'd need extra filter for
+	 * that and since we are calling _exit right away..
+	 */
+}
+
+static int run_probed_with_filter(struct sock_fprog *prog)
+{
+	if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) ||
+	    seccomp(SECCOMP_SET_MODE_FILTER, 0, prog)) {
+		return -1;
+	}
+
+	/*
+	 * Uprobe is optimized after first hit, so let's hit twice.
+	 */
+	probed_uprobe();
+	probed_uprobe();
+
+	probed_uretprobe();
+	return 0;
+}
+
+TEST_F(UPROBE, uprobe_default_allow)
+{
+	struct sock_filter filter[] = {
+		BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
+	};
+	struct sock_fprog prog = {
+		.len = (unsigned short)ARRAY_SIZE(filter),
+		.filter = filter,
+	};
+
+	ASSERT_EQ(0, run_probed_with_filter(&prog));
+}
+
+TEST_F(UPROBE, uprobe_default_block)
+{
+	struct sock_filter filter[] = {
+		BPF_STMT(BPF_LD|BPF_W|BPF_ABS,
+			offsetof(struct seccomp_data, nr)),
+		BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __NR_exit_group, 1, 0),
+		BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_KILL),
+		BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
+	};
+	struct sock_fprog prog = {
+		.len = (unsigned short)ARRAY_SIZE(filter),
+		.filter = filter,
+	};
+
+	ASSERT_EQ(0, run_probed_with_filter(&prog));
+}
+
+TEST_F(UPROBE, uprobe_block_syscall)
+{
+	struct sock_filter filter[] = {
+		BPF_STMT(BPF_LD|BPF_W|BPF_ABS,
+			offsetof(struct seccomp_data, nr)),
+#ifdef __NR_uprobe
+		BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __NR_uprobe, 1, 2),
+#endif
+#ifdef __NR_uretprobe
+		BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __NR_uretprobe, 0, 1),
+#endif
+		BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_KILL),
+		BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
+	};
+	struct sock_fprog prog = {
+		.len = (unsigned short)ARRAY_SIZE(filter),
+		.filter = filter,
+	};
+
+	ASSERT_EQ(0, run_probed_with_filter(&prog));
+}
+
+TEST_F(UPROBE, uprobe_default_block_with_syscall)
+{
+	struct sock_filter filter[] = {
+		BPF_STMT(BPF_LD|BPF_W|BPF_ABS,
+			offsetof(struct seccomp_data, nr)),
+#ifdef __NR_uprobe
+		BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __NR_uprobe, 3, 0),
+#endif
+#ifdef __NR_uretprobe
+		BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __NR_uretprobe, 2, 0),
+#endif
+		BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __NR_exit_group, 1, 0),
+		BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_KILL),
+		BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
+	};
+	struct sock_fprog prog = {
+		.len = (unsigned short)ARRAY_SIZE(filter),
+		.filter = filter,
+	};
+
+	ASSERT_EQ(0, run_probed_with_filter(&prog));
 }
 
 /*

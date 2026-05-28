@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) Fuzhou Rockchip Electronics Co.Ltd
+ * Copyright (C) Rockchip Electronics Co., Ltd.
  * Author:
  *      Mark Yao <mark.yao@rock-chips.com>
  *      Sandy Huang <hjc@rock-chips.com>
@@ -56,14 +56,13 @@ struct rockchip_lvds {
 	struct drm_device *drm_dev;
 	struct drm_panel *panel;
 	struct drm_bridge *bridge;
-	struct drm_connector connector;
 	struct rockchip_encoder encoder;
 	struct dev_pin_info *pins;
 };
 
-static inline struct rockchip_lvds *connector_to_lvds(struct drm_connector *connector)
+static inline struct rockchip_lvds *brige_to_lvds(struct drm_bridge *bridge)
 {
-	return container_of(connector, struct rockchip_lvds, connector);
+	return (struct rockchip_lvds *)bridge->driver_private;
 }
 
 static inline struct rockchip_lvds *encoder_to_lvds(struct drm_encoder *encoder)
@@ -106,25 +105,21 @@ static inline int rockchip_lvds_name_to_output(const char *s)
 	return -EINVAL;
 }
 
-static const struct drm_connector_funcs rockchip_lvds_connector_funcs = {
-	.fill_modes = drm_helper_probe_single_connector_modes,
-	.destroy = drm_connector_cleanup,
-	.reset = drm_atomic_helper_connector_reset,
-	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
-	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
-};
-
-static int rockchip_lvds_connector_get_modes(struct drm_connector *connector)
+static int
+rockchip_lvds_bridge_get_modes(struct drm_bridge *bridge, struct drm_connector *connector)
 {
-	struct rockchip_lvds *lvds = connector_to_lvds(connector);
+	struct rockchip_lvds *lvds = brige_to_lvds(bridge);
 	struct drm_panel *panel = lvds->panel;
 
 	return drm_panel_get_modes(panel, connector);
 }
 
 static const
-struct drm_connector_helper_funcs rockchip_lvds_connector_helper_funcs = {
-	.get_modes = rockchip_lvds_connector_get_modes,
+struct drm_bridge_funcs rockchip_lvds_bridge_funcs = {
+	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
+	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
+	.atomic_reset = drm_atomic_helper_bridge_reset,
+	.get_modes = rockchip_lvds_bridge_get_modes,
 };
 
 static int
@@ -448,17 +443,14 @@ struct drm_encoder_helper_funcs px30_lvds_encoder_helper_funcs = {
 static int rk3288_lvds_probe(struct platform_device *pdev,
 			     struct rockchip_lvds *lvds)
 {
-	int ret;
-
 	lvds->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(lvds->regs))
 		return PTR_ERR(lvds->regs);
 
-	lvds->pclk = devm_clk_get(lvds->dev, "pclk_lvds");
-	if (IS_ERR(lvds->pclk)) {
-		DRM_DEV_ERROR(lvds->dev, "could not get pclk_lvds\n");
-		return PTR_ERR(lvds->pclk);
-	}
+	lvds->pclk = devm_clk_get_prepared(lvds->dev, "pclk_lvds");
+	if (IS_ERR(lvds->pclk))
+		return dev_err_probe(lvds->dev, PTR_ERR(lvds->pclk),
+				     "could not get or prepare pclk_lvds\n");
 
 	lvds->pins = devm_kzalloc(lvds->dev, sizeof(*lvds->pins),
 				  GFP_KERNEL);
@@ -467,23 +459,17 @@ static int rk3288_lvds_probe(struct platform_device *pdev,
 
 	lvds->pins->p = devm_pinctrl_get(lvds->dev);
 	if (IS_ERR(lvds->pins->p)) {
-		DRM_DEV_ERROR(lvds->dev, "no pinctrl handle\n");
+		dev_warn(lvds->dev, "no pinctrl handle\n");
 		devm_kfree(lvds->dev, lvds->pins);
 		lvds->pins = NULL;
 	} else {
 		lvds->pins->default_state =
 			pinctrl_lookup_state(lvds->pins->p, "lcdc");
 		if (IS_ERR(lvds->pins->default_state)) {
-			DRM_DEV_ERROR(lvds->dev, "no default pinctrl state\n");
+			dev_warn(lvds->dev, "no default pinctrl state\n");
 			devm_kfree(lvds->dev, lvds->pins);
 			lvds->pins = NULL;
 		}
-	}
-
-	ret = clk_prepare(lvds->pclk);
-	if (ret < 0) {
-		DRM_DEV_ERROR(lvds->dev, "failed to prepare pclk_lvds\n");
-		return ret;
 	}
 
 	return 0;
@@ -555,11 +541,10 @@ static int rockchip_lvds_bind(struct device *dev, struct device *master,
 
 	lvds->drm_dev = drm_dev;
 	port = of_graph_get_port_by_id(dev->of_node, 1);
-	if (!port) {
-		DRM_DEV_ERROR(dev,
-			      "can't found port point, please init lvds panel port!\n");
-		return -EINVAL;
-	}
+	if (!port)
+		return dev_err_probe(dev, -EINVAL,
+				     "can't found port point, please init lvds panel port!\n");
+
 	for_each_child_of_node(port, endpoint) {
 		child_count++;
 		of_property_read_u32(endpoint, "reg", &endpoint_id);
@@ -571,8 +556,7 @@ static int rockchip_lvds_bind(struct device *dev, struct device *master,
 		}
 	}
 	if (!child_count) {
-		DRM_DEV_ERROR(dev, "lvds port does not have any children\n");
-		ret = -EINVAL;
+		ret = dev_err_probe(dev, -EINVAL, "lvds port does not have any children\n");
 		goto err_put_port;
 	} else if (ret) {
 		dev_err_probe(dev, ret, "failed to find panel and bridge node\n");
@@ -589,8 +573,7 @@ static int rockchip_lvds_bind(struct device *dev, struct device *master,
 		lvds->output = rockchip_lvds_name_to_output(name);
 
 	if (lvds->output < 0) {
-		DRM_DEV_ERROR(dev, "invalid output type [%s]\n", name);
-		ret = lvds->output;
+		ret = dev_err_probe(dev, lvds->output, "invalid output type [%s]\n", name);
 		goto err_put_remote;
 	}
 
@@ -601,8 +584,8 @@ static int rockchip_lvds_bind(struct device *dev, struct device *master,
 		lvds->format = rockchip_lvds_name_to_format(name);
 
 	if (lvds->format < 0) {
-		DRM_DEV_ERROR(dev, "invalid data-mapping format [%s]\n", name);
-		ret = lvds->format;
+		ret = dev_err_probe(dev, lvds->format,
+				    "invalid data-mapping format [%s]\n", name);
 		goto err_put_remote;
 	}
 
@@ -612,48 +595,44 @@ static int rockchip_lvds_bind(struct device *dev, struct device *master,
 
 	ret = drm_simple_encoder_init(drm_dev, encoder, DRM_MODE_ENCODER_LVDS);
 	if (ret < 0) {
-		DRM_DEV_ERROR(drm_dev->dev,
-			      "failed to initialize encoder: %d\n", ret);
+		drm_err(drm_dev,
+			"failed to initialize encoder: %d\n", ret);
 		goto err_put_remote;
 	}
 
 	drm_encoder_helper_add(encoder, lvds->soc_data->helper_funcs);
-	connector = &lvds->connector;
 
 	if (lvds->panel) {
-		connector->dpms = DRM_MODE_DPMS_OFF;
-		ret = drm_connector_init(drm_dev, connector,
-					 &rockchip_lvds_connector_funcs,
-					 DRM_MODE_CONNECTOR_LVDS);
-		if (ret < 0) {
-			DRM_DEV_ERROR(drm_dev->dev,
-				      "failed to initialize connector: %d\n", ret);
-			goto err_free_encoder;
-		}
-
-		drm_connector_helper_add(connector,
-					 &rockchip_lvds_connector_helper_funcs);
-	} else {
-		ret = drm_bridge_attach(encoder, lvds->bridge, NULL,
-					DRM_BRIDGE_ATTACH_NO_CONNECTOR);
-		if (ret)
-			goto err_free_encoder;
-
-		connector = drm_bridge_connector_init(lvds->drm_dev, encoder);
-		if (IS_ERR(connector)) {
-			DRM_DEV_ERROR(drm_dev->dev,
-				      "failed to initialize bridge connector: %pe\n",
-				      connector);
-			ret = PTR_ERR(connector);
+		lvds->bridge = drm_panel_bridge_add_typed(lvds->panel, DRM_MODE_CONNECTOR_LVDS);
+		if (IS_ERR(lvds->bridge)) {
+			ret = PTR_ERR(lvds->bridge);
 			goto err_free_encoder;
 		}
 	}
 
-	ret = drm_connector_attach_encoder(connector, encoder);
-	if (ret < 0) {
-		DRM_DEV_ERROR(drm_dev->dev,
-			      "failed to attach encoder: %d\n", ret);
-		goto err_free_connector;
+	if (lvds->bridge) {
+		lvds->bridge->driver_private = lvds;
+		lvds->bridge->ops = DRM_BRIDGE_OP_MODES;
+		lvds->bridge->funcs = &rockchip_lvds_bridge_funcs;
+
+		ret = drm_bridge_attach(encoder, lvds->bridge, NULL, DRM_BRIDGE_ATTACH_NO_CONNECTOR);
+		if (ret)
+			goto err_free_bridge;
+
+		connector = drm_bridge_connector_init(lvds->drm_dev, encoder);
+		if (IS_ERR(connector)) {
+			drm_err(drm_dev,
+				"failed to initialize bridge connector: %pe\n",
+				connector);
+			ret = PTR_ERR(connector);
+			goto err_free_bridge;
+		}
+
+		ret = drm_connector_attach_encoder(connector, encoder);
+		if (ret < 0) {
+			drm_err(drm_dev, "failed to attach encoder: %d\n", ret);
+			goto err_free_bridge;
+		}
 	}
 
 	pm_runtime_enable(dev);
@@ -662,8 +641,8 @@ static int rockchip_lvds_bind(struct device *dev, struct device *master,
 
 	return 0;
 
-err_free_connector:
-	drm_connector_cleanup(connector);
+err_free_bridge:
+	drm_panel_bridge_remove(lvds->bridge);
 err_free_encoder:
 	drm_encoder_cleanup(encoder);
 err_put_remote:
@@ -683,8 +662,6 @@ static void rockchip_lvds_unbind(struct device *dev, struct device *master,
 	encoder_funcs = lvds->soc_data->helper_funcs;
 	encoder_funcs->disable(&lvds->encoder.encoder);
 	pm_runtime_disable(dev);
-	drm_connector_cleanup(&lvds->connector);
-	drm_encoder_cleanup(&lvds->encoder.encoder);
 }
 
 static const struct component_ops rockchip_lvds_component_ops = {
@@ -714,39 +691,30 @@ static int rockchip_lvds_probe(struct platform_device *pdev)
 
 	lvds->grf = syscon_regmap_lookup_by_phandle(dev->of_node,
 						    "rockchip,grf");
-	if (IS_ERR(lvds->grf)) {
-		DRM_DEV_ERROR(dev, "missing rockchip,grf property\n");
-		return PTR_ERR(lvds->grf);
-	}
+	if (IS_ERR(lvds->grf))
+		return dev_err_probe(dev, PTR_ERR(lvds->grf), "missing rockchip,grf property\n");
 
 	ret = lvds->soc_data->probe(pdev, lvds);
-	if (ret) {
-		DRM_DEV_ERROR(dev, "Platform initialization failed\n");
-		return ret;
-	}
+	if (ret)
+		return dev_err_probe(dev, ret, "Platform initialization failed\n");
 
 	dev_set_drvdata(dev, lvds);
 
 	ret = component_add(&pdev->dev, &rockchip_lvds_component_ops);
-	if (ret < 0) {
-		DRM_DEV_ERROR(dev, "failed to add component\n");
-		clk_unprepare(lvds->pclk);
-	}
+	if (ret < 0)
+		return dev_err_probe(dev, ret, "failed to add component\n");
 
-	return ret;
+	return 0;
 }
 
 static void rockchip_lvds_remove(struct platform_device *pdev)
 {
-	struct rockchip_lvds *lvds = platform_get_drvdata(pdev);
-
 	component_del(&pdev->dev, &rockchip_lvds_component_ops);
-	clk_unprepare(lvds->pclk);
 }
 
 struct platform_driver rockchip_lvds_driver = {
 	.probe = rockchip_lvds_probe,
-	.remove_new = rockchip_lvds_remove,
+	.remove = rockchip_lvds_remove,
 	.driver = {
 		   .name = "rockchip-lvds",
 		   .of_match_table = rockchip_lvds_dt_ids,

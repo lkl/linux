@@ -16,7 +16,7 @@ btrfs filesystems.  Like fscrypt, not too much filesystem-specific
 code is needed to support fs-verity.
 
 fs-verity is similar to `dm-verity
-<https://www.kernel.org/doc/Documentation/device-mapper/verity.txt>`_
+<https://www.kernel.org/doc/Documentation/admin-guide/device-mapper/verity.rst>`_
 but works on files rather than block devices.  On regular files on
 filesystems supporting fs-verity, userspace can execute an ioctl that
 causes the filesystem to build a Merkle tree for the file and persist
@@ -185,8 +185,7 @@ FS_IOC_ENABLE_VERITY can fail with the following errors:
 - ``ENOKEY``: the ".fs-verity" keyring doesn't contain the certificate
   needed to verify the builtin signature
 - ``ENOPKG``: fs-verity recognizes the hash algorithm, but it's not
-  available in the kernel's crypto API as currently configured (e.g.
-  for SHA-512, missing CONFIG_CRYPTO_SHA512).
+  available in the kernel as currently configured
 - ``ENOTTY``: this type of filesystem does not implement fs-verity
 - ``EOPNOTSUPP``: the kernel was not configured with fs-verity
   support; or the filesystem superblock has not had the 'verity'
@@ -248,11 +247,17 @@ FS_IOC_READ_VERITY_METADATA
 The FS_IOC_READ_VERITY_METADATA ioctl reads verity metadata from a
 verity file.  This ioctl is available since Linux v5.12.
 
-This ioctl allows writing a server program that takes a verity file
-and serves it to a client program, such that the client can do its own
-fs-verity compatible verification of the file.  This only makes sense
-if the client doesn't trust the server and if the server needs to
-provide the storage for the client.
+This ioctl is useful for cases where the verity verification should be
+performed somewhere other than the currently running kernel.
+
+One example is a server program that takes a verity file and serves it
+to a client program, such that the client can do its own fs-verity
+compatible verification of the file.  This only makes sense if the
+client doesn't trust the server and if the server needs to provide the
+storage for the client.
+
+Another example is copying verity metadata when creating filesystem
+images in userspace (such as with ``mkfs.ext4 -d``).
 
 This is a fairly specialized use case, and most fs-verity users won't
 need this ioctl.

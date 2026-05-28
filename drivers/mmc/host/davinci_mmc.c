@@ -7,24 +7,23 @@
  * Copyright (C) 2009 David Brownell
  */
 
-#include <linux/module.h>
-#include <linux/ioport.h>
-#include <linux/platform_device.h>
 #include <linux/clk.h>
-#include <linux/err.h>
 #include <linux/cpufreq.h>
-#include <linux/mmc/host.h>
-#include <linux/io.h>
-#include <linux/irq.h>
 #include <linux/delay.h>
-#include <linux/dmaengine.h>
 #include <linux/dma-mapping.h>
-#include <linux/mmc/mmc.h>
-#include <linux/of.h>
-#include <linux/mmc/slot-gpio.h>
+#include <linux/dmaengine.h>
+#include <linux/err.h>
 #include <linux/interrupt.h>
-
+#include <linux/io.h>
+#include <linux/ioport.h>
+#include <linux/irq.h>
+#include <linux/mmc/host.h>
+#include <linux/mmc/mmc.h>
+#include <linux/mmc/slot-gpio.h>
+#include <linux/module.h>
 #include <linux/platform_data/mmc-davinci.h>
+#include <linux/platform_device.h>
+#include <linux/property.h>
 
 /*
  * Register Definitions
@@ -589,7 +588,7 @@ static void mmc_davinci_request(struct mmc_host *mmc, struct mmc_request *req)
 		cpu_relax();
 	}
 	if (mmcst1 & MMCST1_BUSY) {
-		dev_err(mmc_dev(host->mmc), "still BUSY? bad ... \n");
+		dev_err(mmc_dev(host->mmc), "still BUSY? bad ...\n");
 		req->cmd->error = -ETIMEDOUT;
 		mmc_request_done(mmc, req);
 		return;
@@ -1204,7 +1203,7 @@ static int davinci_mmcsd_probe(struct platform_device *pdev)
 	if (!mem)
 		return -EBUSY;
 
-	mmc = mmc_alloc_host(sizeof(struct mmc_davinci_host), &pdev->dev);
+	mmc = devm_mmc_alloc_host(&pdev->dev, sizeof(*host));
 	if (!mmc)
 		return -ENOMEM;
 
@@ -1213,23 +1212,20 @@ static int davinci_mmcsd_probe(struct platform_device *pdev)
 
 	host->mem_res = mem;
 	host->base = devm_ioremap(&pdev->dev, mem->start, mem_size);
-	if (!host->base) {
-		ret = -ENOMEM;
-		goto ioremap_fail;
-	}
+	if (!host->base)
+		return -ENOMEM;
 
 	host->clk = devm_clk_get(&pdev->dev, NULL);
-	if (IS_ERR(host->clk)) {
-		ret = PTR_ERR(host->clk);
-		goto clk_get_fail;
-	}
+	if (IS_ERR(host->clk))
+		return PTR_ERR(host->clk);
+
 	ret = clk_prepare_enable(host->clk);
 	if (ret)
-		goto clk_prepare_enable_fail;
+		return ret;
 
 	host->mmc_input_clk = clk_get_rate(host->clk);
 
-	pdev->id_entry = of_device_get_match_data(&pdev->dev);
+	pdev->id_entry = device_get_match_data(&pdev->dev);
 	if (pdev->id_entry) {
 		ret = mmc_of_parse(mmc);
 		if (ret) {
@@ -1337,10 +1333,6 @@ cpu_freq_fail:
 parse_fail:
 dma_probe_defer:
 	clk_disable_unprepare(host->clk);
-clk_prepare_enable_fail:
-clk_get_fail:
-ioremap_fail:
-	mmc_free_host(mmc);
 
 	return ret;
 }
@@ -1353,10 +1345,8 @@ static void davinci_mmcsd_remove(struct platform_device *pdev)
 	mmc_davinci_cpufreq_deregister(host);
 	davinci_release_dma_channels(host);
 	clk_disable_unprepare(host->clk);
-	mmc_free_host(host->mmc);
 }
 
-#ifdef CONFIG_PM
 static int davinci_mmcsd_suspend(struct device *dev)
 {
 	struct mmc_davinci_host *host = dev_get_drvdata(dev);
@@ -1382,25 +1372,18 @@ static int davinci_mmcsd_resume(struct device *dev)
 	return 0;
 }
 
-static const struct dev_pm_ops davinci_mmcsd_pm = {
-	.suspend        = davinci_mmcsd_suspend,
-	.resume         = davinci_mmcsd_resume,
-};
-
-#define davinci_mmcsd_pm_ops (&davinci_mmcsd_pm)
-#else
-#define davinci_mmcsd_pm_ops NULL
-#endif
+static DEFINE_SIMPLE_DEV_PM_OPS(davinci_mmcsd_pm_ops,
+				davinci_mmcsd_suspend, davinci_mmcsd_resume);
 
 static struct platform_driver davinci_mmcsd_driver = {
 	.driver		= {
 		.name	= "davinci_mmc",
 		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
-		.pm	= davinci_mmcsd_pm_ops,
+		.pm	= pm_sleep_ptr(&davinci_mmcsd_pm_ops),
 		.of_match_table = davinci_mmc_dt_ids,
 	},
 	.probe		= davinci_mmcsd_probe,
-	.remove_new	= davinci_mmcsd_remove,
+	.remove		= davinci_mmcsd_remove,
 	.id_table	= davinci_mmc_devtype,
 };
 

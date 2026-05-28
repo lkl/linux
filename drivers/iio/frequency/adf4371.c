@@ -4,6 +4,7 @@
  *
  * Copyright 2019 Analog Devices Inc.
  */
+#include "linux/dev_printk.h"
 #include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/device.h>
@@ -41,6 +42,12 @@
 #define ADF4371_MOD2WORD_MSK		GENMASK(5, 0)
 #define ADF4371_MOD2WORD(x)		FIELD_PREP(ADF4371_MOD2WORD_MSK, x)
 
+/* ADF4371_REG22 */
+#define ADF4371_REFIN_MODE_MASK		BIT(6)
+#define ADF4371_REFIN_MODE(x)		FIELD_PREP(ADF4371_REFIN_MODE_MASK, x)
+#define ADF4371_REF_DOUB_MASK		BIT(5)
+#define ADF4371_REF_DOUB(x)		FIELD_PREP(ADF4371_REF_DOUB_MASK, x)\
+
 /* ADF4371_REG24 */
 #define ADF4371_RF_DIV_SEL_MSK		GENMASK(6, 4)
 #define ADF4371_RF_DIV_SEL(x)		FIELD_PREP(ADF4371_RF_DIV_SEL_MSK, x)
@@ -69,6 +76,10 @@
 
 #define ADF4371_MAX_FREQ_PFD		250000000UL /* Hz */
 #define ADF4371_MAX_FREQ_REFIN		600000000UL /* Hz */
+#define ADF4371_MAX_FREQ_REFIN_SE	500000000UL /* Hz */
+
+#define ADF4371_MIN_CLKIN_DOUB_FREQ	10000000ULL /* Hz */
+#define ADF4371_MAX_CLKIN_DOUB_FREQ	125000000ULL /* Hz */
 
 /* MOD1 is a 24-bit primary modulus with fixed value of 2^25 */
 #define ADF4371_MODULUS1		33554432ULL
@@ -150,6 +161,7 @@ static const struct regmap_config adf4371_regmap_config = {
 };
 
 struct adf4371_chip_info {
+	const char *name;
 	unsigned int num_channels;
 	const struct iio_chan_spec *channels;
 };
@@ -157,7 +169,6 @@ struct adf4371_chip_info {
 struct adf4371_state {
 	struct spi_device *spi;
 	struct regmap *regmap;
-	struct clk *clkin;
 	/*
 	 * Lock for accessing device registers. Some operations require
 	 * multiple consecutive R/W operations, during which the device
@@ -175,6 +186,7 @@ struct adf4371_state {
 	unsigned int mod2;
 	unsigned int rf_div_sel;
 	unsigned int ref_div_factor;
+	bool ref_diff_en;
 	u8 buf[10] __aligned(IIO_DMA_MINALIGN);
 };
 
@@ -426,7 +438,7 @@ static const struct iio_chan_spec_ext_info adf4371_ext_info[] = {
 	_ADF4371_EXT_INFO("frequency", ADF4371_FREQ),
 	_ADF4371_EXT_INFO("powerdown", ADF4371_POWER_DOWN),
 	_ADF4371_EXT_INFO("name", ADF4371_CHANNEL_NAME),
-	{ },
+	{ }
 };
 
 #define ADF4371_CHANNEL(index) { \
@@ -444,15 +456,16 @@ static const struct iio_chan_spec adf4371_chan[] = {
 	ADF4371_CHANNEL(ADF4371_CH_RF32),
 };
 
-static const struct adf4371_chip_info adf4371_chip_info[] = {
-	[ADF4371] = {
-		.channels = adf4371_chan,
-		.num_channels = 4,
-	},
-	[ADF4372] = {
-		.channels = adf4371_chan,
-		.num_channels = 3,
-	}
+static const struct adf4371_chip_info adf4371_chip_info = {
+	.name = "adf4371",
+	.channels = adf4371_chan,
+	.num_channels = 4,
+};
+
+static const struct adf4371_chip_info adf4372_chip_info = {
+	.name = "adf4372",
+	.channels = adf4371_chan,
+	.num_channels = 3,
 };
 
 static int adf4371_reg_access(struct iio_dev *indio_dev,
@@ -475,7 +488,7 @@ static const struct iio_info adf4371_info = {
 static int adf4371_setup(struct adf4371_state *st)
 {
 	unsigned int synth_timeout = 2, timeout = 1, vco_alc_timeout = 1;
-	unsigned int vco_band_div, tmp;
+	unsigned int vco_band_div, tmp, ref_doubler_en = 0;
 	int ret;
 
 	/* Perform a software reset */
@@ -503,6 +516,23 @@ static int adf4371_setup(struct adf4371_state *st)
 				 ADF4371_ADDR_ASC(1) | ADF4371_ADDR_ASC_R(1));
 	if (ret < 0)
 		return ret;
+
+	if ((st->ref_diff_en && st->clkin_freq > ADF4371_MAX_FREQ_REFIN) ||
+	    (!st->ref_diff_en && st->clkin_freq > ADF4371_MAX_FREQ_REFIN_SE))
+		return -EINVAL;
+
+	if (st->clkin_freq < ADF4371_MAX_CLKIN_DOUB_FREQ &&
+	    st->clkin_freq > ADF4371_MIN_CLKIN_DOUB_FREQ)
+		ref_doubler_en = 1;
+
+	ret = regmap_update_bits(st->regmap,  ADF4371_REG(0x22),
+				 ADF4371_REF_DOUB_MASK |
+				 ADF4371_REFIN_MODE_MASK,
+				 ADF4371_REF_DOUB(ref_doubler_en) |
+				 ADF4371_REFIN_MODE(st->ref_diff_en));
+	if (ret < 0)
+		return ret;
+
 	/*
 	 * Calculate and maximize PFD frequency
 	 * fPFD = REFIN × ((1 + D)/(R × (1 + T)))
@@ -512,7 +542,8 @@ static int adf4371_setup(struct adf4371_state *st)
 	 */
 	do {
 		st->ref_div_factor++;
-		st->fpfd = st->clkin_freq / st->ref_div_factor;
+		st->fpfd = st->clkin_freq * (1 + ref_doubler_en) /
+			   st->ref_div_factor;
 	} while (st->fpfd > ADF4371_MAX_FREQ_PFD);
 
 	/* Calculate Timeouts */
@@ -542,10 +573,10 @@ static int adf4371_setup(struct adf4371_state *st)
 
 static int adf4371_probe(struct spi_device *spi)
 {
-	const struct spi_device_id *id = spi_get_device_id(spi);
 	struct iio_dev *indio_dev;
 	struct adf4371_state *st;
 	struct regmap *regmap;
+	struct clk *clkin;
 	int ret;
 
 	indio_dev = devm_iio_device_alloc(&spi->dev, sizeof(*st));
@@ -553,51 +584,56 @@ static int adf4371_probe(struct spi_device *spi)
 		return -ENOMEM;
 
 	regmap = devm_regmap_init_spi(spi, &adf4371_regmap_config);
-	if (IS_ERR(regmap)) {
-		dev_err(&spi->dev, "Error initializing spi regmap: %ld\n",
-			PTR_ERR(regmap));
-		return PTR_ERR(regmap);
-	}
+	if (IS_ERR(regmap))
+		return dev_err_probe(&spi->dev, PTR_ERR(regmap),
+				     "Error initializing spi regmap\n");
 
 	st = iio_priv(indio_dev);
-	spi_set_drvdata(spi, indio_dev);
 	st->spi = spi;
 	st->regmap = regmap;
 	mutex_init(&st->lock);
 
-	st->chip_info = &adf4371_chip_info[id->driver_data];
-	indio_dev->name = id->name;
+	st->chip_info = spi_get_device_match_data(spi);
+	if (!st->chip_info)
+		return -ENODEV;
+
+	indio_dev->name = st->chip_info->name;
 	indio_dev->info = &adf4371_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = st->chip_info->channels;
 	indio_dev->num_channels = st->chip_info->num_channels;
 
-	st->clkin = devm_clk_get_enabled(&spi->dev, "clkin");
-	if (IS_ERR(st->clkin))
-		return PTR_ERR(st->clkin);
+	st->ref_diff_en = false;
 
-	st->clkin_freq = clk_get_rate(st->clkin);
+	clkin = devm_clk_get_enabled(&spi->dev, "clkin");
+	if (IS_ERR(clkin)) {
+		clkin = devm_clk_get_enabled(&spi->dev, "clkin-diff");
+		if (IS_ERR(clkin))
+			return dev_err_probe(&spi->dev, PTR_ERR(clkin),
+				     "Failed to get clkin/clkin-diff\n");
+		st->ref_diff_en = true;
+	}
+
+	st->clkin_freq = clk_get_rate(clkin);
 
 	ret = adf4371_setup(st);
-	if (ret < 0) {
-		dev_err(&spi->dev, "ADF4371 setup failed\n");
-		return ret;
-	}
+	if (ret < 0)
+		return dev_err_probe(&spi->dev, ret, "ADF4371 setup failed\n");
 
 	return devm_iio_device_register(&spi->dev, indio_dev);
 }
 
 static const struct spi_device_id adf4371_id_table[] = {
-	{ "adf4371", ADF4371 },
-	{ "adf4372", ADF4372 },
-	{}
+	{ "adf4371", (kernel_ulong_t)&adf4371_chip_info },
+	{ "adf4372", (kernel_ulong_t)&adf4372_chip_info },
+	{ }
 };
 MODULE_DEVICE_TABLE(spi, adf4371_id_table);
 
 static const struct of_device_id adf4371_of_match[] = {
-	{ .compatible = "adi,adf4371" },
-	{ .compatible = "adi,adf4372" },
-	{ },
+	{ .compatible = "adi,adf4371", .data = &adf4371_chip_info },
+	{ .compatible = "adi,adf4372", .data = &adf4372_chip_info},
+	{ }
 };
 MODULE_DEVICE_TABLE(of, adf4371_of_match);
 

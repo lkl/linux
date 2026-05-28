@@ -155,7 +155,7 @@ struct scsi_device {
 
 	blist_flags_t		sdev_bflags; /* black/white flags as also found in
 				 * scsi_devinfo.[hc]. For now used only to
-				 * pass settings from slave_alloc to scsi
+				 * pass settings from sdev_init to scsi
 				 * core. */
 	unsigned int eh_timeout; /* Error handling timeout */
 
@@ -183,6 +183,11 @@ struct scsi_device {
 	 * device driver (sd) to force a runtime resume of the device.
 	 */
 	unsigned force_runtime_start_on_system_start:1;
+
+	/*
+	 * Set if the device is an ATA device.
+	 */
+	unsigned is_ata:1;
 
 	unsigned removable:1;
 	unsigned changed:1;	/* Data invalid due to media change */
@@ -246,6 +251,9 @@ struct scsi_device {
 
 	unsigned int queue_stopped;	/* request queue is quiesced */
 	bool offline_already;		/* Device offline message logged */
+
+	atomic_t ua_new_media_ctr;	/* Counter for New Media UNIT ATTENTIONs */
+	atomic_t ua_por_ctr;		/* Counter for Power On / Reset UAs */
 
 	atomic_t disk_events_disable_depth; /* disable depth for disk events */
 
@@ -357,7 +365,7 @@ struct scsi_target {
 	atomic_t		target_blocked;
 
 	/*
-	 * LLDs should set this in the slave_alloc host template callout.
+	 * LLDs should set this in the sdev_init host template callout.
 	 * If set to zero then there is not limit.
 	 */
 	unsigned int		can_queue;
@@ -683,6 +691,10 @@ static inline int scsi_device_busy(struct scsi_device *sdev)
 {
 	return sbitmap_weight(&sdev->budget_map);
 }
+
+/* Macros to access the UNIT ATTENTION counters */
+#define scsi_get_ua_new_media_ctr(sdev)	atomic_read(&sdev->ua_new_media_ctr)
+#define scsi_get_ua_por_ctr(sdev)	atomic_read(&sdev->ua_por_ctr)
 
 #define MODULE_ALIAS_SCSI_DEVICE(type) \
 	MODULE_ALIAS("scsi:t-" __stringify(type) "*")

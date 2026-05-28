@@ -79,25 +79,6 @@ static struct platform_device *__get_pdev_by_id(struct platform_device *pdev,
 	return mdp_pdev;
 }
 
-struct platform_device *mdp_get_plat_device(struct platform_device *pdev)
-{
-	struct device *dev = &pdev->dev;
-	struct device_node *mdp_node;
-	struct platform_device *mdp_pdev;
-
-	mdp_node = of_parse_phandle(dev->of_node, MDP_PHANDLE_NAME, 0);
-	if (!mdp_node) {
-		dev_err(dev, "can't get node %s\n", MDP_PHANDLE_NAME);
-		return NULL;
-	}
-
-	mdp_pdev = of_find_device_by_node(mdp_node);
-	of_node_put(mdp_node);
-
-	return mdp_pdev;
-}
-EXPORT_SYMBOL_GPL(mdp_get_plat_device);
-
 int mdp_vpu_get_locked(struct mdp_dev *mdp)
 {
 	int ret = 0;
@@ -301,7 +282,7 @@ static int mdp_probe(struct platform_device *pdev)
 	}
 
 	mdp->rproc_handle = scp_get_rproc(mdp->scp);
-	dev_dbg(&pdev->dev, "MDP rproc_handle: %pK", mdp->rproc_handle);
+	dev_dbg(&pdev->dev, "MDP rproc_handle: %p", mdp->rproc_handle);
 
 	mutex_init(&mdp->vpu_lock);
 	mutex_init(&mdp->m2m_lock);
@@ -312,6 +293,8 @@ static int mdp_probe(struct platform_device *pdev)
 			ret = PTR_ERR(mdp->cmdq_clt[i]);
 			goto err_mbox_destroy;
 		}
+
+		mdp->cmdq_shift_pa[i] = cmdq_get_shift_pa(mdp->cmdq_clt[i]->chan);
 	}
 
 	init_waitqueue_head(&mdp->callback_wq);
@@ -413,7 +396,7 @@ static const struct dev_pm_ops mdp_pm_ops = {
 
 static struct platform_driver mdp_driver = {
 	.probe		= mdp_probe,
-	.remove_new	= mdp_remove,
+	.remove		= mdp_remove,
 	.driver = {
 		.name	= MDP_MODULE_NAME,
 		.pm	= &mdp_pm_ops,

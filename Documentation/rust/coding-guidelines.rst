@@ -38,6 +38,81 @@ Like ``clang-format`` for the rest of the kernel, ``rustfmt`` works on
 individual files, and does not require a kernel configuration. Sometimes it may
 even work with broken code.
 
+Imports
+~~~~~~~
+
+``rustfmt``, by default, formats imports in a way that is prone to conflicts
+while merging and rebasing, since in some cases it condenses several items into
+the same line. For instance:
+
+.. code-block:: rust
+
+	// Do not use this style.
+	use crate::{
+	    example1,
+	    example2::{example3, example4, example5},
+	    example6, example7,
+	    example8::example9,
+	};
+
+Instead, the kernel uses a vertical layout that looks like this:
+
+.. code-block:: rust
+
+	use crate::{
+	    example1,
+	    example2::{
+	        example3,
+	        example4,
+	        example5, //
+	    },
+	    example6,
+	    example7,
+	    example8::example9, //
+	};
+
+That is, each item goes into its own line, and braces are used as soon as there
+is more than one item in a list.
+
+The trailing empty comment allows to preserve this formatting. Not only that,
+``rustfmt`` will actually reformat imports vertically when the empty comment is
+added. That is, it is possible to easily reformat the original example into the
+expected style by running ``rustfmt`` on an input like:
+
+.. code-block:: rust
+
+	// Do not use this style.
+	use crate::{
+	    example1,
+	    example2::{example3, example4, example5, //
+	    },
+	    example6, example7,
+	    example8::example9, //
+	};
+
+The trailing empty comment works for nested imports, as shown above, as well as
+for single item imports -- this can be useful to minimize diffs within patch
+series:
+
+.. code-block:: rust
+
+	use crate::{
+	    example1, //
+	};
+
+The trailing empty comment works in any of the lines within the braces, but it
+is preferred to keep it in the last item, since it is reminiscent of the
+trailing comma in other formatters. Sometimes it may be simpler to avoid moving
+the comment several times within a patch series due to changes in the list.
+
+There may be cases where exceptions may need to be made, i.e. none of this is
+a hard rule. There is also code that is not migrated to this style yet, but
+please do not introduce code in other styles.
+
+Eventually, the goal is to get ``rustfmt`` to support this formatting style (or
+a similar one) automatically in a stable release without requiring the trailing
+empty comment. Thus, at some point, the goal is to remove those comments.
+
 
 Comments
 --------
@@ -84,6 +159,18 @@ written after the documentation, e.g.:
 	pub fn f(x: i32) -> Foo {
 	    // ...
 	}
+
+This applies to both public and private items. This increases consistency with
+public items, allows changes to visibility with less changes involved and will
+allow us to potentially generate the documentation for private items as well.
+In other words, if documentation is written for a private item, then ``///``
+should still be used. For instance:
+
+.. code-block:: rust
+
+	/// My private function.
+	// TODO: ...
+	fn f() {}
 
 One special kind of comments are the ``// SAFETY:`` comments. These must appear
 before every ``unsafe`` block, and they explain why the code inside the block is
@@ -191,6 +278,23 @@ or:
 	/// [`struct mutex`]: srctree/include/linux/mutex.h
 
 
+C FFI types
+-----------
+
+Rust kernel code refers to C types, such as ``int``, using type aliases such as
+``c_int``, which are readily available from the ``kernel`` prelude. Please do
+not use the aliases from ``core::ffi`` -- they may not map to the correct types.
+
+These aliases should generally be referred directly by their identifier, i.e.
+as a single segment path. For instance:
+
+.. code-block:: rust
+
+	fn f(p: *const c_char) -> c_int {
+	    // ...
+	}
+
+
 Naming
 ------
 
@@ -227,3 +331,157 @@ The equivalent in Rust may look like (ignoring documentation):
 That is, the equivalent of ``GPIO_LINE_DIRECTION_IN`` would be referred to as
 ``gpio::LineDirection::In``. In particular, it should not be named
 ``gpio::gpio_line_direction::GPIO_LINE_DIRECTION_IN``.
+
+
+Lints
+-----
+
+In Rust, it is possible to ``allow`` particular warnings (diagnostics, lints)
+locally, making the compiler ignore instances of a given warning within a given
+function, module, block, etc.
+
+It is similar to ``#pragma GCC diagnostic push`` + ``ignored`` + ``pop`` in C
+[#]_:
+
+.. code-block:: c
+
+	#pragma GCC diagnostic push
+	#pragma GCC diagnostic ignored "-Wunused-function"
+	static void f(void) {}
+	#pragma GCC diagnostic pop
+
+.. [#] In this particular case, the kernel's ``__{always,maybe}_unused``
+       attributes (C23's ``[[maybe_unused]]``) may be used; however, the example
+       is meant to reflect the equivalent lint in Rust discussed afterwards.
+
+But way less verbose:
+
+.. code-block:: rust
+
+	#[allow(dead_code)]
+	fn f() {}
+
+By that virtue, it makes it possible to comfortably enable more diagnostics by
+default (i.e. outside ``W=`` levels). In particular, those that may have some
+false positives but that are otherwise quite useful to keep enabled to catch
+potential mistakes.
+
+On top of that, Rust provides the ``expect`` attribute which takes this further.
+It makes the compiler warn if the warning was not produced. For instance, the
+following will ensure that, when ``f()`` is called somewhere, we will have to
+remove the attribute:
+
+.. code-block:: rust
+
+	#[expect(dead_code)]
+	fn f() {}
+
+If we do not, we get a warning from the compiler::
+
+	warning: this lint expectation is unfulfilled
+	 --> x.rs:3:10
+	  |
+	3 | #[expect(dead_code)]
+	  |          ^^^^^^^^^
+	  |
+	  = note: `#[warn(unfulfilled_lint_expectations)]` on by default
+
+This means that ``expect``\ s do not get forgotten when they are not needed, which
+may happen in several situations, e.g.:
+
+- Temporary attributes added while developing.
+
+- Improvements in lints in the compiler, Clippy or custom tools which may
+  remove a false positive.
+
+- When the lint is not needed anymore because it was expected that it would be
+  removed at some point, such as the ``dead_code`` example above.
+
+It also increases the visibility of the remaining ``allow``\ s and reduces the
+chance of misapplying one.
+
+Thus prefer ``expect`` over ``allow`` unless:
+
+- Conditional compilation triggers the warning in some cases but not others.
+
+  If there are only a few cases where the warning triggers (or does not
+  trigger) compared to the total number of cases, then one may consider using
+  a conditional ``expect`` (i.e. ``cfg_attr(..., expect(...))``). Otherwise,
+  it is likely simpler to just use ``allow``.
+
+- Inside macros, when the different invocations may create expanded code that
+  triggers the warning in some cases but not in others.
+
+- When code may trigger a warning for some architectures but not others, such
+  as an ``as`` cast to a C FFI type.
+
+As a more developed example, consider for instance this program:
+
+.. code-block:: rust
+
+	fn g() {}
+
+	fn main() {
+	    #[cfg(CONFIG_X)]
+	    g();
+	}
+
+Here, function ``g()`` is dead code if ``CONFIG_X`` is not set. Can we use
+``expect`` here?
+
+.. code-block:: rust
+
+	#[expect(dead_code)]
+	fn g() {}
+
+	fn main() {
+	    #[cfg(CONFIG_X)]
+	    g();
+	}
+
+This would emit a lint if ``CONFIG_X`` is set, since it is not dead code in that
+configuration. Therefore, in cases like this, we cannot use ``expect`` as-is.
+
+A simple possibility is using ``allow``:
+
+.. code-block:: rust
+
+	#[allow(dead_code)]
+	fn g() {}
+
+	fn main() {
+	    #[cfg(CONFIG_X)]
+	    g();
+	}
+
+An alternative would be using a conditional ``expect``:
+
+.. code-block:: rust
+
+	#[cfg_attr(not(CONFIG_X), expect(dead_code))]
+	fn g() {}
+
+	fn main() {
+	    #[cfg(CONFIG_X)]
+	    g();
+	}
+
+This would ensure that, if someone introduces another call to ``g()`` somewhere
+(e.g. unconditionally), then it would be spotted that it is not dead code
+anymore. However, the ``cfg_attr`` is more complex than a simple ``allow``.
+
+Therefore, it is likely that it is not worth using conditional ``expect``\ s when
+more than one or two configurations are involved or when the lint may be
+triggered due to non-local changes (such as ``dead_code``).
+
+For more information about diagnostics in Rust, please see:
+
+	https://doc.rust-lang.org/stable/reference/attributes/diagnostics.html
+
+Error handling
+--------------
+
+For some background and guidelines about Rust for Linux specific error handling,
+please see:
+
+	https://rust.docs.kernel.org/kernel/error/type.Result.html#error-codes-in-c-and-rust

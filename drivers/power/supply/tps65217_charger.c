@@ -198,7 +198,7 @@ static int tps65217_charger_probe(struct platform_device *pdev)
 	charger->tps = tps;
 	charger->dev = &pdev->dev;
 
-	cfg.of_node = pdev->dev.of_node;
+	cfg.fwnode = dev_fwnode(&pdev->dev);
 	cfg.drv_data = charger;
 
 	charger->psy = devm_power_supply_register(&pdev->dev,
@@ -269,7 +269,7 @@ MODULE_DEVICE_TABLE(of, tps65217_charger_match_table);
 
 static struct platform_driver tps65217_charger_driver = {
 	.probe	= tps65217_charger_probe,
-	.remove_new = tps65217_charger_remove,
+	.remove	= tps65217_charger_remove,
 	.driver	= {
 		.name	= "tps65217-charger",
 		.of_match_table = of_match_ptr(tps65217_charger_match_table),

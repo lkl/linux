@@ -42,8 +42,8 @@
 #include <linux/slab.h>
 #include <linux/migrate.h>
 
-static int read_block(struct inode *inode, void *addr, unsigned int block,
-		      struct ubifs_data_node *dn)
+static int read_block(struct inode *inode, struct folio *folio, size_t offset,
+		      unsigned int block, struct ubifs_data_node *dn)
 {
 	struct ubifs_info *c = inode->i_sb->s_fs_info;
 	int err, len, out_len;
@@ -55,7 +55,7 @@ static int read_block(struct inode *inode, void *addr, unsigned int block,
 	if (err) {
 		if (err == -ENOENT)
 			/* Not found, so it must be a hole */
-			memset(addr, 0, UBIFS_BLOCK_SIZE);
+			folio_zero_range(folio, offset, UBIFS_BLOCK_SIZE);
 		return err;
 	}
 
@@ -74,8 +74,8 @@ static int read_block(struct inode *inode, void *addr, unsigned int block,
 	}
 
 	out_len = UBIFS_BLOCK_SIZE;
-	err = ubifs_decompress(c, &dn->data, dlen, addr, &out_len,
-			       le16_to_cpu(dn->compr_type));
+	err = ubifs_decompress_folio(c, &dn->data, dlen, folio, offset,
+				     &out_len, le16_to_cpu(dn->compr_type));
 	if (err || len != out_len)
 		goto dump;
 
@@ -85,7 +85,7 @@ static int read_block(struct inode *inode, void *addr, unsigned int block,
 	 * appending data). Ensure that the remainder is zeroed out.
 	 */
 	if (len < UBIFS_BLOCK_SIZE)
-		memset(addr + len, 0, UBIFS_BLOCK_SIZE - len);
+		folio_zero_range(folio, offset + len, UBIFS_BLOCK_SIZE - len);
 
 	return 0;
 
@@ -98,27 +98,25 @@ dump:
 
 static int do_readpage(struct folio *folio)
 {
-	void *addr;
 	int err = 0, i;
 	unsigned int block, beyond;
 	struct ubifs_data_node *dn = NULL;
 	struct inode *inode = folio->mapping->host;
 	struct ubifs_info *c = inode->i_sb->s_fs_info;
 	loff_t i_size = i_size_read(inode);
+	size_t offset = 0;
 
 	dbg_gen("ino %lu, pg %lu, i_size %lld, flags %#lx",
-		inode->i_ino, folio->index, i_size, folio->flags);
+		inode->i_ino, folio->index, i_size, folio->flags.f);
 	ubifs_assert(c, !folio_test_checked(folio));
 	ubifs_assert(c, !folio->private);
-
-	addr = kmap_local_folio(folio, 0);
 
 	block = folio->index << UBIFS_BLOCKS_PER_PAGE_SHIFT;
 	beyond = (i_size + UBIFS_BLOCK_SIZE - 1) >> UBIFS_BLOCK_SHIFT;
 	if (block >= beyond) {
 		/* Reading beyond inode */
 		folio_set_checked(folio);
-		addr = folio_zero_tail(folio, 0, addr);
+		folio_zero_range(folio, 0, folio_size(folio));
 		goto out;
 	}
 
@@ -135,9 +133,9 @@ static int do_readpage(struct folio *folio)
 		if (block >= beyond) {
 			/* Reading beyond inode */
 			err = -ENOENT;
-			memset(addr, 0, UBIFS_BLOCK_SIZE);
+			folio_zero_range(folio, offset, UBIFS_BLOCK_SIZE);
 		} else {
-			ret = read_block(inode, addr, block, dn);
+			ret = read_block(inode, folio, offset, block, dn);
 			if (ret) {
 				err = ret;
 				if (err != -ENOENT)
@@ -147,17 +145,13 @@ static int do_readpage(struct folio *folio)
 				int ilen = i_size & (UBIFS_BLOCK_SIZE - 1);
 
 				if (ilen && ilen < dlen)
-					memset(addr + ilen, 0, dlen - ilen);
+					folio_zero_range(folio, offset + ilen, dlen - ilen);
 			}
 		}
 		if (++i >= (UBIFS_BLOCKS_PER_PAGE << folio_order(folio)))
 			break;
 		block += 1;
-		addr += UBIFS_BLOCK_SIZE;
-		if (folio_test_highmem(folio) && (offset_in_page(addr) == 0)) {
-			kunmap_local(addr - UBIFS_BLOCK_SIZE);
-			addr = kmap_local_folio(folio, i * UBIFS_BLOCK_SIZE);
-		}
+		offset += UBIFS_BLOCK_SIZE;
 	}
 
 	if (err) {
@@ -177,8 +171,6 @@ out:
 	kfree(dn);
 	if (!err)
 		folio_mark_uptodate(folio);
-	flush_dcache_folio(folio);
-	kunmap_local(addr);
 	return err;
 }
 
@@ -412,7 +404,8 @@ static int allocate_budget(struct ubifs_info *c, struct folio *folio,
  * there is a plenty of flash space and the budget will be acquired quickly,
  * without forcing write-back. The slow path does not make this assumption.
  */
-static int ubifs_write_begin(struct file *file, struct address_space *mapping,
+static int ubifs_write_begin(const struct kiocb *iocb,
+			     struct address_space *mapping,
 			     loff_t pos, unsigned len,
 			     struct folio **foliop, void **fsdata)
 {
@@ -522,8 +515,9 @@ static void cancel_budget(struct ubifs_info *c, struct folio *folio,
 	}
 }
 
-static int ubifs_write_end(struct file *file, struct address_space *mapping,
-			   loff_t pos, unsigned len, unsigned copied,
+static int ubifs_write_end(const struct kiocb *iocb,
+			   struct address_space *mapping, loff_t pos,
+			   unsigned len, unsigned copied,
 			   struct folio *folio, void *fsdata)
 {
 	struct inode *inode = mapping->host;
@@ -602,18 +596,16 @@ static int populate_page(struct ubifs_info *c, struct folio *folio,
 	struct inode *inode = folio->mapping->host;
 	loff_t i_size = i_size_read(inode);
 	unsigned int page_block;
-	void *addr, *zaddr;
+	size_t offset = 0;
 	pgoff_t end_index;
 
 	dbg_gen("ino %lu, pg %lu, i_size %lld, flags %#lx",
-		inode->i_ino, folio->index, i_size, folio->flags);
-
-	addr = zaddr = kmap_local_folio(folio, 0);
+		inode->i_ino, folio->index, i_size, folio->flags.f);
 
 	end_index = (i_size - 1) >> PAGE_SHIFT;
 	if (!i_size || folio->index > end_index) {
 		hole = 1;
-		addr = folio_zero_tail(folio, 0, addr);
+		folio_zero_range(folio, 0, folio_size(folio));
 		goto out_hole;
 	}
 
@@ -623,7 +615,7 @@ static int populate_page(struct ubifs_info *c, struct folio *folio,
 
 		if (nn >= bu->cnt) {
 			hole = 1;
-			memset(addr, 0, UBIFS_BLOCK_SIZE);
+			folio_zero_range(folio, offset, UBIFS_BLOCK_SIZE);
 		} else if (key_block(c, &bu->zbranch[nn].key) == page_block) {
 			struct ubifs_data_node *dn;
 
@@ -645,13 +637,15 @@ static int populate_page(struct ubifs_info *c, struct folio *folio,
 					goto out_err;
 			}
 
-			err = ubifs_decompress(c, &dn->data, dlen, addr, &out_len,
-					       le16_to_cpu(dn->compr_type));
+			err = ubifs_decompress_folio(
+				c, &dn->data, dlen, folio, offset, &out_len,
+				le16_to_cpu(dn->compr_type));
 			if (err || len != out_len)
 				goto out_err;
 
 			if (len < UBIFS_BLOCK_SIZE)
-				memset(addr + len, 0, UBIFS_BLOCK_SIZE - len);
+				folio_zero_range(folio, offset + len,
+						 UBIFS_BLOCK_SIZE - len);
 
 			nn += 1;
 			read = (i << UBIFS_BLOCK_SHIFT) + len;
@@ -660,23 +654,19 @@ static int populate_page(struct ubifs_info *c, struct folio *folio,
 			continue;
 		} else {
 			hole = 1;
-			memset(addr, 0, UBIFS_BLOCK_SIZE);
+			folio_zero_range(folio, offset, UBIFS_BLOCK_SIZE);
 		}
 		if (++i >= UBIFS_BLOCKS_PER_PAGE)
 			break;
-		addr += UBIFS_BLOCK_SIZE;
+		offset += UBIFS_BLOCK_SIZE;
 		page_block += 1;
-		if (folio_test_highmem(folio) && (offset_in_page(addr) == 0)) {
-			kunmap_local(addr - UBIFS_BLOCK_SIZE);
-			addr = kmap_local_folio(folio, i * UBIFS_BLOCK_SIZE);
-		}
 	}
 
 	if (end_index == folio->index) {
 		int len = i_size & (PAGE_SIZE - 1);
 
 		if (len && len < read)
-			memset(zaddr + len, 0, read - len);
+			folio_zero_range(folio, len, read - len);
 	}
 
 out_hole:
@@ -686,14 +676,10 @@ out_hole:
 	}
 
 	folio_mark_uptodate(folio);
-	flush_dcache_folio(folio);
-	kunmap_local(addr);
 	*n = nn;
 	return 0;
 
 out_err:
-	flush_dcache_folio(folio);
-	kunmap_local(addr);
 	ubifs_err(c, "bad data node (block %u, inode %lu)",
 		  page_block, inode->i_ino);
 	return -EINVAL;
@@ -898,7 +884,6 @@ static int do_writepage(struct folio *folio, size_t len)
 {
 	int err = 0, blen;
 	unsigned int block;
-	void *addr;
 	size_t offset = 0;
 	union ubifs_key key;
 	struct inode *inode = folio->mapping->host;
@@ -913,26 +898,19 @@ static int do_writepage(struct folio *folio, size_t len)
 
 	folio_start_writeback(folio);
 
-	addr = kmap_local_folio(folio, offset);
 	block = folio->index << UBIFS_BLOCKS_PER_PAGE_SHIFT;
 	for (;;) {
 		blen = min_t(size_t, len, UBIFS_BLOCK_SIZE);
 		data_key_init(c, &key, inode->i_ino, block);
-		err = ubifs_jnl_write_data(c, inode, &key, addr, blen);
+		err = ubifs_jnl_write_data(c, inode, &key, folio, offset, blen);
 		if (err)
 			break;
 		len -= blen;
 		if (!len)
 			break;
 		block += 1;
-		addr += blen;
-		if (folio_test_highmem(folio) && !offset_in_page(addr)) {
-			kunmap_local(addr - blen);
-			offset += PAGE_SIZE;
-			addr = kmap_local_folio(folio, offset);
-		}
+		offset += blen;
 	}
-	kunmap_local(addr);
 	if (err) {
 		mapping_set_error(folio->mapping, err);
 		ubifs_err(c, "cannot write folio %lu of inode %lu, error %d",
@@ -1001,8 +979,7 @@ static int do_writepage(struct folio *folio, size_t len)
  * on the page lock and it would not write the truncated inode node to the
  * journal before we have finished.
  */
-static int ubifs_writepage(struct folio *folio, struct writeback_control *wbc,
-		void *data)
+static int ubifs_writepage(struct folio *folio, struct writeback_control *wbc)
 {
 	struct inode *inode = folio->mapping->host;
 	struct ubifs_info *c = inode->i_sb->s_fs_info;
@@ -1011,7 +988,7 @@ static int ubifs_writepage(struct folio *folio, struct writeback_control *wbc,
 	int err, len = folio_size(folio);
 
 	dbg_gen("ino %lu, pg %lu, pg flags %#lx",
-		inode->i_ino, folio->index, folio->flags);
+		inode->i_ino, folio->index, folio->flags.f);
 	ubifs_assert(c, folio->private != NULL);
 
 	/* Is the folio fully outside @i_size? (truncate in progress) */
@@ -1074,7 +1051,12 @@ out_unlock:
 static int ubifs_writepages(struct address_space *mapping,
 		struct writeback_control *wbc)
 {
-	return write_cache_pages(mapping, wbc, ubifs_writepage, NULL);
+	struct folio *folio = NULL;
+	int error;
+
+	while ((folio = writeback_iter(mapping, wbc, folio, &error)))
+		error = ubifs_writepage(folio, wbc);
+	return error;
 }
 
 /**
@@ -1603,17 +1585,17 @@ static const struct vm_operations_struct ubifs_file_vm_ops = {
 	.page_mkwrite = ubifs_vm_page_mkwrite,
 };
 
-static int ubifs_file_mmap(struct file *file, struct vm_area_struct *vma)
+static int ubifs_file_mmap_prepare(struct vm_area_desc *desc)
 {
 	int err;
 
-	err = generic_file_mmap(file, vma);
+	err = generic_file_mmap_prepare(desc);
 	if (err)
 		return err;
-	vma->vm_ops = &ubifs_file_vm_ops;
+	desc->vm_ops = &ubifs_file_vm_ops;
 
 	if (IS_ENABLED(CONFIG_UBIFS_ATIME_SUPPORT))
-		file_accessed(file);
+		file_accessed(desc->file);
 
 	return 0;
 }
@@ -1676,7 +1658,7 @@ const struct file_operations ubifs_file_operations = {
 	.llseek         = generic_file_llseek,
 	.read_iter      = generic_file_read_iter,
 	.write_iter     = ubifs_write_iter,
-	.mmap           = ubifs_file_mmap,
+	.mmap_prepare   = ubifs_file_mmap_prepare,
 	.fsync          = ubifs_fsync,
 	.unlocked_ioctl = ubifs_ioctl,
 	.splice_read	= filemap_splice_read,

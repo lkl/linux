@@ -133,7 +133,7 @@ static enum hrtimer_restart idle_inject_timer_fn(struct hrtimer *timer)
 	duration_us = READ_ONCE(ii_dev->run_duration_us);
 	duration_us += READ_ONCE(ii_dev->idle_duration_us);
 
-	hrtimer_forward_now(timer, ns_to_ktime(duration_us * NSEC_PER_USEC));
+	hrtimer_forward_now(timer, us_to_ktime(duration_us));
 
 	return HRTIMER_RESTART;
 }
@@ -179,7 +179,7 @@ void idle_inject_set_duration(struct idle_inject_device *ii_dev,
 	if (!run_duration_us)
 		pr_debug("CPU is forced to 100 percent idle\n");
 }
-EXPORT_SYMBOL_NS_GPL(idle_inject_set_duration, IDLE_INJECT);
+EXPORT_SYMBOL_NS_GPL(idle_inject_set_duration, "IDLE_INJECT");
 
 /**
  * idle_inject_get_duration - idle and run duration retrieval helper
@@ -194,7 +194,7 @@ void idle_inject_get_duration(struct idle_inject_device *ii_dev,
 	*run_duration_us = READ_ONCE(ii_dev->run_duration_us);
 	*idle_duration_us = READ_ONCE(ii_dev->idle_duration_us);
 }
-EXPORT_SYMBOL_NS_GPL(idle_inject_get_duration, IDLE_INJECT);
+EXPORT_SYMBOL_NS_GPL(idle_inject_get_duration, "IDLE_INJECT");
 
 /**
  * idle_inject_set_latency - set the maximum latency allowed
@@ -206,7 +206,7 @@ void idle_inject_set_latency(struct idle_inject_device *ii_dev,
 {
 	WRITE_ONCE(ii_dev->latency_us, latency_us);
 }
-EXPORT_SYMBOL_NS_GPL(idle_inject_set_latency, IDLE_INJECT);
+EXPORT_SYMBOL_NS_GPL(idle_inject_set_latency, "IDLE_INJECT");
 
 /**
  * idle_inject_start - start idle injections
@@ -232,13 +232,12 @@ int idle_inject_start(struct idle_inject_device *ii_dev)
 	idle_inject_wakeup(ii_dev);
 
 	hrtimer_start(&ii_dev->timer,
-		      ns_to_ktime((idle_duration_us + run_duration_us) *
-				  NSEC_PER_USEC),
+		      us_to_ktime(idle_duration_us + run_duration_us),
 		      HRTIMER_MODE_REL);
 
 	return 0;
 }
-EXPORT_SYMBOL_NS_GPL(idle_inject_start, IDLE_INJECT);
+EXPORT_SYMBOL_NS_GPL(idle_inject_start, "IDLE_INJECT");
 
 /**
  * idle_inject_stop - stops idle injections
@@ -285,7 +284,7 @@ void idle_inject_stop(struct idle_inject_device *ii_dev)
 
 	cpu_hotplug_enable();
 }
-EXPORT_SYMBOL_NS_GPL(idle_inject_stop, IDLE_INJECT);
+EXPORT_SYMBOL_NS_GPL(idle_inject_stop, "IDLE_INJECT");
 
 /**
  * idle_inject_setup - prepare the current task for idle injection
@@ -339,8 +338,7 @@ struct idle_inject_device *idle_inject_register_full(struct cpumask *cpumask,
 		return NULL;
 
 	cpumask_copy(to_cpumask(ii_dev->cpumask), cpumask);
-	hrtimer_init(&ii_dev->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	ii_dev->timer.function = idle_inject_timer_fn;
+	hrtimer_setup(&ii_dev->timer, idle_inject_timer_fn, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	ii_dev->latency_us = UINT_MAX;
 	ii_dev->update = update;
 
@@ -367,7 +365,7 @@ out_rollback:
 
 	return NULL;
 }
-EXPORT_SYMBOL_NS_GPL(idle_inject_register_full, IDLE_INJECT);
+EXPORT_SYMBOL_NS_GPL(idle_inject_register_full, "IDLE_INJECT");
 
 /**
  * idle_inject_register - initialize idle injection on a set of CPUs
@@ -384,7 +382,7 @@ struct idle_inject_device *idle_inject_register(struct cpumask *cpumask)
 {
 	return idle_inject_register_full(cpumask, NULL);
 }
-EXPORT_SYMBOL_NS_GPL(idle_inject_register, IDLE_INJECT);
+EXPORT_SYMBOL_NS_GPL(idle_inject_register, "IDLE_INJECT");
 
 /**
  * idle_inject_unregister - unregister idle injection control device
@@ -405,7 +403,7 @@ void idle_inject_unregister(struct idle_inject_device *ii_dev)
 
 	kfree(ii_dev);
 }
-EXPORT_SYMBOL_NS_GPL(idle_inject_unregister, IDLE_INJECT);
+EXPORT_SYMBOL_NS_GPL(idle_inject_unregister, "IDLE_INJECT");
 
 static struct smp_hotplug_thread idle_inject_threads = {
 	.store = &idle_inject_thread.tsk,

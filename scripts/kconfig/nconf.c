@@ -7,6 +7,7 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
+#include <locale.h>
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
@@ -467,7 +468,7 @@ static void handle_f9(int *key, struct menu *current_item)
 	return;
 }
 
-/* return != 0 to indicate the key was handles */
+/* return != 0 to indicate the key was handled */
 static int process_special_keys(int *key, struct menu *menu)
 {
 	int i;
@@ -592,6 +593,8 @@ static void item_add_str(const char *fmt, ...)
 	strncpy(k_menu_items[index].str,
 		tmp_str,
 		sizeof(k_menu_items[index].str));
+
+	k_menu_items[index].str[sizeof(k_menu_items[index].str) - 1] = '\0';
 
 	free_item(curses_menu_items[index]);
 	curses_menu_items[index] = new_item(
@@ -1475,6 +1478,8 @@ int main(int ac, char **av)
 {
 	int lines, columns;
 	char *mode;
+
+	setlocale(LC_ALL, "");
 
 	if (ac > 1 && strcmp(av[1], "-s") == 0) {
 		/* Silence conf_read() until the real callback is set up */

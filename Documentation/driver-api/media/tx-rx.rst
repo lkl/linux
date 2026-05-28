@@ -12,7 +12,7 @@ CSI-2 receiver in an SoC.
 Bus types
 ---------
 
-The following busses are the most common. This section discusses these two only.
+The following buses are the most common. This section discusses these two only.
 
 MIPI CSI-2
 ^^^^^^^^^^
@@ -36,7 +36,7 @@ Transmitter drivers
 
 Transmitter drivers generally need to provide the receiver drivers with the
 configuration of the transmitter. What is required depends on the type of the
-bus. These are common for both busses.
+bus. These are common for both buses.
 
 Media bus pixel code
 ^^^^^^^^^^^^^^^^^^^^
@@ -49,12 +49,31 @@ Link frequency
 The :ref:`V4L2_CID_LINK_FREQ <v4l2-cid-link-freq>` control is used to tell the
 receiver the frequency of the bus (i.e. it is not the same as the symbol rate).
 
-``.s_stream()`` callback
+Drivers that do not have user-configurable link frequency should report it
+through the ``.get_mbus_config()`` subdev pad operation, in the ``link_freq``
+field of struct v4l2_mbus_config, instead of through controls.
+
+Receiver drivers should use :c:func:`v4l2_get_link_freq` helper to obtain the
+link frequency from the transmitter sub-device.
+
+``.enable_streams()`` and ``.disable_streams()`` callbacks
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The struct v4l2_subdev_pad_ops->enable_streams() and struct
+v4l2_subdev_pad_ops->disable_streams() callbacks are used by the receiver driver
+to control the transmitter driver's streaming state. These callbacks may not be
+called directly, but by using ``v4l2_subdev_enable_streams()`` and
+``v4l2_subdev_disable_streams()``.
+
+Stopping the transmitter
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-The struct struct v4l2_subdev_video_ops->s_stream() callback is used by the
-receiver driver to control the transmitter driver's streaming state.
-
+A transmitter stops sending the stream of images as a result of
+calling the ``.disable_streams()`` callback. Some transmitters may stop the
+stream at a frame boundary whereas others stop immediately,
+effectively leaving the current frame unfinished. The receiver driver
+should not make assumptions either way, but function properly in both
+cases.
 
 CSI-2 transmitter drivers
 -------------------------
@@ -76,14 +95,15 @@ where
    * - link_freq
      - The value of the ``V4L2_CID_LINK_FREQ`` integer64 menu item.
    * - nr_of_lanes
-     - Number of data lanes used on the CSI-2 link. This can
-       be obtained from the OF endpoint configuration.
+     - Number of data lanes used on the CSI-2 link.
    * - 2
      - Data is transferred on both rising and falling edge of the signal.
    * - bits_per_sample
      - Number of bits per sample.
    * - k
-     - 16 for D-PHY and 7 for C-PHY
+     - 16 for D-PHY and 7 for C-PHY.
+
+Information on whether D-PHY or C-PHY is used, and the value of ``nr_of_lanes``, can be obtained from the OF endpoint configuration.
 
 .. note::
 
@@ -122,13 +142,3 @@ device, so this should be only done when it is needed.
 
 Receiver drivers that do not need explicit LP-11 or LP-111 state setup are
 waived from calling the two callbacks.
-
-Stopping the transmitter
-^^^^^^^^^^^^^^^^^^^^^^^^
-
-A transmitter stops sending the stream of images as a result of
-calling the ``.s_stream()`` callback. Some transmitters may stop the
-stream at a frame boundary whereas others stop immediately,
-effectively leaving the current frame unfinished. The receiver driver
-should not make assumptions either way, but function properly in both
-cases.

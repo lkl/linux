@@ -319,7 +319,6 @@ enum {
 	GLF_DEMOTE_IN_PROGRESS		= 5,
 	GLF_DIRTY			= 6,
 	GLF_LFLUSH			= 7,
-	GLF_INVALIDATE_IN_PROGRESS	= 8,
 	GLF_HAVE_REPLY			= 9,
 	GLF_INITIAL			= 10,
 	GLF_HAVE_FROZEN_REPLY		= 11,
@@ -329,7 +328,10 @@ enum {
 	GLF_BLOCKING			= 15,
 	GLF_UNLOCKED			= 16, /* Wait for glock to be unlocked */
 	GLF_TRY_TO_EVICT		= 17, /* iopen glocks only */
-	GLF_VERIFY_EVICT		= 18, /* iopen glocks only */
+	GLF_VERIFY_DELETE		= 18, /* iopen glocks only */
+	GLF_PENDING_REPLY		= 19,
+	GLF_DEFER_DELETE		= 20, /* iopen glocks only */
+	GLF_CANCELING			= 21,
 };
 
 struct gfs2_glock {
@@ -372,11 +374,8 @@ struct gfs2_glock {
 
 enum {
 	GIF_QD_LOCKED		= 1,
-	GIF_ALLOC_FAILED	= 2,
 	GIF_SW_PAGED		= 3,
-	GIF_FREE_VFS_INODE      = 5,
 	GIF_GLOP_PENDING	= 6,
-	GIF_DEFERRED_DELETE	= 7,
 };
 
 struct gfs2_inode {
@@ -657,6 +656,8 @@ struct lm_lockstruct {
 	struct completion ls_sync_wait; /* {control,mounted}_{lock,unlock} */
 	char *ls_lvb_bits;
 
+	struct rw_semaphore ls_sem;
+
 	spinlock_t ls_recover_spin; /* protects following fields */
 	unsigned long ls_recover_flags; /* DFL_ */
 	uint32_t ls_recover_mount; /* gen in first recover_done cb */
@@ -793,7 +794,7 @@ struct gfs2_sbd {
 
 	/* Log stuff */
 
-	struct address_space sd_aspace;
+	struct inode *sd_inode;
 
 	spinlock_t sd_log_lock;
 
@@ -822,7 +823,6 @@ struct gfs2_sbd {
 	atomic_t sd_log_in_flight;
 	wait_queue_head_t sd_log_flush_wait;
 	int sd_log_error; /* First log error */
-	wait_queue_head_t sd_withdraw_wait;
 
 	unsigned int sd_log_tail;
 	unsigned int sd_log_flush_tail;
@@ -848,6 +848,13 @@ struct gfs2_sbd {
 	struct dentry *debugfs_dir;    /* debugfs directory */
 	unsigned long sd_glock_dqs_held;
 };
+
+#define GFS2_BAD_INO 1
+
+static inline struct address_space *gfs2_aspace(struct gfs2_sbd *sdp)
+{
+	return sdp->sd_inode->i_mapping;
+}
 
 static inline void gfs2_glstats_inc(struct gfs2_glock *gl, int which)
 {

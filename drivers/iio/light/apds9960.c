@@ -25,7 +25,6 @@
 #include <linux/iio/kfifo_buf.h>
 #include <linux/iio/sysfs.h>
 
-#define APDS9960_REGMAP_NAME	"apds9960_regmap"
 #define APDS9960_DRV_NAME	"apds9960"
 
 #define APDS9960_REG_RAM_START	0x00
@@ -133,8 +132,8 @@ struct apds9960_data {
 	struct regmap_field *reg_enable_pxs;
 
 	/* state */
-	int als_int;
-	int pxs_int;
+	bool als_int;
+	bool pxs_int;
 	int gesture_mode_running;
 
 	/* gain values */
@@ -221,7 +220,7 @@ static const struct regmap_access_table apds9960_writeable_table = {
 };
 
 static const struct regmap_config apds9960_regmap_config = {
-	.name = APDS9960_REGMAP_NAME,
+	.name = "apds9960_regmap",
 	.reg_bits = 8,
 	.val_bits = 8,
 	.use_single_read = true,
@@ -496,7 +495,6 @@ static int apds9960_set_power_state(struct apds9960_data *data, bool on)
 			usleep_range(data->als_adc_int_us,
 				     APDS9960_MAX_INT_TIME_IN_US);
 	} else {
-		pm_runtime_mark_last_busy(dev);
 		ret = pm_runtime_put_autosuspend(dev);
 	}
 
@@ -749,20 +747,16 @@ static int apds9960_read_event_config(struct iio_dev *indio_dev,
 	default:
 		return -EINVAL;
 	}
-
-	return 0;
 }
 
 static int apds9960_write_event_config(struct iio_dev *indio_dev,
 				       const struct iio_chan_spec *chan,
 				       enum iio_event_type type,
 				       enum iio_event_direction dir,
-				       int state)
+				       bool state)
 {
 	struct apds9960_data *data = iio_priv(indio_dev);
 	int ret;
-
-	state = !!state;
 
 	switch (chan->type) {
 	case IIO_PROXIMITY:
@@ -1161,7 +1155,7 @@ static const struct dev_pm_ops apds9960_pm_ops = {
 
 static const struct i2c_device_id apds9960_id[] = {
 	{ "apds9960" },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, apds9960_id);
 

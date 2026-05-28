@@ -12,6 +12,31 @@
 #include "txgbe_fdir.h"
 #include "txgbe_ethtool.h"
 
+int txgbe_get_link_ksettings(struct net_device *netdev,
+			     struct ethtool_link_ksettings *cmd)
+{
+	struct wx *wx = netdev_priv(netdev);
+	struct txgbe *txgbe = wx->priv;
+	int err;
+
+	if (wx->mac.type == wx_mac_aml40)
+		return -EOPNOTSUPP;
+
+	err = wx_get_link_ksettings(netdev, cmd);
+	if (err)
+		return err;
+
+	if (wx->mac.type == wx_mac_sp)
+		return 0;
+
+	cmd->base.port = txgbe->link_port;
+	cmd->base.autoneg = AUTONEG_DISABLE;
+	linkmode_copy(cmd->link_modes.supported, txgbe->sfp_support);
+	linkmode_copy(cmd->link_modes.advertising, txgbe->advertising);
+
+	return 0;
+}
+
 static int txgbe_set_ringparam(struct net_device *netdev,
 			       struct ethtool_ringparam *ring,
 			       struct kernel_ethtool_ringparam *kernel_ring,
@@ -342,12 +367,19 @@ static int txgbe_add_ethtool_fdir_entry(struct txgbe *txgbe,
 		queue = TXGBE_RDB_FDIR_DROP_QUEUE;
 	} else {
 		u32 ring = ethtool_get_flow_spec_ring(fsp->ring_cookie);
+		u8 vf = ethtool_get_flow_spec_ring_vf(fsp->ring_cookie);
 
-		if (ring >= wx->num_rx_queues)
+		if (!vf && ring >= wx->num_rx_queues)
+			return -EINVAL;
+		else if (vf && (vf > wx->num_vfs ||
+				ring >= wx->num_rx_queues_per_pool))
 			return -EINVAL;
 
 		/* Map the ring onto the absolute queue index */
-		queue = wx->rx_ring[ring]->reg_idx;
+		if (!vf)
+			queue = wx->rx_ring[ring]->reg_idx;
+		else
+			queue = ((vf - 1) * wx->num_rx_queues_per_pool) + ring;
 	}
 
 	/* Don't allow indexes to exist outside of available space */
@@ -506,11 +538,12 @@ static int txgbe_set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd)
 
 static const struct ethtool_ops txgbe_ethtool_ops = {
 	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
-				     ETHTOOL_COALESCE_TX_MAX_FRAMES_IRQ,
+				     ETHTOOL_COALESCE_TX_MAX_FRAMES_IRQ |
+				     ETHTOOL_COALESCE_USE_ADAPTIVE,
 	.get_drvinfo		= wx_get_drvinfo,
 	.nway_reset		= wx_nway_reset,
 	.get_link		= ethtool_op_get_link,
-	.get_link_ksettings	= wx_get_link_ksettings,
+	.get_link_ksettings	= txgbe_get_link_ksettings,
 	.set_link_ksettings	= wx_set_link_ksettings,
 	.get_sset_count		= wx_get_sset_count,
 	.get_strings		= wx_get_strings,
@@ -527,8 +560,16 @@ static const struct ethtool_ops txgbe_ethtool_ops = {
 	.set_channels		= txgbe_set_channels,
 	.get_rxnfc		= txgbe_get_rxnfc,
 	.set_rxnfc		= txgbe_set_rxnfc,
+	.get_rxfh_fields	= wx_get_rxfh_fields,
+	.set_rxfh_fields	= wx_set_rxfh_fields,
+	.get_rxfh_indir_size	= wx_rss_indir_size,
+	.get_rxfh_key_size	= wx_get_rxfh_key_size,
+	.get_rxfh		= wx_get_rxfh,
+	.set_rxfh		= wx_set_rxfh,
 	.get_msglevel		= wx_get_msglevel,
 	.set_msglevel		= wx_set_msglevel,
+	.get_ts_info		= wx_get_ts_info,
+	.get_ts_stats		= wx_get_ptp_stats,
 };
 
 void txgbe_set_ethtool_ops(struct net_device *netdev)

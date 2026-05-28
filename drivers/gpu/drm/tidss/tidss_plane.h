@@ -7,6 +7,8 @@
 #ifndef __TIDSS_PLANE_H__
 #define __TIDSS_PLANE_H__
 
+#include <drm/drm_plane.h>
+
 #define to_tidss_plane(p) container_of((p), struct tidss_plane, plane)
 
 struct tidss_device;
@@ -21,5 +23,7 @@ struct tidss_plane *tidss_plane_create(struct tidss_device *tidss,
 				       u32 hw_plane_id, u32 plane_type,
 				       u32 crtc_mask, const u32 *formats,
 				       u32 num_formats);
+
+void tidss_plane_error_irq(struct drm_plane *plane, u64 irqstatus);
 
 #endif

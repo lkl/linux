@@ -3,6 +3,7 @@
  * Copyright (c) 2005-2011 Atheros Communications Inc.
  * Copyright (c) 2011-2017 Qualcomm Atheros, Inc.
  * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/pci.h>
@@ -63,7 +64,7 @@ static const struct pci_device_id ath10k_pci_id_table[] = {
 	{ PCI_VDEVICE(ATHEROS, QCA9984_1_0_DEVICE_ID) }, /* PCI-E QCA9984 V1 */
 	{ PCI_VDEVICE(ATHEROS, QCA9377_1_0_DEVICE_ID) }, /* PCI-E QCA9377 V1 */
 	{ PCI_VDEVICE(ATHEROS, QCA9887_1_0_DEVICE_ID) }, /* PCI-E QCA9887 */
-	{0}
+	{}
 };
 
 static const struct ath10k_pci_supp_chip ath10k_pci_supp_chips[] = {
@@ -591,7 +592,7 @@ skip:
 
 static void ath10k_pci_ps_timer(struct timer_list *t)
 {
-	struct ath10k_pci *ar_pci = from_timer(ar_pci, t, ps_timer);
+	struct ath10k_pci *ar_pci = timer_container_of(ar_pci, t, ps_timer);
 	struct ath10k *ar = ar_pci->ar;
 	unsigned long flags;
 
@@ -619,7 +620,7 @@ static void ath10k_pci_sleep_sync(struct ath10k *ar)
 		return;
 	}
 
-	del_timer_sync(&ar_pci->ps_timer);
+	timer_delete_sync(&ar_pci->ps_timer);
 
 	spin_lock_irqsave(&ar_pci->ps_lock, flags);
 	WARN_ON(ar_pci->ps_wake_refcount > 0);
@@ -844,7 +845,8 @@ void ath10k_pci_rx_post(struct ath10k *ar)
 
 void ath10k_pci_rx_replenish_retry(struct timer_list *t)
 {
-	struct ath10k_pci *ar_pci = from_timer(ar_pci, t, rx_post_retry);
+	struct ath10k_pci *ar_pci = timer_container_of(ar_pci, t,
+						       rx_post_retry);
 	struct ath10k *ar = ar_pci->ar;
 
 	ath10k_pci_rx_post(ar);
@@ -1817,7 +1819,7 @@ static void ath10k_pci_rx_retry_sync(struct ath10k *ar)
 {
 	struct ath10k_pci *ar_pci = ath10k_pci_priv(ar);
 
-	del_timer_sync(&ar_pci->rx_post_retry);
+	timer_delete_sync(&ar_pci->rx_post_retry);
 }
 
 int ath10k_pci_hif_map_service_to_pipe(struct ath10k *ar, u16 service_id,
@@ -3411,7 +3413,7 @@ static int ath10k_pci_claim(struct ath10k *ar)
 		goto err_region;
 	}
 
-	ath10k_dbg(ar, ATH10K_DBG_BOOT, "boot pci_mem 0x%pK\n", ar_pci->mem);
+	ath10k_dbg(ar, ATH10K_DBG_BOOT, "boot pci_mem 0x%p\n", ar_pci->mem);
 	return 0;
 
 err_region:

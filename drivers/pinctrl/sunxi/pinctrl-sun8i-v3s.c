@@ -22,6 +22,9 @@
 
 #include "pinctrl-sunxi.h"
 
+#define PINCTRL_SUN8I_V3	BIT(0)
+#define PINCTRL_SUN8I_V3S	BIT(1)
+
 static const struct sunxi_desc_pin sun8i_v3s_pins[] = {
 	/* Hole */
 	SUNXI_PIN(SUNXI_PINCTRL_PIN(B, 0),
@@ -42,7 +45,7 @@ static const struct sunxi_desc_pin sun8i_v3s_pins[] = {
 	SUNXI_PIN(SUNXI_PINCTRL_PIN(B, 3),
 		  SUNXI_FUNCTION(0x0, "gpio_in"),
 		  SUNXI_FUNCTION(0x1, "gpio_out"),
-		  SUNXI_FUNCTION(0x2, "uart2"),		/* D1 */
+		  SUNXI_FUNCTION(0x2, "uart2"),		/* CTS */
 		  SUNXI_FUNCTION_IRQ_BANK(0x6, 0, 3)),	/* PB_EINT3 */
 	SUNXI_PIN(SUNXI_PINCTRL_PIN(B, 4),
 		  SUNXI_FUNCTION(0x0, "gpio_in"),
@@ -552,8 +555,8 @@ static int sun8i_v3s_pinctrl_probe(struct platform_device *pdev)
 {
 	unsigned long variant = (unsigned long)of_device_get_match_data(&pdev->dev);
 
-	return sunxi_pinctrl_init_with_variant(pdev, &sun8i_v3s_pinctrl_data,
-					       variant);
+	return sunxi_pinctrl_init_with_flags(pdev, &sun8i_v3s_pinctrl_data,
+					     variant);
 }
 
 static const struct of_device_id sun8i_v3s_pinctrl_match[] = {

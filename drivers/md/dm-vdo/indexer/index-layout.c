@@ -54,7 +54,6 @@
  * Each save also has a unique nonce.
  */
 
-#define MAGIC_SIZE 32
 #define NONCE_INFO_SIZE 32
 #define MAX_SAVES 2
 
@@ -98,8 +97,10 @@ enum region_type {
 #define SUPER_VERSION_CURRENT 3
 #define SUPER_VERSION_MAXIMUM 7
 
-static const u8 LAYOUT_MAGIC[MAGIC_SIZE] = "*ALBIREO*SINGLE*FILE*LAYOUT*001*";
+static const u8 LAYOUT_MAGIC[] = "*ALBIREO*SINGLE*FILE*LAYOUT*001*";
 static const u64 REGION_MAGIC = 0x416c6252676e3031; /* 'AlbRgn01' */
+
+#define MAGIC_SIZE (sizeof(LAYOUT_MAGIC) - 1)
 
 struct region_header {
 	u64 magic;
@@ -245,32 +246,6 @@ static int __must_check compute_sizes(const struct uds_configuration *config,
 	sls->total_blocks = 3 + sls->sub_index_blocks;
 	sls->total_size = sls->total_blocks * sls->block_size;
 
-	return UDS_SUCCESS;
-}
-
-int uds_compute_index_size(const struct uds_parameters *parameters, u64 *index_size)
-{
-	int result;
-	struct uds_configuration *index_config;
-	struct save_layout_sizes sizes;
-
-	if (index_size == NULL) {
-		vdo_log_error("Missing output size pointer");
-		return -EINVAL;
-	}
-
-	result = uds_make_configuration(parameters, &index_config);
-	if (result != UDS_SUCCESS) {
-		vdo_log_error_strerror(result, "cannot compute index size");
-		return uds_status_to_errno(result);
-	}
-
-	result = compute_sizes(index_config, &sizes);
-	uds_free_configuration(index_config);
-	if (result != UDS_SUCCESS)
-		return uds_status_to_errno(result);
-
-	*index_size = sizes.total_size;
 	return UDS_SUCCESS;
 }
 

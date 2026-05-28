@@ -14,13 +14,17 @@ properties:
     oneOf:
       - enum:
           - loongson,ls2k-gpio
+          - loongson,ls2k0300-gpio
           - loongson,ls2k0500-gpio0
           - loongson,ls2k0500-gpio1
           - loongson,ls2k2000-gpio0
           - loongson,ls2k2000-gpio1
           - loongson,ls2k2000-gpio2
           - loongson,ls3a5000-gpio
+          - loongson,ls3a6000-gpio  # Loongson-3A6000 node GPIO
           - loongson,ls7a-gpio
+          - loongson,ls7a2000-gpio1 # LS7A2000 chipset GPIO
+          - loongson,ls7a2000-gpio2 # LS7A2000 ACPI GPIO
       - items:
           - const: loongson,ls2k1000-gpio
           - const: loongson,ls2k-gpio
@@ -33,7 +37,7 @@ properties:
 
   ngpios:
     minimum: 1
-    maximum: 64
+    maximum: 128
 
   "#gpio-cells":
     const: 2
@@ -46,6 +50,14 @@ properties:
     minItems: 1
     maxItems: 64
 
+  "#interrupt-cells":
+    const: 2
+
+  interrupt-controller: true
+
+  resets:
+    maxItems: 1
+
 required:
   - compatible
   - reg
@@ -54,6 +66,23 @@ required:
   - gpio-controller
   - gpio-ranges
   - interrupts
+
+allOf:
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: loongson,ls2k0300-gpio
+    then:
+      required:
+        - "#interrupt-cells"
+        - interrupt-controller
+        - resets
+    else:
+      properties:
+        "#interrupts-cells": false
+        interrupt-controller: false
+        resets: false
 
 additionalProperties: false
 

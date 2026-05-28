@@ -13,10 +13,23 @@
 #include "avs.h"
 #include "topology.h"
 
+#define AVS_COND_TYPE_NONE	0
+#define AVS_COND_TYPE_AECREF	1
+
 struct avs_path {
 	u32 dma_id;
 	struct list_head ppl_list;
 	u32 state;
+
+	/* condpath navigation for standard paths */
+	struct list_head source_list;
+	struct list_head sink_list;
+
+	/* conditional path fields */
+	struct avs_path *source;
+	struct avs_path *sink;
+	struct list_head source_node;
+	struct list_head sink_node;
 
 	struct avs_tplg_path *template;
 	struct avs_dev *owner;
@@ -68,5 +81,15 @@ int avs_path_unbind(struct avs_path *path);
 int avs_path_reset(struct avs_path *path);
 int avs_path_pause(struct avs_path *path);
 int avs_path_run(struct avs_path *path, int trigger);
+
+int avs_path_set_constraint(struct avs_dev *adev, struct avs_tplg_path_template *template,
+			    struct snd_pcm_hw_constraint_list *rate_list,
+			    struct snd_pcm_hw_constraint_list *channels_list,
+			    struct snd_pcm_hw_constraint_list *sample_bits_list);
+
+int avs_peakvol_set_volume(struct avs_dev *adev, struct avs_path_module *mod,
+			   struct soc_mixer_control *mc, long *input);
+int avs_peakvol_set_mute(struct avs_dev *adev, struct avs_path_module *mod,
+			 struct soc_mixer_control *mc, long *input);
 
 #endif

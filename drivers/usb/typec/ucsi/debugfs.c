@@ -28,19 +28,29 @@ static int ucsi_cmd(void *data, u64 val)
 	ucsi->debugfs->status = 0;
 
 	switch (UCSI_COMMAND(val)) {
-	case UCSI_SET_UOM:
+	case UCSI_SET_CCOM:
 	case UCSI_SET_UOR:
 	case UCSI_SET_PDR:
 	case UCSI_CONNECTOR_RESET:
+	case UCSI_SET_SINK_PATH:
+	case UCSI_SET_NEW_CAM:
+	case UCSI_SET_USB:
+	case UCSI_READ_POWER_LEVEL:
 		ret = ucsi_send_command(ucsi, val, NULL, 0);
 		break;
 	case UCSI_GET_CAPABILITY:
 	case UCSI_GET_CONNECTOR_CAPABILITY:
 	case UCSI_GET_ALTERNATE_MODES:
+	case UCSI_GET_CAM_SUPPORTED:
 	case UCSI_GET_CURRENT_CAM:
 	case UCSI_GET_PDOS:
 	case UCSI_GET_CABLE_PROPERTY:
 	case UCSI_GET_CONNECTOR_STATUS:
+	case UCSI_GET_ERROR_STATUS:
+	case UCSI_GET_PD_MESSAGE:
+	case UCSI_GET_ATTENTION_VDO:
+	case UCSI_GET_CAM_CS:
+	case UCSI_GET_LPM_PPM_INFO:
 		ret = ucsi_send_command(ucsi, val,
 					&ucsi->debugfs->response,
 					sizeof(ucsi->debugfs->response));
@@ -71,6 +81,33 @@ static int ucsi_resp_show(struct seq_file *s, void *not_used)
 }
 DEFINE_SHOW_ATTRIBUTE(ucsi_resp);
 
+static int ucsi_peak_curr_show(struct seq_file *m, void *v)
+{
+	struct ucsi *ucsi = m->private;
+
+	seq_printf(m, "%u mA\n", ucsi->connector->peak_current);
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(ucsi_peak_curr);
+
+static int ucsi_avg_curr_show(struct seq_file *m, void *v)
+{
+	struct ucsi *ucsi = m->private;
+
+	seq_printf(m, "%u mA\n", ucsi->connector->avg_current);
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(ucsi_avg_curr);
+
+static int ucsi_vbus_volt_show(struct seq_file *m, void *v)
+{
+	struct ucsi *ucsi = m->private;
+
+	seq_printf(m, "%u mV\n", ucsi->connector->vbus_voltage);
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(ucsi_vbus_volt);
+
 void ucsi_debugfs_register(struct ucsi *ucsi)
 {
 	ucsi->debugfs = kzalloc(sizeof(*ucsi->debugfs), GFP_KERNEL);
@@ -80,6 +117,9 @@ void ucsi_debugfs_register(struct ucsi *ucsi)
 	ucsi->debugfs->dentry = debugfs_create_dir(dev_name(ucsi->dev), ucsi_debugfs_root);
 	debugfs_create_file("command", 0200, ucsi->debugfs->dentry, ucsi, &ucsi_cmd_fops);
 	debugfs_create_file("response", 0400, ucsi->debugfs->dentry, ucsi, &ucsi_resp_fops);
+	debugfs_create_file("peak_current", 0400, ucsi->debugfs->dentry, ucsi, &ucsi_peak_curr_fops);
+	debugfs_create_file("avg_current", 0400, ucsi->debugfs->dentry, ucsi, &ucsi_avg_curr_fops);
+	debugfs_create_file("vbus_voltage", 0400, ucsi->debugfs->dentry, ucsi, &ucsi_vbus_volt_fops);
 }
 
 void ucsi_debugfs_unregister(struct ucsi *ucsi)

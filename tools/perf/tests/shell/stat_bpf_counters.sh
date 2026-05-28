@@ -1,10 +1,10 @@
-#!/bin/sh
-# perf stat --bpf-counters test
+#!/bin/bash
+# perf stat --bpf-counters test (exclusive)
 # SPDX-License-Identifier: GPL-2.0
 
 set -e
 
-workload="perf test -w brstack"
+workload="perf test -w sqrtloop"
 
 # check whether $2 is within +/- 20% of $1
 compare_number()

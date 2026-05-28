@@ -198,7 +198,7 @@ void ath9k_htc_reset(struct ath9k_htc_priv *priv)
 	ath9k_htc_stop_ani(priv);
 	ieee80211_stop_queues(priv->hw);
 
-	del_timer_sync(&priv->tx.cleanup_timer);
+	timer_delete_sync(&priv->tx.cleanup_timer);
 	ath9k_htc_tx_drain(priv);
 
 	WMI_CMD(WMI_DISABLE_INTR_CMDID);
@@ -260,7 +260,7 @@ static int ath9k_htc_set_channel(struct ath9k_htc_priv *priv,
 	ath9k_htc_ps_wakeup(priv);
 
 	ath9k_htc_stop_ani(priv);
-	del_timer_sync(&priv->tx.cleanup_timer);
+	timer_delete_sync(&priv->tx.cleanup_timer);
 	ath9k_htc_tx_drain(priv);
 
 	WMI_CMD(WMI_DISABLE_INTR_CMDID);
@@ -997,7 +997,7 @@ static void ath9k_htc_stop(struct ieee80211_hw *hw, bool suspend)
 
 	tasklet_kill(&priv->rx_tasklet);
 
-	del_timer_sync(&priv->tx.cleanup_timer);
+	timer_delete_sync(&priv->tx.cleanup_timer);
 	ath9k_htc_tx_drain(priv);
 	ath9k_wmi_event_drain(priv);
 
@@ -1172,7 +1172,7 @@ static void ath9k_htc_remove_interface(struct ieee80211_hw *hw,
 	mutex_unlock(&priv->mutex);
 }
 
-static int ath9k_htc_config(struct ieee80211_hw *hw, u32 changed)
+static int ath9k_htc_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
 {
 	struct ath9k_htc_priv *priv = hw->priv;
 	struct ath_common *common = ath9k_hw_common(priv->ah);
@@ -1357,8 +1357,10 @@ static int ath9k_htc_sta_remove(struct ieee80211_hw *hw,
 
 static void ath9k_htc_sta_rc_update(struct ieee80211_hw *hw,
 				    struct ieee80211_vif *vif,
-				    struct ieee80211_sta *sta, u32 changed)
+				    struct ieee80211_link_sta *link_sta,
+				    u32 changed)
 {
+	struct ieee80211_sta *sta = link_sta->sta;
 	struct ath9k_htc_sta *ista = (struct ath9k_htc_sta *) sta->drv_priv;
 
 	if (!(changed & IEEE80211_RC_SUPP_RATES_CHANGED))
@@ -1735,12 +1737,14 @@ static void ath9k_htc_sw_scan_complete(struct ieee80211_hw *hw,
 	mutex_unlock(&priv->mutex);
 }
 
-static int ath9k_htc_set_rts_threshold(struct ieee80211_hw *hw, u32 value)
+static int ath9k_htc_set_rts_threshold(struct ieee80211_hw *hw,
+				       int radio_idx, u32 value)
 {
 	return 0;
 }
 
 static void ath9k_htc_set_coverage_class(struct ieee80211_hw *hw,
+					 int radio_idx,
 					 s16 coverage_class)
 {
 	struct ath9k_htc_priv *priv = hw->priv;
@@ -1839,8 +1843,8 @@ struct base_eep_header *ath9k_htc_get_eeprom_base(struct ath9k_htc_priv *priv)
 }
 
 
-static int ath9k_htc_get_antenna(struct ieee80211_hw *hw, u32 *tx_ant,
-				 u32 *rx_ant)
+static int ath9k_htc_get_antenna(struct ieee80211_hw *hw, int radio_idx,
+				 u32 *tx_ant, u32 *rx_ant)
 {
 	struct ath9k_htc_priv *priv = hw->priv;
 	struct base_eep_header *pBase = ath9k_htc_get_eeprom_base(priv);
@@ -1883,7 +1887,7 @@ struct ieee80211_ops ath9k_htc_ops = {
 	.sta_add            = ath9k_htc_sta_add,
 	.sta_remove         = ath9k_htc_sta_remove,
 	.conf_tx            = ath9k_htc_conf_tx,
-	.sta_rc_update      = ath9k_htc_sta_rc_update,
+	.link_sta_rc_update = ath9k_htc_sta_rc_update,
 	.bss_info_changed   = ath9k_htc_bss_info_changed,
 	.set_key            = ath9k_htc_set_key,
 	.get_tsf            = ath9k_htc_get_tsf,

@@ -50665,6 +50665,19 @@
 #define RCC_STRAP0_RCC_DEV0_EPF0_STRAP0__STRAP_D1_SUPPORT_DEV0_F0_MASK                                        0x40000000L
 #define RCC_STRAP0_RCC_DEV0_EPF0_STRAP0__STRAP_D2_SUPPORT_DEV0_F0_MASK                                        0x80000000L
 
+//RCC_DEV0_EPF5_STRAP4
+#define RCC_DEV0_EPF5_STRAP4__STRAP_ATOMIC_64BIT_EN_DEV0_F5__SHIFT                                            0x14
+#define RCC_DEV0_EPF5_STRAP4__STRAP_ATOMIC_EN_DEV0_F5__SHIFT                                                  0x15
+#define RCC_DEV0_EPF5_STRAP4__STRAP_FLR_EN_DEV0_F5__SHIFT                                                     0x16
+#define RCC_DEV0_EPF5_STRAP4__STRAP_PME_SUPPORT_DEV0_F5__SHIFT                                                0x17
+#define RCC_DEV0_EPF5_STRAP4__STRAP_INTERRUPT_PIN_DEV0_F5__SHIFT                                              0x1c
+#define RCC_DEV0_EPF5_STRAP4__STRAP_AUXPWR_SUPPORT_DEV0_F5__SHIFT                                             0x1f
+#define RCC_DEV0_EPF5_STRAP4__STRAP_ATOMIC_64BIT_EN_DEV0_F5_MASK                                              0x00100000L
+#define RCC_DEV0_EPF5_STRAP4__STRAP_ATOMIC_EN_DEV0_F5_MASK                                                    0x00200000L
+#define RCC_DEV0_EPF5_STRAP4__STRAP_FLR_EN_DEV0_F5_MASK                                                       0x00400000L
+#define RCC_DEV0_EPF5_STRAP4__STRAP_PME_SUPPORT_DEV0_F5_MASK                                                  0x0F800000L
+#define RCC_DEV0_EPF5_STRAP4__STRAP_INTERRUPT_PIN_DEV0_F5_MASK                                                0x70000000L
+#define RCC_DEV0_EPF5_STRAP4__STRAP_AUXPWR_SUPPORT_DEV0_F5_MASK                                               0x80000000L
 
 // addressBlock: nbio_nbif0_bif_rst_bif_rst_regblk
 //HARD_RST_CTRL

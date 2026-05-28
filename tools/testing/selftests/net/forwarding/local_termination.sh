@@ -7,7 +7,6 @@ ALL_TESTS="standalone vlan_unaware_bridge vlan_aware_bridge test_vlan \
 NUM_NETIFS=2
 PING_COUNT=1
 REQUIRE_MTOOLS=yes
-REQUIRE_MZ=no
 
 source lib.sh
 
@@ -176,6 +175,8 @@ run_test()
 	local smac=$(mac_get $send_if_name)
 	local rcv_dmac=$(mac_get $rcv_if_name)
 	local should_receive
+
+	setup_wait
 
 	tcpdump_start $rcv_if_name
 

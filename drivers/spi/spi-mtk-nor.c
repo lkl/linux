@@ -918,7 +918,6 @@ static int mtk_nor_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto err_probe;
 
-	pm_runtime_mark_last_busy(&pdev->dev);
 	pm_runtime_put_autosuspend(&pdev->dev);
 
 	dev_info(&pdev->dev, "spi frequency: %d Hz\n", sp->spi_freq);
@@ -998,7 +997,7 @@ static struct platform_driver mtk_nor_driver = {
 		.pm = &mtk_nor_pm_ops,
 	},
 	.probe = mtk_nor_probe,
-	.remove_new = mtk_nor_remove,
+	.remove = mtk_nor_remove,
 };
 
 module_platform_driver(mtk_nor_driver);

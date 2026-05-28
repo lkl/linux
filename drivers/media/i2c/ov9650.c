@@ -286,7 +286,7 @@ static const struct i2c_rv ov965x_init_regs[] = {
 	{ REG_COM5, 0x00 },	/* System clock options */
 	{ REG_COM2, 0x01 },	/* Output drive, soft sleep mode */
 	{ REG_COM10, 0x00 },	/* Slave mode, HREF vs HSYNC, signals negate */
-	{ REG_EDGE, 0xa6 },	/* Edge enhancement treshhold and factor */
+	{ REG_EDGE, 0xa6 },	/* Edge enhancement threshold and factor */
 	{ REG_COM16, 0x02 },	/* Color matrix coeff double option */
 	{ REG_COM17, 0x08 },	/* Single frame out, banding filter */
 	{ 0x16, 0x06 },
@@ -1494,9 +1494,10 @@ static int ov965x_probe(struct i2c_client *client)
 	}
 
 	if (dev_fwnode(&client->dev)) {
-		ov965x->clk = devm_clk_get(&client->dev, NULL);
+		ov965x->clk = devm_v4l2_sensor_clk_get(&client->dev, NULL);
 		if (IS_ERR(ov965x->clk))
-			return PTR_ERR(ov965x->clk);
+			return dev_err_probe(&client->dev, PTR_ERR(ov965x->clk),
+					     "failed to get the clock\n");
 		ov965x->mclk_frequency = clk_get_rate(ov965x->clk);
 
 		ret = ov965x_configure_gpios(ov965x);

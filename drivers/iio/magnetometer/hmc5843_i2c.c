@@ -84,7 +84,7 @@ static const struct of_device_id hmc5843_of_match[] = {
 	{ .compatible = "honeywell,hmc5883", .data = (void *)HMC5883_ID },
 	{ .compatible = "honeywell,hmc5883l", .data = (void *)HMC5883L_ID },
 	{ .compatible = "honeywell,hmc5983", .data = (void *)HMC5983_ID },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(of, hmc5843_of_match);
 
@@ -103,4 +103,4 @@ module_i2c_driver(hmc5843_driver);
 MODULE_AUTHOR("Josef Gajdusek <atx@atx.name>");
 MODULE_DESCRIPTION("HMC5843/5883/5883L/5983 i2c driver");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(IIO_HMC5843);
+MODULE_IMPORT_NS("IIO_HMC5843");

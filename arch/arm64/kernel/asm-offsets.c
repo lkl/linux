@@ -6,21 +6,19 @@
  *               2001-2002 Keith Owens
  * Copyright (C) 2012 ARM Ltd.
  */
+#define COMPILE_OFFSETS
 
 #include <linux/arm_sdei.h>
 #include <linux/sched.h>
 #include <linux/ftrace.h>
 #include <linux/kexec.h>
 #include <linux/mm.h>
-#include <linux/dma-mapping.h>
 #include <linux/kvm_host.h>
-#include <linux/preempt.h>
 #include <linux/suspend.h>
 #include <asm/cpufeature.h>
 #include <asm/fixmap.h>
 #include <asm/thread_info.h>
 #include <asm/memory.h>
-#include <asm/signal32.h>
 #include <asm/smp_plat.h>
 #include <asm/suspend.h>
 #include <linux/kbuild.h>
@@ -28,8 +26,6 @@
 
 int main(void)
 {
-  DEFINE(TSK_ACTIVE_MM,		offsetof(struct task_struct, active_mm));
-  BLANK();
   DEFINE(TSK_TI_CPU,		offsetof(struct task_struct, thread_info.cpu));
   DEFINE(TSK_TI_FLAGS,		offsetof(struct task_struct, thread_info.flags));
   DEFINE(TSK_TI_PREEMPT,	offsetof(struct task_struct, thread_info.preempt_count));
@@ -79,45 +75,27 @@ int main(void)
   DEFINE(S_PSTATE,		offsetof(struct pt_regs, pstate));
   DEFINE(S_SYSCALLNO,		offsetof(struct pt_regs, syscallno));
   DEFINE(S_SDEI_TTBR1,		offsetof(struct pt_regs, sdei_ttbr1));
-  DEFINE(S_PMR_SAVE,		offsetof(struct pt_regs, pmr_save));
+  DEFINE(S_PMR,			offsetof(struct pt_regs, pmr));
   DEFINE(S_STACKFRAME,		offsetof(struct pt_regs, stackframe));
+  DEFINE(S_STACKFRAME_TYPE,	offsetof(struct pt_regs, stackframe.type));
   DEFINE(PT_REGS_SIZE,		sizeof(struct pt_regs));
   BLANK();
 #ifdef CONFIG_DYNAMIC_FTRACE_WITH_ARGS
-  DEFINE(FREGS_X0,		offsetof(struct ftrace_regs, regs[0]));
-  DEFINE(FREGS_X2,		offsetof(struct ftrace_regs, regs[2]));
-  DEFINE(FREGS_X4,		offsetof(struct ftrace_regs, regs[4]));
-  DEFINE(FREGS_X6,		offsetof(struct ftrace_regs, regs[6]));
-  DEFINE(FREGS_X8,		offsetof(struct ftrace_regs, regs[8]));
-  DEFINE(FREGS_FP,		offsetof(struct ftrace_regs, fp));
-  DEFINE(FREGS_LR,		offsetof(struct ftrace_regs, lr));
-  DEFINE(FREGS_SP,		offsetof(struct ftrace_regs, sp));
-  DEFINE(FREGS_PC,		offsetof(struct ftrace_regs, pc));
+  DEFINE(FREGS_X0,		offsetof(struct __arch_ftrace_regs, regs[0]));
+  DEFINE(FREGS_X2,		offsetof(struct __arch_ftrace_regs, regs[2]));
+  DEFINE(FREGS_X4,		offsetof(struct __arch_ftrace_regs, regs[4]));
+  DEFINE(FREGS_X6,		offsetof(struct __arch_ftrace_regs, regs[6]));
+  DEFINE(FREGS_X8,		offsetof(struct __arch_ftrace_regs, regs[8]));
+  DEFINE(FREGS_FP,		offsetof(struct __arch_ftrace_regs, fp));
+  DEFINE(FREGS_LR,		offsetof(struct __arch_ftrace_regs, lr));
+  DEFINE(FREGS_SP,		offsetof(struct __arch_ftrace_regs, sp));
+  DEFINE(FREGS_PC,		offsetof(struct __arch_ftrace_regs, pc));
 #ifdef CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS
-  DEFINE(FREGS_DIRECT_TRAMP,	offsetof(struct ftrace_regs, direct_tramp));
+  DEFINE(FREGS_DIRECT_TRAMP,	offsetof(struct __arch_ftrace_regs, direct_tramp));
 #endif
-  DEFINE(FREGS_SIZE,		sizeof(struct ftrace_regs));
-  BLANK();
-#endif
-#ifdef CONFIG_COMPAT
-  DEFINE(COMPAT_SIGFRAME_REGS_OFFSET,		offsetof(struct compat_sigframe, uc.uc_mcontext.arm_r0));
-  DEFINE(COMPAT_RT_SIGFRAME_REGS_OFFSET,	offsetof(struct compat_rt_sigframe, sig.uc.uc_mcontext.arm_r0));
+  DEFINE(FREGS_SIZE,		sizeof(struct __arch_ftrace_regs));
   BLANK();
 #endif
-  DEFINE(MM_CONTEXT_ID,		offsetof(struct mm_struct, context.id.counter));
-  BLANK();
-  DEFINE(VMA_VM_MM,		offsetof(struct vm_area_struct, vm_mm));
-  DEFINE(VMA_VM_FLAGS,		offsetof(struct vm_area_struct, vm_flags));
-  BLANK();
-  DEFINE(VM_EXEC,	       	VM_EXEC);
-  BLANK();
-  DEFINE(PAGE_SZ,	       	PAGE_SIZE);
-  BLANK();
-  DEFINE(DMA_TO_DEVICE,		DMA_TO_DEVICE);
-  DEFINE(DMA_FROM_DEVICE,	DMA_FROM_DEVICE);
-  BLANK();
-  DEFINE(PREEMPT_DISABLE_OFFSET, PREEMPT_DISABLE_OFFSET);
-  BLANK();
   DEFINE(CPU_BOOT_TASK,		offsetof(struct secondary_data, task));
   BLANK();
   DEFINE(FTR_OVR_VAL_OFFSET,	offsetof(struct arm64_ftr_override, val));
@@ -202,20 +180,10 @@ int main(void)
   DEFINE(FTRACE_OPS_FUNC,		offsetof(struct ftrace_ops, func));
 #endif
   BLANK();
-#ifdef CONFIG_FUNCTION_GRAPH_TRACER
-  DEFINE(FGRET_REGS_X0,			offsetof(struct fgraph_ret_regs, regs[0]));
-  DEFINE(FGRET_REGS_X1,			offsetof(struct fgraph_ret_regs, regs[1]));
-  DEFINE(FGRET_REGS_X2,			offsetof(struct fgraph_ret_regs, regs[2]));
-  DEFINE(FGRET_REGS_X3,			offsetof(struct fgraph_ret_regs, regs[3]));
-  DEFINE(FGRET_REGS_X4,			offsetof(struct fgraph_ret_regs, regs[4]));
-  DEFINE(FGRET_REGS_X5,			offsetof(struct fgraph_ret_regs, regs[5]));
-  DEFINE(FGRET_REGS_X6,			offsetof(struct fgraph_ret_regs, regs[6]));
-  DEFINE(FGRET_REGS_X7,			offsetof(struct fgraph_ret_regs, regs[7]));
-  DEFINE(FGRET_REGS_FP,			offsetof(struct fgraph_ret_regs, fp));
-  DEFINE(FGRET_REGS_SIZE,		sizeof(struct fgraph_ret_regs));
-#endif
 #ifdef CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS
   DEFINE(FTRACE_OPS_DIRECT_CALL,	offsetof(struct ftrace_ops, direct_call));
 #endif
+  DEFINE(PIE_E0_ASM, PIE_E0);
+  DEFINE(PIE_E1_ASM, PIE_E1);
   return 0;
 }

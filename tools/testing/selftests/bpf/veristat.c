@@ -3,6 +3,7 @@
 #define _GNU_SOURCE
 #include <argp.h>
 #include <libgen.h>
+#include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sched.h>
@@ -16,13 +17,24 @@
 #include <sys/stat.h>
 #include <bpf/libbpf.h>
 #include <bpf/btf.h>
+#include <bpf/bpf.h>
 #include <libelf.h>
 #include <gelf.h>
 #include <float.h>
 #include <math.h>
+#include <limits.h>
+#include <assert.h>
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+#endif
+
+#ifndef max
+#define max(a, b) ((a) > (b) ? (a) : (b))
+#endif
+
+#ifndef min
+#define min(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
 enum stat_id {
@@ -33,6 +45,12 @@ enum stat_id {
 	PEAK_STATES,
 	MAX_STATES_PER_INSN,
 	MARK_READ_MAX_LEN,
+	SIZE,
+	JITED_SIZE,
+	STACK,
+	PROG_TYPE,
+	ATTACH_TYPE,
+	MEMORY_PEAK,
 
 	FILE_NAME,
 	PROG_NAME,
@@ -139,6 +157,36 @@ struct filter {
 	bool abs;
 };
 
+struct rvalue {
+	enum { INTEGRAL, ENUMERATOR } type;
+	union {
+		long long ivalue;
+		char *svalue;
+	};
+};
+
+struct field_access {
+	enum { FIELD_NAME, ARRAY_INDEX } type;
+	union {
+		char *name;
+		struct rvalue index;
+	};
+};
+
+struct var_preset {
+	struct field_access *atoms;
+	int atom_count;
+	char *full_name;
+	struct rvalue value;
+	bool applied;
+};
+
+enum dump_mode {
+	DUMP_NONE = 0,
+	DUMP_XLATED = 1,
+	DUMP_JITED = 2,
+};
+
 static struct env {
 	char **filenames;
 	int filename_cnt;
@@ -179,6 +227,13 @@ static struct env {
 	int files_skipped;
 	int progs_processed;
 	int progs_skipped;
+	int top_src_lines;
+	struct var_preset *presets;
+	int npresets;
+	char orig_cgroup[PATH_MAX];
+	char stat_cgroup[PATH_MAX];
+	int memory_peak_fd;
+	__u32 dump_mode;
 } env;
 
 static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args)
@@ -188,6 +243,22 @@ static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va
 	if (level == LIBBPF_DEBUG  && !env.debug)
 		return 0;
 	return vfprintf(stderr, format, args);
+}
+
+#define log_errno(fmt, ...) log_errno_aux(__FILE__, __LINE__, fmt, ##__VA_ARGS__)
+
+__attribute__((format(printf, 3, 4)))
+static int log_errno_aux(const char *file, int line, const char *fmt, ...)
+{
+	int err = -errno;
+	va_list ap;
+
+	va_start(ap, fmt);
+	fprintf(stderr, "%s:%d: ", file, line);
+	vfprintf(stderr, fmt, ap);
+	fprintf(stderr, " failed with error '%s'.\n", strerror(errno));
+	va_end(ap);
+	return err;
 }
 
 #ifndef VERISTAT_VERSION
@@ -201,11 +272,13 @@ const char argp_program_doc[] =
 "\n"
 "USAGE: veristat <obj-file> [<obj-file>...]\n"
 "   OR: veristat -C <baseline.csv> <comparison.csv>\n"
-"   OR: veristat -R <results.csv>\n";
+"   OR: veristat -R <results.csv>\n"
+"   OR: veristat -vl2 <to_analyze.bpf.o>\n";
 
 enum {
 	OPT_LOG_FIXED = 1000,
 	OPT_LOG_SIZE = 1001,
+	OPT_DUMP = 1002,
 };
 
 static const struct argp_option opts[] = {
@@ -213,7 +286,7 @@ static const struct argp_option opts[] = {
 	{ "version", 'V', NULL, 0, "Print version" },
 	{ "verbose", 'v', NULL, 0, "Verbose mode" },
 	{ "debug", 'd', NULL, 0, "Debug mode (turns on libbpf debug logging)" },
-	{ "log-level", 'l', "LEVEL", 0, "Verifier log level (default 0 for normal mode, 1 for verbose mode)" },
+	{ "log-level", 'l', "LEVEL", 0, "Verifier log level (default 0 for normal mode, 1 for verbose mode, 2 for full verification log)" },
 	{ "log-fixed", OPT_LOG_FIXED, NULL, 0, "Disable verifier log rotation" },
 	{ "log-size", OPT_LOG_SIZE, "BYTES", 0, "Customize verifier log size (default to 16MB)" },
 	{ "top-n", 'n', "N", 0, "Emit only up to first N results." },
@@ -228,16 +301,22 @@ static const struct argp_option opts[] = {
 	  "Force frequent BPF verifier state checkpointing (set BPF_F_TEST_STATE_FREQ program flag)" },
 	{ "test-reg-invariants", 'r', NULL, 0,
 	  "Force BPF verifier failure on register invariant violation (BPF_F_TEST_REG_INVARIANTS program flag)" },
+	{ "top-src-lines", 'S', "N", 0, "Emit N most frequent source code lines" },
+	{ "set-global-vars", 'G', "GLOBAL", 0, "Set global variables provided in the expression, for example \"var1 = 1\"" },
+	{ "dump", OPT_DUMP, "DUMP_MODE", OPTION_ARG_OPTIONAL, "Print BPF program dump (xlated, jited)" },
 	{},
 };
 
 static int parse_stats(const char *stats_str, struct stat_specs *specs);
 static int append_filter(struct filter **filters, int *cnt, const char *str);
 static int append_filter_file(const char *path);
+static int append_var_preset(struct var_preset **presets, int *cnt, const char *expr);
+static int append_var_preset_file(const char *filename);
+static int append_file(const char *path);
+static int append_file_from_file(const char *path);
 
 static error_t parse_arg(int key, char *arg, struct argp_state *state)
 {
-	void *tmp;
 	int err;
 
 	switch (key) {
@@ -309,6 +388,7 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 			fprintf(stderr, "invalid top N specifier: %s\n", arg);
 			argp_usage(state);
 		}
+		break;
 	case 'C':
 		env.comparison_mode = true;
 		break;
@@ -327,15 +407,44 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 			return err;
 		}
 		break;
+	case 'S':
+		errno = 0;
+		env.top_src_lines = strtol(arg, NULL, 10);
+		if (errno) {
+			fprintf(stderr, "invalid top lines N specifier: %s\n", arg);
+			argp_usage(state);
+		}
+		break;
+	case 'G': {
+		if (arg[0] == '@')
+			err = append_var_preset_file(arg + 1);
+		else
+			err = append_var_preset(&env.presets, &env.npresets, arg);
+		if (err) {
+			fprintf(stderr, "Failed to parse global variable presets: %s\n", arg);
+			return err;
+		}
+		break;
+	}
 	case ARGP_KEY_ARG:
-		tmp = realloc(env.filenames, (env.filename_cnt + 1) * sizeof(*env.filenames));
-		if (!tmp)
-			return -ENOMEM;
-		env.filenames = tmp;
-		env.filenames[env.filename_cnt] = strdup(arg);
-		if (!env.filenames[env.filename_cnt])
-			return -ENOMEM;
-		env.filename_cnt++;
+		if (arg[0] == '@')
+			err = append_file_from_file(arg + 1);
+		else
+			err = append_file(arg);
+		if (err) {
+			fprintf(stderr, "Failed to collect BPF object files: %d\n", err);
+			return err;
+		}
+		break;
+	case OPT_DUMP:
+		if (!arg || strcasecmp(arg, "xlated") == 0) {
+			env.dump_mode |= DUMP_XLATED;
+		} else if (strcasecmp(arg, "jited") == 0) {
+			env.dump_mode |= DUMP_JITED;
+		} else {
+			fprintf(stderr, "Unrecognized dump mode '%s'\n", arg);
+			return -EINVAL;
+		}
 		break;
 	default:
 		return ARGP_ERR_UNKNOWN;
@@ -606,7 +715,7 @@ static int append_filter_file(const char *path)
 	f = fopen(path, "r");
 	if (!f) {
 		err = -errno;
-		fprintf(stderr, "Failed to open filters in '%s': %d\n", path, err);
+		fprintf(stderr, "Failed to open filters in '%s': %s\n", path, strerror(-err));
 		return err;
 	}
 
@@ -629,19 +738,64 @@ cleanup:
 }
 
 static const struct stat_specs default_output_spec = {
-	.spec_cnt = 7,
+	.spec_cnt = 8,
 	.ids = {
 		FILE_NAME, PROG_NAME, VERDICT, DURATION,
-		TOTAL_INSNS, TOTAL_STATES, PEAK_STATES,
+		TOTAL_INSNS, TOTAL_STATES, SIZE, JITED_SIZE
 	},
 };
 
+static int append_file(const char *path)
+{
+	void *tmp;
+
+	tmp = realloc(env.filenames, (env.filename_cnt + 1) * sizeof(*env.filenames));
+	if (!tmp)
+		return -ENOMEM;
+	env.filenames = tmp;
+	env.filenames[env.filename_cnt] = strdup(path);
+	if (!env.filenames[env.filename_cnt])
+		return -ENOMEM;
+	env.filename_cnt++;
+	return 0;
+}
+
+static int append_file_from_file(const char *path)
+{
+	char buf[1024];
+	int err = 0;
+	FILE *f;
+
+	f = fopen(path, "r");
+	if (!f) {
+		err = -errno;
+		fprintf(stderr, "Failed to open object files list in '%s': %s\n",
+			path, strerror(errno));
+		return err;
+	}
+
+	while (fscanf(f, " %1023[^\n]\n", buf) == 1) {
+		/* lines starting with # are comments, skip them */
+		if (buf[0] == '\0' || buf[0] == '#')
+			continue;
+		err = append_file(buf);
+		if (err)
+			goto cleanup;
+	}
+
+cleanup:
+	fclose(f);
+	return err;
+}
+
 static const struct stat_specs default_csv_output_spec = {
-	.spec_cnt = 9,
+	.spec_cnt = 15,
 	.ids = {
 		FILE_NAME, PROG_NAME, VERDICT, DURATION,
 		TOTAL_INSNS, TOTAL_STATES, PEAK_STATES,
 		MAX_STATES_PER_INSN, MARK_READ_MAX_LEN,
+		SIZE, JITED_SIZE, PROG_TYPE, ATTACH_TYPE,
+		STACK, MEMORY_PEAK,
 	},
 };
 
@@ -677,6 +831,12 @@ static struct stat_def {
 	[PEAK_STATES] = { "Peak states", {"peak_states"}, },
 	[MAX_STATES_PER_INSN] = { "Max states per insn", {"max_states_per_insn"}, },
 	[MARK_READ_MAX_LEN] = { "Max mark read length", {"max_mark_read_len", "mark_read"}, },
+	[SIZE] = { "Program size", {"prog_size"}, },
+	[JITED_SIZE] = { "Jited size", {"prog_size_jited"}, },
+	[STACK] = {"Stack depth", {"stack_depth", "stack"}, },
+	[PROG_TYPE] = { "Program type", {"prog_type"}, },
+	[ATTACH_TYPE] = { "Attach type", {"attach_type", }, },
+	[MEMORY_PEAK] = { "Peak memory (MiB)", {"mem_peak", }, },
 };
 
 static bool parse_stat_id_var(const char *name, size_t len, int *id,
@@ -748,6 +908,18 @@ static bool is_asc_sym(char c)
 static bool is_desc_sym(char c)
 {
 	return c == 'v' || c == 'V' || c == '.' || c == '!' || c == '_';
+}
+
+static char *rtrim(char *str)
+{
+	int i;
+
+	for (i = strlen(str) - 1; i > 0; --i) {
+		if (!isspace(str[i]))
+			break;
+		str[i] = '\0';
+	}
+	return str;
 }
 
 static int parse_stat(const char *stat_name, struct stat_specs *specs)
@@ -824,7 +996,8 @@ static char verif_log_buf[64 * 1024];
 static int parse_verif_log(char * const buf, size_t buf_sz, struct verif_stats *s)
 {
 	const char *cur;
-	int pos, lines;
+	int pos, lines, sub_stack, cnt = 0;
+	char *state = NULL, *token, stack[512];
 
 	buf[buf_sz - 1] = '\0';
 
@@ -842,16 +1015,135 @@ static int parse_verif_log(char * const buf, size_t buf_sz, struct verif_stats *
 
 		if (1 == sscanf(cur, "verification time %ld usec\n", &s->stats[DURATION]))
 			continue;
-		if (6 == sscanf(cur, "processed %ld insns (limit %*d) max_states_per_insn %ld total_states %ld peak_states %ld mark_read %ld",
+		if (5 == sscanf(cur, "processed %ld insns (limit %*d) max_states_per_insn %ld total_states %ld peak_states %ld mark_read %ld",
 				&s->stats[TOTAL_INSNS],
 				&s->stats[MAX_STATES_PER_INSN],
 				&s->stats[TOTAL_STATES],
 				&s->stats[PEAK_STATES],
 				&s->stats[MARK_READ_MAX_LEN]))
 			continue;
+
+		if (1 == sscanf(cur, "stack depth %511s", stack))
+			continue;
+	}
+	while ((token = strtok_r(cnt++ ? NULL : stack, "+", &state))) {
+		if (sscanf(token, "%d", &sub_stack) == 0)
+			break;
+		s->stats[STACK] += sub_stack;
+	}
+	return 0;
+}
+
+struct line_cnt {
+	char *line;
+	int cnt;
+};
+
+static int str_cmp(const void *a, const void *b)
+{
+	const char **str1 = (const char **)a;
+	const char **str2 = (const char **)b;
+
+	return strcmp(*str1, *str2);
+}
+
+static int line_cnt_cmp(const void *a, const void *b)
+{
+	const struct line_cnt *a_cnt = (const struct line_cnt *)a;
+	const struct line_cnt *b_cnt = (const struct line_cnt *)b;
+
+	if (a_cnt->cnt != b_cnt->cnt)
+		return a_cnt->cnt > b_cnt->cnt ? -1 : 1;
+	return strcmp(a_cnt->line, b_cnt->line);
+}
+
+static int print_top_src_lines(char * const buf, size_t buf_sz, const char *prog_name)
+{
+	int lines_cap = 0;
+	int lines_size = 0;
+	char **lines = NULL;
+	char *line = NULL;
+	char *state;
+	struct line_cnt *freq = NULL;
+	struct line_cnt *cur;
+	int unique_lines;
+	int err = 0;
+	int i;
+
+	while ((line = strtok_r(line ? NULL : buf, "\n", &state))) {
+		if (strncmp(line, "; ", 2) != 0)
+			continue;
+		line += 2;
+
+		if (lines_size == lines_cap) {
+			char **tmp;
+
+			lines_cap = max(16, lines_cap * 2);
+			tmp = realloc(lines, lines_cap * sizeof(*tmp));
+			if (!tmp) {
+				err = -ENOMEM;
+				goto cleanup;
+			}
+			lines = tmp;
+		}
+		lines[lines_size] = line;
+		lines_size++;
 	}
 
-	return 0;
+	if (lines_size == 0)
+		goto cleanup;
+
+	qsort(lines, lines_size, sizeof(*lines), str_cmp);
+
+	freq = calloc(lines_size, sizeof(*freq));
+	if (!freq) {
+		err = -ENOMEM;
+		goto cleanup;
+	}
+
+	cur = freq;
+	cur->line = lines[0];
+	cur->cnt = 1;
+	for (i = 1; i < lines_size; ++i) {
+		if (strcmp(lines[i], cur->line) != 0) {
+			cur++;
+			cur->line = lines[i];
+			cur->cnt = 0;
+		}
+		cur->cnt++;
+	}
+	unique_lines = cur - freq + 1;
+
+	qsort(freq, unique_lines, sizeof(struct line_cnt), line_cnt_cmp);
+
+	printf("Top source lines (%s):\n", prog_name);
+	for (i = 0; i < min(unique_lines, env.top_src_lines); ++i) {
+		const char *src_code = freq[i].line;
+		const char *src_line = NULL;
+		char *split = strrchr(freq[i].line, '@');
+
+		if (split) {
+			src_line = split + 1;
+
+			while (*src_line && isspace(*src_line))
+				src_line++;
+
+			while (split > src_code && isspace(*split))
+				split--;
+			*split = '\0';
+		}
+
+		if (src_line)
+			printf("%5d: (%s)\t%s\n", freq[i].cnt, src_line, src_code);
+		else
+			printf("%5d: %s\n", freq[i].cnt, src_code);
+	}
+	printf("\n");
+
+cleanup:
+	free(freq);
+	free(lines);
+	return err;
 }
 
 static int guess_prog_type_by_ctx_name(const char *ctx_name,
@@ -909,6 +1201,41 @@ static int guess_prog_type_by_ctx_name(const char *ctx_name,
 	return -ESRCH;
 }
 
+/* Make sure only target program is referenced from struct_ops map,
+ * otherwise libbpf would automatically set autocreate for all
+ * referenced programs.
+ * See libbpf.c:bpf_object_adjust_struct_ops_autoload.
+ */
+static void mask_unrelated_struct_ops_progs(struct bpf_object *obj,
+					    struct bpf_map *map,
+					    struct bpf_program *prog)
+{
+	struct btf *btf = bpf_object__btf(obj);
+	const struct btf_type *t, *mt;
+	struct btf_member *m;
+	int i, moff;
+	size_t data_sz, ptr_sz = sizeof(void *);
+	void *data;
+
+	t = btf__type_by_id(btf, bpf_map__btf_value_type_id(map));
+	if (!btf_is_struct(t))
+		return;
+
+	data = bpf_map__initial_value(map, &data_sz);
+	for (i = 0; i < btf_vlen(t); i++) {
+		m = &btf_members(t)[i];
+		mt = btf__type_by_id(btf, m->type);
+		if (!btf_is_ptr(mt))
+			continue;
+		moff = m->offset / 8;
+		if (moff + ptr_sz > data_sz)
+			continue;
+		if (memcmp(data + moff, &prog, ptr_sz) == 0)
+			continue;
+		memset(data + moff, 0, ptr_sz);
+	}
+}
+
 static void fixup_obj(struct bpf_object *obj, struct bpf_program *prog, const char *filename)
 {
 	struct bpf_map *map;
@@ -923,6 +1250,10 @@ static void fixup_obj(struct bpf_object *obj, struct bpf_program *prog, const ch
 		case BPF_MAP_TYPE_TASK_STORAGE:
 		case BPF_MAP_TYPE_INODE_STORAGE:
 		case BPF_MAP_TYPE_CGROUP_STORAGE:
+		case BPF_MAP_TYPE_CGRP_STORAGE:
+			break;
+		case BPF_MAP_TYPE_STRUCT_OPS:
+			mask_unrelated_struct_ops_progs(obj, map, prog);
 			break;
 		default:
 			if (bpf_map__max_entries(map) == 0)
@@ -972,13 +1303,13 @@ static void fixup_obj(struct bpf_object *obj, struct bpf_program *prog, const ch
 			bpf_program__set_expected_attach_type(prog, attach_type);
 
 			if (!env.quiet) {
-				printf("Using guessed program type '%s' for %s/%s...\n",
+				fprintf(stderr, "Using guessed program type '%s' for %s/%s...\n",
 					libbpf_bpf_prog_type_str(prog_type),
 					filename, prog_name);
 			}
 		} else {
 			if (!env.quiet) {
-				printf("Failed to guess program type for freplace program with context type name '%s' for %s/%s. Consider using canonical type names to help veristat...\n",
+				fprintf(stderr, "Failed to guess program type for freplace program with context type name '%s' for %s/%s. Consider using canonical type names to help veristat...\n",
 					ctx_name, filename, prog_name);
 			}
 		}
@@ -987,15 +1318,304 @@ skip_freplace_fixup:
 	return;
 }
 
+static int max_verifier_log_size(void)
+{
+	const int SMALL_LOG_SIZE = UINT_MAX >> 8;
+	const int BIG_LOG_SIZE = UINT_MAX >> 2;
+	struct bpf_insn insns[] = {
+		{ .code = BPF_ALU | BPF_MOV | BPF_X, .dst_reg = BPF_REG_0, },
+		{ .code  = BPF_JMP | BPF_EXIT, },
+	};
+	LIBBPF_OPTS(bpf_prog_load_opts, opts,
+		    .log_size = BIG_LOG_SIZE,
+		    .log_buf = (void *)-1,
+		    .log_level = 4
+	);
+	int ret, insn_cnt = ARRAY_SIZE(insns);
+	static int log_size;
+
+	if (log_size != 0)
+		return log_size;
+
+	ret = bpf_prog_load(BPF_PROG_TYPE_TRACEPOINT, NULL, "GPL", insns, insn_cnt, &opts);
+
+	if (ret == -EFAULT)
+		log_size = BIG_LOG_SIZE;
+	else /* ret == -EINVAL, big log size is not supported by the verifier */
+		log_size = SMALL_LOG_SIZE;
+
+	return log_size;
+}
+
+static bool output_stat_enabled(int id)
+{
+	int i;
+
+	for (i = 0; i < env.output_spec.spec_cnt; i++)
+		if (env.output_spec.ids[i] == id)
+			return true;
+	return false;
+}
+
+__attribute__((format(printf, 2, 3)))
+static int write_one_line(const char *file, const char *fmt, ...)
+{
+	int err, saved_errno;
+	va_list ap;
+	FILE *f;
+
+	f = fopen(file, "w");
+	if (!f)
+		return -1;
+
+	va_start(ap, fmt);
+	errno = 0;
+	err = vfprintf(f, fmt, ap);
+	saved_errno = errno;
+	va_end(ap);
+	fclose(f);
+	errno = saved_errno;
+	return err < 0 ? -1 : 0;
+}
+
+__attribute__((format(scanf, 3, 4)))
+static int scanf_one_line(const char *file, int fields_expected, const char *fmt, ...)
+{
+	int res = 0, saved_errno = 0;
+	char *line = NULL;
+	size_t line_len;
+	va_list ap;
+	FILE *f;
+
+	f = fopen(file, "r");
+	if (!f)
+		return -1;
+
+	va_start(ap, fmt);
+	while (getline(&line, &line_len, f) > 0) {
+		res = vsscanf(line, fmt, ap);
+		if (res == fields_expected)
+			goto out;
+	}
+	if (ferror(f)) {
+		saved_errno = errno;
+		res = -1;
+	}
+
+out:
+	va_end(ap);
+	free(line);
+	fclose(f);
+	errno = saved_errno;
+	return res;
+}
+
+static void destroy_stat_cgroup(void)
+{
+	char buf[PATH_MAX];
+	int err;
+
+	close(env.memory_peak_fd);
+
+	if (env.orig_cgroup[0]) {
+		snprintf(buf, sizeof(buf), "%s/cgroup.procs", env.orig_cgroup);
+		err = write_one_line(buf, "%d\n", getpid());
+		if (err < 0)
+			log_errno("moving self to original cgroup %s\n", env.orig_cgroup);
+	}
+
+	if (env.stat_cgroup[0]) {
+		err = rmdir(env.stat_cgroup);
+		if (err < 0)
+			log_errno("deletion of cgroup %s", env.stat_cgroup);
+	}
+
+	env.memory_peak_fd = -1;
+	env.orig_cgroup[0] = 0;
+	env.stat_cgroup[0] = 0;
+}
+
+/*
+ * Creates a cgroup at /sys/fs/cgroup/veristat-accounting-<pid>,
+ * moves current process to this cgroup.
+ */
+static void create_stat_cgroup(void)
+{
+	char cgroup_fs_mount[4096];
+	char buf[4096];
+	int err;
+
+	env.memory_peak_fd = -1;
+
+	if (!output_stat_enabled(MEMORY_PEAK))
+		return;
+
+	err = scanf_one_line("/proc/self/mounts", 2, "%*s %4095s cgroup2 %s",
+			     cgroup_fs_mount, buf);
+	if (err != 2) {
+		if (err < 0)
+			log_errno("reading /proc/self/mounts");
+		else if (!env.quiet)
+			fprintf(stderr, "Can't find cgroupfs v2 mount point.\n");
+		goto err_out;
+	}
+
+	/* cgroup-v2.rst promises the line "0::<group>" for cgroups v2 */
+	err = scanf_one_line("/proc/self/cgroup", 1, "0::%4095s", buf);
+	if (err != 1) {
+		if (err < 0)
+			log_errno("reading /proc/self/cgroup");
+		else if (!env.quiet)
+			fprintf(stderr, "Can't infer veristat process cgroup.");
+		goto err_out;
+	}
+
+	snprintf(env.orig_cgroup, sizeof(env.orig_cgroup), "%s/%s", cgroup_fs_mount, buf);
+
+	snprintf(buf, sizeof(buf), "%s/veristat-accounting-%d", cgroup_fs_mount, getpid());
+	err = mkdir(buf, 0777);
+	if (err < 0) {
+		log_errno("creation of cgroup %s", buf);
+		goto err_out;
+	}
+	strcpy(env.stat_cgroup, buf);
+
+	snprintf(buf, sizeof(buf), "%s/cgroup.procs", env.stat_cgroup);
+	err = write_one_line(buf, "%d\n", getpid());
+	if (err < 0) {
+		log_errno("entering cgroup %s", buf);
+		goto err_out;
+	}
+
+	snprintf(buf, sizeof(buf), "%s/memory.peak", env.stat_cgroup);
+	env.memory_peak_fd = open(buf, O_RDWR | O_APPEND);
+	if (env.memory_peak_fd < 0) {
+		log_errno("opening %s", buf);
+		goto err_out;
+	}
+
+	return;
+
+err_out:
+	if (!env.quiet)
+		fprintf(stderr, "Memory usage metric unavailable.\n");
+	destroy_stat_cgroup();
+}
+
+/* Current value of /sys/fs/cgroup/veristat-accounting-<pid>/memory.peak */
+static long cgroup_memory_peak(void)
+{
+	long err, memory_peak;
+	char buf[32];
+
+	if (env.memory_peak_fd < 0)
+		return -1;
+
+	err = pread(env.memory_peak_fd, buf, sizeof(buf) - 1, 0);
+	if (err <= 0) {
+		log_errno("pread(%s/memory.peak)", env.stat_cgroup);
+		return -1;
+	}
+
+	buf[err] = 0;
+	errno = 0;
+	memory_peak = strtoll(buf, NULL, 10);
+	if (errno) {
+		log_errno("%s/memory.peak:strtoll(%s)", env.stat_cgroup, buf);
+		return -1;
+	}
+
+	return memory_peak;
+}
+
+static int reset_stat_cgroup(void)
+{
+	char buf[] = "r\n";
+	int err;
+
+	if (env.memory_peak_fd < 0)
+		return -1;
+
+	err = pwrite(env.memory_peak_fd, buf, sizeof(buf), 0);
+	if (err <= 0) {
+		log_errno("pwrite(%s/memory.peak)", env.stat_cgroup);
+		return -1;
+	}
+	return 0;
+}
+
+static int parse_rvalue(const char *val, struct rvalue *rvalue)
+{
+	long long value;
+	char *val_end;
+
+	if (val[0] == '-' || isdigit(val[0])) {
+		/* must be a number */
+		errno = 0;
+		value = strtoll(val, &val_end, 0);
+		if (errno == ERANGE) {
+			errno = 0;
+			value = strtoull(val, &val_end, 0);
+		}
+		if (errno || *val_end != '\0') {
+			fprintf(stderr, "Failed to parse value '%s'\n", val);
+			return -EINVAL;
+		}
+		rvalue->ivalue = value;
+		rvalue->type = INTEGRAL;
+	} else {
+		/* if not a number, consider it enum value */
+		rvalue->svalue = strdup(val);
+		if (!rvalue->svalue)
+			return -ENOMEM;
+		rvalue->type = ENUMERATOR;
+	}
+	return 0;
+}
+
+static void dump(__u32 prog_id, enum dump_mode mode, const char *file_name, const char *prog_name)
+{
+	char command[64], buf[4096];
+	FILE *fp;
+	int status;
+
+	status = system("command -v bpftool > /dev/null 2>&1");
+	if (status != 0) {
+		fprintf(stderr, "bpftool is not available, can't print program dump\n");
+		return;
+	}
+	snprintf(command, sizeof(command), "bpftool prog dump %s id %u",
+		 mode == DUMP_JITED ? "jited" : "xlated", prog_id);
+	fp = popen(command, "r");
+	if (!fp) {
+		fprintf(stderr, "bpftool failed with error: %d\n", errno);
+		return;
+	}
+
+	printf("DUMP (%s) %s/%s:\n", mode == DUMP_JITED ? "JITED" : "XLATED", file_name, prog_name);
+	while (fgets(buf, sizeof(buf), fp))
+		fputs(buf, stdout);
+	fprintf(stdout, "\n");
+
+	if (ferror(fp))
+		fprintf(stderr, "Failed to dump BPF prog with error: %d\n", errno);
+
+	pclose(fp);
+}
+
 static int process_prog(const char *filename, struct bpf_object *obj, struct bpf_program *prog)
 {
 	const char *base_filename = basename(strdupa(filename));
 	const char *prog_name = bpf_program__name(prog);
+	long mem_peak_a, mem_peak_b, mem_peak = -1;
 	char *buf;
 	int buf_sz, log_level;
 	struct verif_stats *stats;
-	int err = 0;
+	struct bpf_prog_info info;
+	__u32 info_len = sizeof(info);
+	int err = 0, cgroup_err;
 	void *tmp;
+	int fd;
 
 	if (!should_process_file_prog(base_filename, bpf_program__name(prog))) {
 		env.progs_skipped++;
@@ -1009,13 +1629,16 @@ static int process_prog(const char *filename, struct bpf_object *obj, struct bpf
 	stats = &env.prog_stats[env.prog_stat_cnt++];
 	memset(stats, 0, sizeof(*stats));
 
-	if (env.verbose) {
-		buf_sz = env.log_size ? env.log_size : 16 * 1024 * 1024;
+	if (env.verbose || env.top_src_lines > 0) {
+		buf_sz = env.log_size ? env.log_size : max_verifier_log_size();
 		buf = malloc(buf_sz);
 		if (!buf)
 			return -ENOMEM;
 		/* ensure we always request stats */
 		log_level = env.log_level | 4 | (env.log_fixed ? 8 : 0);
+		/* --top-src-lines needs verifier log */
+		if (env.top_src_lines > 0 && env.log_level == 0)
+			log_level |= 2;
 	} else {
 		buf = verif_log_buf;
 		buf_sz = sizeof(verif_log_buf);
@@ -1035,12 +1658,35 @@ static int process_prog(const char *filename, struct bpf_object *obj, struct bpf
 	if (env.force_reg_invariants)
 		bpf_program__set_flags(prog, bpf_program__flags(prog) | BPF_F_TEST_REG_INVARIANTS);
 
-	err = bpf_object__load(obj);
+	err = bpf_object__prepare(obj);
+	if (!err) {
+		cgroup_err = reset_stat_cgroup();
+		mem_peak_a = cgroup_memory_peak();
+		err = bpf_object__load(obj);
+		mem_peak_b = cgroup_memory_peak();
+		if (!cgroup_err && mem_peak_a >= 0 && mem_peak_b >= 0)
+			mem_peak = mem_peak_b - mem_peak_a;
+	}
 	env.progs_processed++;
 
 	stats->file_name = strdup(base_filename);
 	stats->prog_name = strdup(bpf_program__name(prog));
 	stats->stats[VERDICT] = err == 0; /* 1 - success, 0 - failure */
+	stats->stats[SIZE] = bpf_program__insn_cnt(prog);
+	stats->stats[PROG_TYPE] = bpf_program__type(prog);
+	stats->stats[ATTACH_TYPE] = bpf_program__expected_attach_type(prog);
+	stats->stats[MEMORY_PEAK] = mem_peak < 0 ? -1 : mem_peak / (1024 * 1024);
+
+	memset(&info, 0, info_len);
+	fd = bpf_program__fd(prog);
+	if (fd > 0 && bpf_prog_get_info_by_fd(fd, &info, &info_len) == 0) {
+		stats->stats[JITED_SIZE] = info.jited_prog_len;
+		if (env.dump_mode & DUMP_JITED)
+			dump(info.id, DUMP_JITED, base_filename, prog_name);
+		if (env.dump_mode & DUMP_XLATED)
+			dump(info.id, DUMP_XLATED, base_filename, prog_name);
+	}
+
 	parse_verif_log(buf, buf_sz, stats);
 
 	if (env.verbose) {
@@ -1048,12 +1694,490 @@ static int process_prog(const char *filename, struct bpf_object *obj, struct bpf
 		       filename, prog_name, stats->stats[DURATION],
 		       err ? "failure" : "success", buf);
 	}
+	if (env.top_src_lines > 0)
+		print_top_src_lines(buf, buf_sz, stats->prog_name);
 
 	if (verif_log_buf != buf)
 		free(buf);
 
 	return 0;
-};
+}
+
+static int append_preset_atom(struct var_preset *preset, char *value, bool is_index)
+{
+	struct field_access *tmp;
+	int i = preset->atom_count;
+	int err;
+
+	tmp = reallocarray(preset->atoms, i + 1, sizeof(*preset->atoms));
+	if (!tmp)
+		return -ENOMEM;
+
+	preset->atoms = tmp;
+	preset->atom_count++;
+
+	if (is_index) {
+		preset->atoms[i].type = ARRAY_INDEX;
+		err = parse_rvalue(value, &preset->atoms[i].index);
+		if (err)
+			return err;
+	} else {
+		preset->atoms[i].type = FIELD_NAME;
+		preset->atoms[i].name = strdup(value);
+		if (!preset->atoms[i].name)
+			return -ENOMEM;
+	}
+	return 0;
+}
+
+static int parse_var_atoms(const char *full_var, struct var_preset *preset)
+{
+	char expr[256], var[256], *name, *saveptr;
+	int n, len, off, err;
+
+	snprintf(expr, sizeof(expr), "%s", full_var);
+	preset->atom_count = 0;
+	while ((name = strtok_r(preset->atom_count ? NULL : expr, ".", &saveptr))) {
+		len = strlen(name);
+		/* parse variable name */
+		if (sscanf(name, "%[a-zA-Z0-9_] %n", var, &off) != 1) {
+			fprintf(stderr, "Can't parse %s\n", name);
+			return -EINVAL;
+		}
+		err = append_preset_atom(preset, var, false);
+		if (err)
+			return err;
+
+		/* parse optional array indexes */
+		while (off < len) {
+			if (sscanf(name + off, " [ %[a-zA-Z0-9_] ] %n", var, &n) != 1) {
+				fprintf(stderr, "Can't parse %s as index\n", name + off);
+				return -EINVAL;
+			}
+			err = append_preset_atom(preset, var, true);
+			if (err)
+				return err;
+			off += n;
+		}
+	}
+	return 0;
+}
+
+static int append_var_preset(struct var_preset **presets, int *cnt, const char *expr)
+{
+	void *tmp;
+	struct var_preset *cur;
+	char var[256], val[256];
+	int n, err;
+
+	tmp = realloc(*presets, (*cnt + 1) * sizeof(**presets));
+	if (!tmp)
+		return -ENOMEM;
+	*presets = tmp;
+	cur = &(*presets)[*cnt];
+	memset(cur, 0, sizeof(*cur));
+	(*cnt)++;
+
+	if (sscanf(expr, " %[][a-zA-Z0-9_. ] = %s %n", var, val, &n) != 2 || n != strlen(expr)) {
+		fprintf(stderr, "Failed to parse expression '%s'\n", expr);
+		return -EINVAL;
+	}
+	/* Remove trailing spaces from var, as scanf may add those */
+	rtrim(var);
+
+	err = parse_rvalue(val, &cur->value);
+	if (err)
+		return err;
+
+	cur->full_name = strdup(var);
+	if (!cur->full_name)
+		return -ENOMEM;
+
+	err = parse_var_atoms(var, cur);
+	if (err)
+		return err;
+
+	return 0;
+}
+
+static int append_var_preset_file(const char *filename)
+{
+	char buf[1024];
+	FILE *f;
+	int err = 0;
+
+	f = fopen(filename, "rt");
+	if (!f) {
+		err = -errno;
+		fprintf(stderr, "Failed to open presets in '%s': %s\n", filename, strerror(-err));
+		return -EINVAL;
+	}
+
+	while (fscanf(f, " %1023[^\n]\n", buf) == 1) {
+		if (buf[0] == '\0' || buf[0] == '#')
+			continue;
+
+		err = append_var_preset(&env.presets, &env.npresets, buf);
+		if (err)
+			goto cleanup;
+	}
+
+cleanup:
+	fclose(f);
+	return err;
+}
+
+static bool is_signed_type(const struct btf_type *t)
+{
+	if (btf_is_int(t))
+		return btf_int_encoding(t) & BTF_INT_SIGNED;
+	if (btf_is_any_enum(t))
+		return btf_kflag(t);
+	return true;
+}
+
+static int enum_value_from_name(const struct btf *btf, const struct btf_type *t,
+				const char *evalue, long long *retval)
+{
+	if (btf_is_enum(t)) {
+		struct btf_enum *e = btf_enum(t);
+		int i, n = btf_vlen(t);
+
+		for (i = 0; i < n; ++i, ++e) {
+			const char *cur_name = btf__name_by_offset(btf, e->name_off);
+
+			if (strcmp(cur_name, evalue) == 0) {
+				*retval = e->val;
+				return 0;
+			}
+		}
+	} else if (btf_is_enum64(t)) {
+		struct btf_enum64 *e = btf_enum64(t);
+		int i, n = btf_vlen(t);
+
+		for (i = 0; i < n; ++i, ++e) {
+			const char *cur_name = btf__name_by_offset(btf, e->name_off);
+			__u64 value =  btf_enum64_value(e);
+
+			if (strcmp(cur_name, evalue) == 0) {
+				*retval = value;
+				return 0;
+			}
+		}
+	}
+	return -EINVAL;
+}
+
+static bool is_preset_supported(const struct btf_type *t)
+{
+	return btf_is_int(t) || btf_is_enum(t) || btf_is_enum64(t);
+}
+
+static int find_enum_value(const struct btf *btf, const char *name, long long *value)
+{
+	const struct btf_type *t;
+	int cnt, i;
+	long long lvalue;
+
+	cnt = btf__type_cnt(btf);
+	for (i = 1; i != cnt; ++i) {
+		t = btf__type_by_id(btf, i);
+
+		if (!btf_is_any_enum(t))
+			continue;
+
+		if (enum_value_from_name(btf, t, name, &lvalue) == 0) {
+			*value = lvalue;
+			return 0;
+		}
+	}
+	return -ESRCH;
+}
+
+static int resolve_rvalue(struct btf *btf, const struct rvalue *rvalue, long long *result)
+{
+	int err = 0;
+
+	switch (rvalue->type) {
+	case INTEGRAL:
+		*result = rvalue->ivalue;
+		return 0;
+	case ENUMERATOR:
+		err = find_enum_value(btf, rvalue->svalue, result);
+		if (err) {
+			fprintf(stderr, "Can't resolve enum value %s\n", rvalue->svalue);
+			return err;
+		}
+		return 0;
+	default:
+		fprintf(stderr, "Unknown rvalue type\n");
+		return -EOPNOTSUPP;
+	}
+	return 0;
+}
+
+static int adjust_var_secinfo_array(struct btf *btf, int tid, struct field_access *atom,
+				    const char *array_name, struct btf_var_secinfo *sinfo)
+{
+	const struct btf_type *t;
+	struct btf_array *barr;
+	long long idx;
+	int err;
+
+	tid = btf__resolve_type(btf, tid);
+	t = btf__type_by_id(btf, tid);
+	if (!btf_is_array(t)) {
+		fprintf(stderr, "Array index is not expected for %s\n",
+			array_name);
+		return -EINVAL;
+	}
+	barr = btf_array(t);
+	err = resolve_rvalue(btf, &atom->index, &idx);
+	if (err)
+		return err;
+	if (idx < 0 || idx >= barr->nelems) {
+		fprintf(stderr, "Array index %lld is out of bounds [0, %u): %s\n",
+			idx, barr->nelems, array_name);
+		return -EINVAL;
+	}
+	sinfo->size = btf__resolve_size(btf, barr->type);
+	sinfo->offset += sinfo->size * idx;
+	sinfo->type = btf__resolve_type(btf, barr->type);
+	return 0;
+}
+
+static int adjust_var_secinfo_member(const struct btf *btf,
+				     const struct btf_type *parent_type,
+				     __u32 parent_offset,
+				     const char *member_name,
+				     struct btf_var_secinfo *sinfo)
+{
+	int i;
+
+	if (!btf_is_composite(parent_type)) {
+		fprintf(stderr, "Can't resolve field %s for non-composite type\n", member_name);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < btf_vlen(parent_type); ++i) {
+		const struct btf_member *member;
+		const struct btf_type *member_type;
+		int tid, off;
+
+		member = btf_members(parent_type) + i;
+		tid =  btf__resolve_type(btf, member->type);
+		if (tid < 0)
+			return -EINVAL;
+
+		member_type = btf__type_by_id(btf, tid);
+		off = parent_offset + member->offset;
+		if (member->name_off) {
+			const char *name = btf__name_by_offset(btf, member->name_off);
+
+			if (strcmp(member_name, name) == 0) {
+				if (btf_member_bitfield_size(parent_type, i) != 0) {
+					fprintf(stderr, "Bitfield presets are not supported %s\n",
+						name);
+					return -EINVAL;
+				}
+				sinfo->offset += off / 8;
+				sinfo->type = tid;
+				sinfo->size = member_type->size;
+				return 0;
+			}
+		} else if (btf_is_composite(member_type)) {
+			int err;
+
+			err = adjust_var_secinfo_member(btf, member_type, off,
+							member_name, sinfo);
+			if (!err)
+				return 0;
+		}
+	}
+
+	return -ESRCH;
+}
+
+static int adjust_var_secinfo(struct btf *btf, const struct btf_type *t,
+			      struct btf_var_secinfo *sinfo, struct var_preset *preset)
+{
+	const struct btf_type *base_type;
+	const char *prev_name;
+	int err, i;
+	int tid;
+
+	assert(preset->atom_count > 0);
+	assert(preset->atoms[0].type == FIELD_NAME);
+
+	tid = btf__resolve_type(btf, t->type);
+	base_type = btf__type_by_id(btf, tid);
+	prev_name = preset->atoms[0].name;
+
+	for (i = 1; i < preset->atom_count; ++i) {
+		struct field_access *atom = preset->atoms + i;
+
+		switch (atom->type) {
+		case ARRAY_INDEX:
+			err = adjust_var_secinfo_array(btf, tid, atom, prev_name, sinfo);
+			break;
+		case FIELD_NAME:
+			err = adjust_var_secinfo_member(btf, base_type, 0, atom->name, sinfo);
+			if (err == -ESRCH)
+				fprintf(stderr, "Can't find '%s'\n", atom->name);
+			prev_name = atom->name;
+			break;
+		default:
+			fprintf(stderr, "Unknown field_access type\n");
+			return -EOPNOTSUPP;
+		}
+		if (err)
+			return err;
+		base_type = btf__type_by_id(btf, sinfo->type);
+		tid = sinfo->type;
+	}
+
+	return 0;
+}
+
+static int set_global_var(struct bpf_object *obj, struct btf *btf,
+			  struct bpf_map *map, struct btf_var_secinfo *sinfo,
+			  struct var_preset *preset)
+{
+	const struct btf_type *base_type;
+	void *ptr;
+	long long value = preset->value.ivalue;
+	size_t size;
+
+	base_type = btf__type_by_id(btf, btf__resolve_type(btf, sinfo->type));
+	if (!base_type) {
+		fprintf(stderr, "Failed to resolve type %d\n", sinfo->type);
+		return -EINVAL;
+	}
+	if (!is_preset_supported(base_type)) {
+		fprintf(stderr, "Can't set %s. Only ints and enums are supported\n",
+			preset->full_name);
+		return -EINVAL;
+	}
+
+	if (preset->value.type == ENUMERATOR) {
+		if (btf_is_any_enum(base_type)) {
+			if (enum_value_from_name(btf, base_type, preset->value.svalue, &value)) {
+				fprintf(stderr,
+					"Failed to find integer value for enum element %s\n",
+					preset->value.svalue);
+				return -EINVAL;
+			}
+		} else {
+			fprintf(stderr, "Value %s is not supported for type %s\n",
+				preset->value.svalue,
+				btf__name_by_offset(btf, base_type->name_off));
+			return -EINVAL;
+		}
+	}
+
+	/* Check if value fits into the target variable size */
+	if  (sinfo->size < sizeof(value)) {
+		bool is_signed = is_signed_type(base_type);
+		__u32 unsigned_bits = sinfo->size * 8 - (is_signed ? 1 : 0);
+		long long max_val = 1ll << unsigned_bits;
+
+		if (value >= max_val || value < -max_val) {
+			fprintf(stderr,
+				"Variable %s value %lld is out of range [%lld; %lld]\n",
+				btf__name_by_offset(btf, base_type->name_off), value,
+				is_signed ? -max_val : 0, max_val - 1);
+			return -EINVAL;
+		}
+	}
+
+	ptr = bpf_map__initial_value(map, &size);
+	if (!ptr || sinfo->offset + sinfo->size > size)
+		return -EINVAL;
+
+	if (__BYTE_ORDER == __LITTLE_ENDIAN) {
+		memcpy(ptr + sinfo->offset, &value, sinfo->size);
+	} else { /* __BYTE_ORDER == __BIG_ENDIAN */
+		__u8 src_offset = sizeof(value) - sinfo->size;
+
+		memcpy(ptr + sinfo->offset, (void *)&value + src_offset, sinfo->size);
+	}
+	return 0;
+}
+
+static int set_global_vars(struct bpf_object *obj, struct var_preset *presets, int npresets)
+{
+	struct btf_var_secinfo *sinfo;
+	const char *sec_name;
+	const struct btf_type *t;
+	struct bpf_map *map;
+	struct btf *btf;
+	int i, j, k, n, cnt, err = 0;
+
+	if (npresets == 0)
+		return 0;
+
+	btf = bpf_object__btf(obj);
+	if (!btf)
+		return -EINVAL;
+
+	cnt = btf__type_cnt(btf);
+	for (i = 1; i != cnt; ++i) {
+		t = btf__type_by_id(btf, i);
+
+		if (!btf_is_datasec(t))
+			continue;
+
+		sinfo = btf_var_secinfos(t);
+		sec_name = btf__name_by_offset(btf, t->name_off);
+		map = bpf_object__find_map_by_name(obj, sec_name);
+		if (!map)
+			continue;
+
+		n = btf_vlen(t);
+		for (j = 0; j < n; ++j, ++sinfo) {
+			const struct btf_type *var_type = btf__type_by_id(btf, sinfo->type);
+			const char *var_name;
+
+			if (!btf_is_var(var_type))
+				continue;
+
+			var_name = btf__name_by_offset(btf, var_type->name_off);
+
+			for (k = 0; k < npresets; ++k) {
+				struct btf_var_secinfo tmp_sinfo;
+
+				if (strcmp(var_name, presets[k].atoms[0].name) != 0)
+					continue;
+
+				if (presets[k].applied) {
+					fprintf(stderr, "Variable %s is set more than once",
+						var_name);
+					return -EINVAL;
+				}
+				tmp_sinfo = *sinfo;
+				err = adjust_var_secinfo(btf, var_type,
+							 &tmp_sinfo, presets + k);
+				if (err)
+					return err;
+
+				err = set_global_var(obj, btf, map, &tmp_sinfo, presets + k);
+				if (err)
+					return err;
+
+				presets[k].applied = true;
+			}
+		}
+	}
+	for (i = 0; i < npresets; ++i) {
+		if (!presets[i].applied) {
+			fprintf(stderr, "Global variable preset %s has not been applied\n",
+				presets[i].full_name);
+			err = -EINVAL;
+		}
+		presets[i].applied = false;
+	}
+	return err;
+}
 
 static int process_obj(const char *filename)
 {
@@ -1104,6 +2228,11 @@ static int process_obj(const char *filename)
 	if (prog_cnt == 1) {
 		prog = bpf_object__next_program(obj, NULL);
 		bpf_program__set_autoload(prog, true);
+		err = set_global_vars(obj, env.presets, env.npresets);
+		if (err) {
+			fprintf(stderr, "Failed to set global variables %d\n", err);
+			goto cleanup;
+		}
 		process_prog(filename, obj, prog);
 		goto cleanup;
 	}
@@ -1115,6 +2244,12 @@ static int process_obj(const char *filename)
 		if (!tobj) {
 			err = -errno;
 			fprintf(stderr, "Failed to open '%s': %d\n", filename, err);
+			goto cleanup;
+		}
+
+		err = set_global_vars(tobj, env.presets, env.npresets);
+		if (err) {
+			fprintf(stderr, "Failed to set global variables %d\n", err);
 			goto cleanup;
 		}
 
@@ -1152,12 +2287,18 @@ static int cmp_stat(const struct verif_stats *s1, const struct verif_stats *s2,
 	case PROG_NAME:
 		cmp = strcmp(s1->prog_name, s2->prog_name);
 		break;
+	case ATTACH_TYPE:
+	case PROG_TYPE:
+	case SIZE:
+	case JITED_SIZE:
+	case STACK:
 	case VERDICT:
 	case DURATION:
 	case TOTAL_INSNS:
 	case TOTAL_STATES:
 	case PEAK_STATES:
 	case MAX_STATES_PER_INSN:
+	case MEMORY_PEAK:
 	case MARK_READ_MAX_LEN: {
 		long v1 = s1->stats[id];
 		long v2 = s2->stats[id];
@@ -1366,12 +2507,28 @@ static void prepare_value(const struct verif_stats *s, enum stat_id id,
 		else
 			*str = s->stats[VERDICT] ? "success" : "failure";
 		break;
+	case ATTACH_TYPE:
+		if (!s)
+			*str = "N/A";
+		else
+			*str = libbpf_bpf_attach_type_str(s->stats[ATTACH_TYPE]) ?: "N/A";
+		break;
+	case PROG_TYPE:
+		if (!s)
+			*str = "N/A";
+		else
+			*str = libbpf_bpf_prog_type_str(s->stats[PROG_TYPE]) ?: "N/A";
+		break;
 	case DURATION:
 	case TOTAL_INSNS:
 	case TOTAL_STATES:
 	case PEAK_STATES:
 	case MAX_STATES_PER_INSN:
 	case MARK_READ_MAX_LEN:
+	case STACK:
+	case SIZE:
+	case JITED_SIZE:
+	case MEMORY_PEAK:
 		*val = s ? s->stats[id] : 0;
 		break;
 	default:
@@ -1455,7 +2612,11 @@ static int parse_stat_value(const char *str, enum stat_id id, struct verif_stats
 	case TOTAL_STATES:
 	case PEAK_STATES:
 	case MAX_STATES_PER_INSN:
-	case MARK_READ_MAX_LEN: {
+	case MARK_READ_MAX_LEN:
+	case SIZE:
+	case JITED_SIZE:
+	case MEMORY_PEAK:
+	case STACK: {
 		long val;
 		int err, n;
 
@@ -1466,6 +2627,42 @@ static int parse_stat_value(const char *str, enum stat_id id, struct verif_stats
 		}
 
 		st->stats[id] = val;
+		break;
+	}
+	case PROG_TYPE: {
+		enum bpf_prog_type prog_type = 0;
+		const char *type;
+
+		while ((type = libbpf_bpf_prog_type_str(prog_type)))  {
+			if (strcmp(type, str) == 0) {
+				st->stats[id] = prog_type;
+				break;
+			}
+			prog_type++;
+		}
+
+		if (!type) {
+			fprintf(stderr, "Unrecognized prog type %s\n", str);
+			return -EINVAL;
+		}
+		break;
+	}
+	case ATTACH_TYPE: {
+		enum bpf_attach_type attach_type = 0;
+		const char *type;
+
+		while ((type = libbpf_bpf_attach_type_str(attach_type)))  {
+			if (strcmp(type, str) == 0) {
+				st->stats[id] = attach_type;
+				break;
+			}
+			attach_type++;
+		}
+
+		if (!type) {
+			fprintf(stderr, "Unrecognized attach type %s\n", str);
+			return -EINVAL;
+		}
 		break;
 	}
 	default:
@@ -2056,7 +3253,7 @@ static void output_prog_stats(void)
 
 static int handle_verif_mode(void)
 {
-	int i, err;
+	int i, err = 0;
 
 	if (env.filename_cnt == 0) {
 		fprintf(stderr, "Please provide path to BPF object file!\n\n");
@@ -2064,11 +3261,12 @@ static int handle_verif_mode(void)
 		return -EINVAL;
 	}
 
+	create_stat_cgroup();
 	for (i = 0; i < env.filename_cnt; i++) {
 		err = process_obj(env.filenames[i]);
 		if (err) {
 			fprintf(stderr, "Failed to process '%s': %d\n", env.filenames[i], err);
-			return err;
+			goto out;
 		}
 	}
 
@@ -2076,7 +3274,9 @@ static int handle_verif_mode(void)
 
 	output_prog_stats();
 
-	return 0;
+out:
+	destroy_stat_cgroup();
+	return err;
 }
 
 static int handle_replay_mode(void)
@@ -2106,7 +3306,7 @@ static int handle_replay_mode(void)
 
 int main(int argc, char **argv)
 {
-	int err = 0, i;
+	int err = 0, i, j;
 
 	if (argp_parse(&argp, argc, argv, 0, NULL, NULL))
 		return 1;
@@ -2164,5 +3364,21 @@ int main(int argc, char **argv)
 		free(env.deny_filters[i].prog_glob);
 	}
 	free(env.deny_filters);
+	for (i = 0; i < env.npresets; ++i) {
+		free(env.presets[i].full_name);
+		for (j = 0; j < env.presets[i].atom_count; ++j) {
+			switch (env.presets[i].atoms[j].type) {
+			case FIELD_NAME:
+				free(env.presets[i].atoms[j].name);
+				break;
+			case ARRAY_INDEX:
+				if (env.presets[i].atoms[j].index.type == ENUMERATOR)
+					free(env.presets[i].atoms[j].index.svalue);
+				break;
+			}
+		}
+		free(env.presets[i].atoms);
+	}
+	free(env.presets);
 	return -err;
 }

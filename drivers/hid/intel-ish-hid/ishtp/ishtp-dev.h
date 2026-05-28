@@ -47,6 +47,9 @@
 
 #define	MAX_DMA_DELAY	20
 
+/* 300ms to get resume response */
+#define WAIT_FOR_RESUME_ACK_MS		300
+
 /* ISHTP device states */
 enum ishtp_dev_state {
 	ISHTP_DEV_INITIALIZING = 0,
@@ -57,7 +60,6 @@ enum ishtp_dev_state {
 	ISHTP_DEV_POWER_DOWN,
 	ISHTP_DEV_POWER_UP
 };
-const char *ishtp_dev_state_str(int state);
 
 struct ishtp_cl;
 
@@ -138,6 +140,13 @@ struct ishtp_hw_ops {
  */
 struct ishtp_driver_data {
 	char *fw_generation;
+};
+
+struct ish_version {
+	u16 major;
+	u16 minor;
+	u16 hotfix;
+	u16 build;
 };
 
 /**
@@ -236,12 +245,19 @@ struct ishtp_device {
 	/* Dump to trace buffers if enabled*/
 	ishtp_print_log print_log;
 
+	/* Base version of Intel's released firmware */
+	struct ish_version base_ver;
+	/* Vendor-customized project version */
+	struct ish_version prj_ver;
+
 	/* Debug stats */
 	unsigned int	ipc_rx_cnt;
 	unsigned long long	ipc_rx_bytes_cnt;
 	unsigned int	ipc_tx_cnt;
 	unsigned long long	ipc_tx_bytes_cnt;
 
+	/* Time of the last clock sync */
+	unsigned long prev_sync;
 	const struct ishtp_hw_ops *ops;
 	size_t	mtu;
 	uint32_t	ishtp_msg_hdr;

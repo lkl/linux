@@ -123,6 +123,10 @@ OPTIONS for 'perf ftrace trace'
 --graph-opts::
 	List of options allowed to set:
 
+	  - args         - Show function arguments.
+	  - retval       - Show function return value.
+	  - retval-hex   - Show function return value in hexadecimal format.
+	  - retaddr      - Show function return address.
 	  - nosleep-time - Measure on-CPU time only for function_graph tracer.
 	  - noirqs       - Ignore functions that happen inside interrupt.
 	  - verbose      - Show process names, PIDs, timestamps, etc.
@@ -139,6 +143,12 @@ OPTIONS for 'perf ftrace latency'
 	Set the function name to get the histogram.  Unlike perf ftrace trace,
 	it only allows single function to calculate the histogram.
 
+-e::
+--events=::
+	Set the pair of events to get the histogram.  The histogram is calculated
+	by the time difference between the two events from the same thread.  This
+	requires -b/--use-bpf option.
+
 -b::
 --use-bpf::
 	Use BPF to measure function latency instead of using the ftrace (it
@@ -148,6 +158,17 @@ OPTIONS for 'perf ftrace latency'
 --use-nsec::
 	Use nano-second instead of micro-second as a base unit of the histogram.
 
+--bucket-range=::
+	Bucket range in ms or ns (according to -n/--use-nsec), default is log2() mode.
+
+--min-latency=::
+	Minimum latency for the start of the first bucket, in ms or ns (according to
+	-n/--use-nsec).
+
+--max-latency=::
+	Maximum latency for the start of the last bucket, in ms or ns (according to
+	-n/--use-nsec). The setting is ignored if the value results in more than
+	22 buckets.
 
 OPTIONS for 'perf ftrace profile'
 ---------------------------------
@@ -189,6 +210,14 @@ OPTIONS for 'perf ftrace profile'
 --sort=::
 	Sort the result by the given field.  Available values are:
 	total, avg, max, count, name.  Default is 'total'.
+
+--graph-opts::
+	List of options allowed to set:
+
+	  - nosleep-time - Measure on-CPU time only for function_graph tracer.
+	  - noirqs       - Ignore functions that happen inside interrupt.
+	  - thresh=<n>   - Setup trace duration threshold in microseconds.
+	  - depth=<n>    - Set max depth for function graph tracer to follow.
 
 
 SEE ALSO

@@ -11,6 +11,7 @@
 #include <linux/net.h>
 #include <linux/igmp.h>
 #include <linux/workqueue.h>
+#include <net/flow.h>
 #include <net/pkt_sched.h>
 #include <net/net_namespace.h>
 #include <net/ip.h>
@@ -28,6 +29,7 @@
 #include <net/addrconf.h>
 #include <net/ip6_route.h>
 #include <net/inet_common.h>
+#include <net/inet_dscp.h>
 #include <net/ip6_checksum.h>
 
 static struct workqueue_struct *amt_wq;
@@ -979,7 +981,7 @@ static void amt_event_send_request(struct amt_dev *amt)
 	amt->req_cnt++;
 out:
 	exp = min_t(u32, (1 * (1 << amt->req_cnt)), AMT_MAX_REQ_TIMEOUT);
-	mod_delayed_work(amt_wq, &amt->req_wq, msecs_to_jiffies(exp * 1000));
+	mod_delayed_work(amt_wq, &amt->req_wq, secs_to_jiffies(exp));
 }
 
 static void amt_req_work(struct work_struct *work)
@@ -1018,7 +1020,7 @@ static bool amt_send_membership_update(struct amt_dev *amt,
 	fl4.flowi4_oif         = amt->stream_dev->ifindex;
 	fl4.daddr              = amt->remote_ip;
 	fl4.saddr              = amt->local_ip;
-	fl4.flowi4_tos         = AMT_TOS;
+	fl4.flowi4_dscp        = inet_dsfield_to_dscp(AMT_TOS);
 	fl4.flowi4_proto       = IPPROTO_UDP;
 	rt = ip_route_output_key(amt->net, &fl4);
 	if (IS_ERR(rt)) {
@@ -1046,7 +1048,8 @@ static bool amt_send_membership_update(struct amt_dev *amt,
 			    amt->gw_port,
 			    amt->relay_port,
 			    false,
-			    false);
+			    false,
+			    0);
 	amt_update_gw_status(amt, AMT_STATUS_SENT_UPDATE, true);
 	return false;
 }
@@ -1103,7 +1106,8 @@ static void amt_send_multicast_data(struct amt_dev *amt,
 			    amt->relay_port,
 			    tunnel->source_port,
 			    false,
-			    false);
+			    false,
+			    0);
 }
 
 static bool amt_send_membership_query(struct amt_dev *amt,
@@ -1131,7 +1135,7 @@ static bool amt_send_membership_query(struct amt_dev *amt,
 	fl4.flowi4_oif         = amt->stream_dev->ifindex;
 	fl4.daddr              = tunnel->ip4;
 	fl4.saddr              = amt->local_ip;
-	fl4.flowi4_tos         = AMT_TOS;
+	fl4.flowi4_dscp        = inet_dsfield_to_dscp(AMT_TOS);
 	fl4.flowi4_proto       = IPPROTO_UDP;
 	rt = ip_route_output_key(amt->net, &fl4);
 	if (IS_ERR(rt)) {
@@ -1161,7 +1165,8 @@ static bool amt_send_membership_query(struct amt_dev *amt,
 			    amt->relay_port,
 			    tunnel->source_port,
 			    false,
-			    false);
+			    false,
+			    0);
 	amt_update_relay_status(tunnel, AMT_STATUS_SENT_QUERY, true);
 	return false;
 }
@@ -3099,7 +3104,7 @@ static void amt_link_setup(struct net_device *dev)
 	dev->addr_len		= 0;
 	dev->priv_flags		|= IFF_NO_QUEUE;
 	dev->lltx		= true;
-	dev->netns_local	= true;
+	dev->netns_immutable	= true;
 	dev->features		|= NETIF_F_GSO_SOFTWARE;
 	dev->hw_features	|= NETIF_F_SG | NETIF_F_HW_CSUM;
 	dev->hw_features	|= NETIF_F_FRAGLIST | NETIF_F_RXCSUM;
@@ -3161,14 +3166,17 @@ static int amt_validate(struct nlattr *tb[], struct nlattr *data[],
 	return 0;
 }
 
-static int amt_newlink(struct net *net, struct net_device *dev,
-		       struct nlattr *tb[], struct nlattr *data[],
+static int amt_newlink(struct net_device *dev,
+		       struct rtnl_newlink_params *params,
 		       struct netlink_ext_ack *extack)
 {
+	struct net *link_net = rtnl_newlink_link_net(params);
 	struct amt_dev *amt = netdev_priv(dev);
+	struct nlattr **data = params->data;
+	struct nlattr **tb = params->tb;
 	int err = -EINVAL;
 
-	amt->net = net;
+	amt->net = link_net;
 	amt->mode = nla_get_u32(data[IFLA_AMT_MODE]);
 
 	if (data[IFLA_AMT_MAX_TUNNELS] &&
@@ -3183,7 +3191,7 @@ static int amt_newlink(struct net *net, struct net_device *dev,
 	amt->hash_buckets = AMT_HSIZE;
 	amt->nr_tunnels = 0;
 	get_random_bytes(&amt->hash_seed, sizeof(amt->hash_seed));
-	amt->stream_dev = dev_get_by_index(net,
+	amt->stream_dev = dev_get_by_index(link_net,
 					   nla_get_u32(data[IFLA_AMT_LINK]));
 	if (!amt->stream_dev) {
 		NL_SET_ERR_MSG_ATTR(extack, tb[IFLA_AMT_LINK],
@@ -3206,15 +3214,11 @@ static int amt_newlink(struct net *net, struct net_device *dev,
 		goto err;
 	}
 
-	if (data[IFLA_AMT_RELAY_PORT])
-		amt->relay_port = nla_get_be16(data[IFLA_AMT_RELAY_PORT]);
-	else
-		amt->relay_port = htons(IANA_AMT_UDP_PORT);
+	amt->relay_port = nla_get_be16_default(data[IFLA_AMT_RELAY_PORT],
+					       htons(IANA_AMT_UDP_PORT));
 
-	if (data[IFLA_AMT_GATEWAY_PORT])
-		amt->gw_port = nla_get_be16(data[IFLA_AMT_GATEWAY_PORT]);
-	else
-		amt->gw_port = htons(IANA_AMT_UDP_PORT);
+	amt->gw_port = nla_get_be16_default(data[IFLA_AMT_GATEWAY_PORT],
+					    htons(IANA_AMT_UDP_PORT));
 
 	if (!amt->relay_port) {
 		NL_SET_ERR_MSG_ATTR(extack, tb[IFLA_AMT_DISCOVERY_IP],

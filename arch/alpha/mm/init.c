@@ -42,7 +42,7 @@ pgd_alloc(struct mm_struct *mm)
 {
 	pgd_t *ret, *init;
 
-	ret = (pgd_t *)__get_free_page(GFP_KERNEL | __GFP_ZERO);
+	ret = __pgd_alloc(mm, 0);
 	init = pgd_offset(&init_mm, 0UL);
 	if (ret) {
 #ifdef CONFIG_ALPHA_LARGE_VMALLOC
@@ -59,33 +59,6 @@ pgd_alloc(struct mm_struct *mm)
 	return ret;
 }
 
-
-/*
- * BAD_PAGE is the page that is used for page faults when linux
- * is out-of-memory. Older versions of linux just did a
- * do_exit(), but using this instead means there is less risk
- * for a process dying in kernel mode, possibly leaving an inode
- * unused etc..
- *
- * BAD_PAGETABLE is the accompanying page-table: it is initialized
- * to point to BAD_PAGE entries.
- *
- * ZERO_PAGE is a special page that is used for zero-initialized
- * data and COW.
- */
-pmd_t *
-__bad_pagetable(void)
-{
-	memset(absolute_pointer(EMPTY_PGT), 0, PAGE_SIZE);
-	return (pmd_t *) EMPTY_PGT;
-}
-
-pte_t
-__bad_page(void)
-{
-	memset(absolute_pointer(EMPTY_PGE), 0, PAGE_SIZE);
-	return pte_mkdirty(mk_pte(virt_to_page(EMPTY_PGE), PAGE_SHARED));
-}
 
 static inline unsigned long
 load_PCB(struct pcb_struct *pcb)
@@ -272,14 +245,6 @@ srm_paging_stop (void)
 	tbia();
 }
 #endif
-
-void __init
-mem_init(void)
-{
-	set_max_mapnr(max_low_pfn);
-	high_memory = (void *) __va(max_low_pfn * PAGE_SIZE);
-	memblock_free_all();
-}
 
 static const pgprot_t protection_map[16] = {
 	[VM_NONE]					= _PAGE_P(_PAGE_FOE | _PAGE_FOW |

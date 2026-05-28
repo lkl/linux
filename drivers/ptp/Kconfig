@@ -44,7 +44,7 @@ config PTP_1588_CLOCK_DTE
 	depends on PTP_1588_CLOCK
 	depends on NET && HAS_IOMEM
 	depends on ARCH_BCM_MOBILE || (ARCH_BCM_IPROC && !(ARCH_BCM_NSP || ARCH_BCM_5301X)) || COMPILE_TEST
-	default y
+	default y if ARCH_BCM_MOBILE || ARCH_BCM_IPROC
 	help
 	  This driver adds support for using the Digital timing engine
 	  (DTE) in the Broadcom SoC's as a PTP clock.
@@ -59,7 +59,7 @@ config PTP_1588_CLOCK_QORIQ
 	tristate "Freescale QorIQ 1588 timer as PTP clock"
 	depends on GIANFAR || FSL_DPAA_ETH || FSL_DPAA2_ETH || FSL_ENETC || FSL_ENETC_VF || COMPILE_TEST
 	depends on PTP_1588_CLOCK
-	default y
+	default y if GIANFAR || FSL_DPAA_ETH || FSL_DPAA2_ETH || FSL_ENETC || FSL_ENETC_VF
 	help
 	  This driver adds support for using the Freescale QorIQ 1588
 	  timer as a PTP clock. This clock is only useful if your PTP
@@ -67,7 +67,7 @@ config PTP_1588_CLOCK_QORIQ
 	  packets using the SO_TIMESTAMPING API.
 
 	  To compile this driver as a module, choose M here: the module
-	  will be called ptp-qoriq.
+	  will be called ptp_qoriq.
 
 comment "Enable PHYLIB and NETWORK_PHY_TIMESTAMPING to see the additional clocks."
 	depends on PHYLIB=n || NETWORK_PHY_TIMESTAMPING=n
@@ -130,6 +130,23 @@ config PTP_1588_CLOCK_KVM
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called ptp_kvm.
+
+config PTP_1588_CLOCK_VMCLOCK
+	tristate "Virtual machine PTP clock"
+	depends on X86_TSC || ARM_ARCH_TIMER
+	depends on PTP_1588_CLOCK && ACPI && ARCH_SUPPORTS_INT128
+	default PTP_1588_CLOCK_KVM
+	help
+	  This driver adds support for using a virtual precision clock
+	  advertised by the hypervisor. This clock is only useful in virtual
+	  machines where such a device is present.
+
+	  Unlike the KVM virtual PTP clock, the VMCLOCK device offers support
+	  for reliable timekeeping even across live migration. So this driver
+	  is enabled by default whenever the KVM PTP clock is.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called ptp_vmclock.
 
 config PTP_1588_CLOCK_IDT82P33
 	tristate "IDT 82P33xxx PTP clock"
@@ -223,5 +240,27 @@ config PTP_DFL_TOD
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called ptp_dfl_tod.
+
+config PTP_S390
+	tristate "S390 PTP driver"
+	depends on PTP_1588_CLOCK
+	depends on S390
+	help
+	  This driver adds support for S390 time steering via the PtP
+	  interface. This works by adding a in-kernel clock delta value,
+	  which is always added to time values used in the kernel. The PtP
+	  driver provides the raw clock value without the delta to
+	  userspace. That way userspace programs like chrony could steer
+	  the kernel clock.
+
+config PTP_NETC_V4_TIMER
+	tristate "NXP NETC V4 Timer PTP Driver"
+	depends on PTP_1588_CLOCK
+	depends on PCI_MSI
+	help
+	  This driver adds support for using the NXP NETC V4 Timer as a PTP
+	  clock, the clock is used by ENETC V4 or NETC V4 Switch for PTP time
+	  synchronization. It also supports periodic output signal (e.g. PPS)
+	  and external trigger timestamping.
 
 endmenu

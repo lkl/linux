@@ -76,14 +76,6 @@ bool sof_debug_check_flag(int mask);
 #define SOF_IPC_DSP_REPLY		0
 #define SOF_IPC_HOST_REPLY		1
 
-/* convenience constructor for DAI driver streams */
-#define SOF_DAI_STREAM(sname, scmin, scmax, srates, sfmt) \
-	{.stream_name = sname, .channels_min = scmin, .channels_max = scmax, \
-	 .rates = srates, .formats = sfmt}
-
-#define SOF_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE | \
-	SNDRV_PCM_FMTBIT_S32_LE | SNDRV_PCM_FMTBIT_FLOAT)
-
 /* So far the primary core on all DSPs has ID 0 */
 #define SOF_DSP_PRIMARY_CORE 0
 
@@ -846,7 +838,11 @@ int sof_stream_pcm_close(struct snd_sof_dev *sdev,
 			 struct snd_pcm_substream *substream);
 
 /* SOF client support */
+struct sof_client_dev;
+
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT)
+struct snd_sof_dev *sof_client_dev_to_sof_dev(struct sof_client_dev *cdev);
+
 int sof_client_dev_register(struct snd_sof_dev *sdev, const char *name, u32 id,
 			    const void *data, size_t size);
 void sof_client_dev_unregister(struct snd_sof_dev *sdev, const char *name, u32 id);
@@ -857,6 +853,11 @@ void sof_client_fw_state_dispatcher(struct snd_sof_dev *sdev);
 int sof_suspend_clients(struct snd_sof_dev *sdev, pm_message_t state);
 int sof_resume_clients(struct snd_sof_dev *sdev);
 #else /* CONFIG_SND_SOC_SOF_CLIENT */
+static inline struct snd_sof_dev *
+sof_client_dev_to_sof_dev(struct sof_client_dev *cdev) {
+	return NULL;
+}
+
 static inline int sof_client_dev_register(struct snd_sof_dev *sdev, const char *name,
 					  u32 id, const void *data, size_t size)
 {

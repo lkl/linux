@@ -39,20 +39,20 @@ static void copy_abs(struct input_dev *dev, unsigned int dst, unsigned int src)
 int input_mt_init_slots(struct input_dev *dev, unsigned int num_slots,
 			unsigned int flags)
 {
-	struct input_mt *mt = dev->mt;
-	int i;
-
 	if (!num_slots)
 		return 0;
-	if (mt)
-		return mt->num_slots != num_slots ? -EINVAL : 0;
+
+	if (dev->mt)
+		return dev->mt->num_slots != num_slots ? -EINVAL : 0;
+
 	/* Arbitrary limit for avoiding too large memory allocation. */
 	if (num_slots > 1024)
 		return -EINVAL;
 
-	mt = kzalloc(struct_size(mt, slots, num_slots), GFP_KERNEL);
+	struct input_mt *mt __free(kfree) =
+			kzalloc(struct_size(mt, slots, num_slots), GFP_KERNEL);
 	if (!mt)
-		goto err_mem;
+		return -ENOMEM;
 
 	mt->num_slots = num_slots;
 	mt->flags = flags;
@@ -86,21 +86,18 @@ int input_mt_init_slots(struct input_dev *dev, unsigned int num_slots,
 		unsigned int n2 = num_slots * num_slots;
 		mt->red = kcalloc(n2, sizeof(*mt->red), GFP_KERNEL);
 		if (!mt->red)
-			goto err_mem;
+			return -ENOMEM;
 	}
 
 	/* Mark slots as 'inactive' */
-	for (i = 0; i < num_slots; i++)
+	for (unsigned int i = 0; i < num_slots; i++)
 		input_mt_set_value(&mt->slots[i], ABS_MT_TRACKING_ID, -1);
 
 	/* Mark slots as 'unused' */
 	mt->frame = 1;
 
-	dev->mt = mt;
+	dev->mt = no_free_ptr(mt);
 	return 0;
-err_mem:
-	kfree(mt);
-	return -ENOMEM;
 }
 EXPORT_SYMBOL(input_mt_init_slots);
 
@@ -201,6 +198,7 @@ void input_mt_report_pointer_emulation(struct input_dev *dev, bool use_count)
 	struct input_mt *mt = dev->mt;
 	struct input_mt_slot *oldest;
 	int oldid, count, i;
+	int p, reported_p = 0;
 
 	if (!mt)
 		return;
@@ -218,6 +216,13 @@ void input_mt_report_pointer_emulation(struct input_dev *dev, bool use_count)
 		if ((id - oldid) & TRKID_SGN) {
 			oldest = ps;
 			oldid = id;
+		}
+		if (test_bit(ABS_MT_PRESSURE, dev->absbit)) {
+			p = input_mt_get_value(ps, ABS_MT_PRESSURE);
+			if (mt->flags & INPUT_MT_TOTAL_FORCE)
+				reported_p += p;
+			else if (oldid == id)
+				reported_p = p;
 		}
 		count++;
 	}
@@ -248,10 +253,8 @@ void input_mt_report_pointer_emulation(struct input_dev *dev, bool use_count)
 		input_event(dev, EV_ABS, ABS_X, x);
 		input_event(dev, EV_ABS, ABS_Y, y);
 
-		if (test_bit(ABS_MT_PRESSURE, dev->absbit)) {
-			int p = input_mt_get_value(oldest, ABS_MT_PRESSURE);
-			input_event(dev, EV_ABS, ABS_PRESSURE, p);
-		}
+		if (test_bit(ABS_MT_PRESSURE, dev->absbit))
+			input_event(dev, EV_ABS, ABS_PRESSURE, reported_p);
 	} else {
 		if (test_bit(ABS_MT_PRESSURE, dev->absbit))
 			input_event(dev, EV_ABS, ABS_PRESSURE, 0);
@@ -285,14 +288,10 @@ void input_mt_drop_unused(struct input_dev *dev)
 	struct input_mt *mt = dev->mt;
 
 	if (mt) {
-		unsigned long flags;
-
-		spin_lock_irqsave(&dev->event_lock, flags);
+		guard(spinlock_irqsave)(&dev->event_lock);
 
 		__input_mt_drop_unused(dev, mt);
 		mt->frame++;
-
-		spin_unlock_irqrestore(&dev->event_lock, flags);
 	}
 }
 EXPORT_SYMBOL(input_mt_drop_unused);
@@ -339,11 +338,8 @@ void input_mt_sync_frame(struct input_dev *dev)
 		return;
 
 	if (mt->flags & INPUT_MT_DROP_UNUSED) {
-		unsigned long flags;
-
-		spin_lock_irqsave(&dev->event_lock, flags);
+		guard(spinlock_irqsave)(&dev->event_lock);
 		__input_mt_drop_unused(dev, mt);
-		spin_unlock_irqrestore(&dev->event_lock, flags);
 	}
 
 	if ((mt->flags & INPUT_MT_POINTER) && !(mt->flags & INPUT_MT_SEMI_MT))

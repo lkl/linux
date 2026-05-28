@@ -13,12 +13,15 @@
 #include <linux/pagemap.h>
 #include <linux/ucs2_string.h>
 #include <linux/slab.h>
+#include <linux/suspend.h>
 #include <linux/magic.h>
 #include <linux/statfs.h>
 #include <linux/notifier.h>
 #include <linux/printk.h>
+#include <linux/namei.h>
 
 #include "internal.h"
+#include "../internal.h"
 
 static int efivarfs_ops_notifier(struct notifier_block *nb, unsigned long event,
 				 void *data)
@@ -39,9 +42,24 @@ static int efivarfs_ops_notifier(struct notifier_block *nb, unsigned long event,
 	return NOTIFY_OK;
 }
 
-static void efivarfs_evict_inode(struct inode *inode)
+static struct inode *efivarfs_alloc_inode(struct super_block *sb)
 {
-	clear_inode(inode);
+	struct efivar_entry *entry = kzalloc(sizeof(*entry), GFP_KERNEL);
+
+	if (!entry)
+		return NULL;
+
+	inode_init_once(&entry->vfs_inode);
+	entry->removed = false;
+
+	return &entry->vfs_inode;
+}
+
+static void efivarfs_free_inode(struct inode *inode)
+{
+	struct efivar_entry *entry = efivar_entry(inode);
+
+	kfree(entry);
 }
 
 static int efivarfs_show_options(struct seq_file *m, struct dentry *root)
@@ -103,11 +121,18 @@ static int efivarfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 
 	return 0;
 }
+
+static int efivarfs_freeze_fs(struct super_block *sb);
+static int efivarfs_unfreeze_fs(struct super_block *sb);
+
 static const struct super_operations efivarfs_ops = {
 	.statfs = efivarfs_statfs,
-	.drop_inode = generic_delete_inode,
-	.evict_inode = efivarfs_evict_inode,
+	.drop_inode = inode_just_drop,
+	.alloc_inode = efivarfs_alloc_inode,
+	.free_inode = efivarfs_free_inode,
 	.show_options = efivarfs_show_options,
+	.freeze_fs = efivarfs_freeze_fs,
+	.unfreeze_fs = efivarfs_unfreeze_fs,
 };
 
 /*
@@ -127,6 +152,10 @@ static int efivarfs_d_compare(const struct dentry *dentry,
 {
 	int guid = len - EFI_VARIABLE_GUID_LEN;
 
+	/* Parallel lookups may produce a temporary invalid filename */
+	if (guid <= 0)
+		return 1;
+
 	if (name->len != len)
 		return 1;
 
@@ -144,9 +173,6 @@ static int efivarfs_d_hash(const struct dentry *dentry, struct qstr *qstr)
 	const unsigned char *s = qstr->name;
 	unsigned int len = qstr->len;
 
-	if (!efivarfs_valid_name(s, len))
-		return -EINVAL;
-
 	while (len-- > EFI_VARIABLE_GUID_LEN)
 		hash = partial_name_hash(*s++, hash);
 
@@ -161,7 +187,6 @@ static int efivarfs_d_hash(const struct dentry *dentry, struct qstr *qstr)
 static const struct dentry_operations efivarfs_d_ops = {
 	.d_compare = efivarfs_d_compare,
 	.d_hash = efivarfs_d_hash,
-	.d_delete = always_delete_dentry,
 };
 
 static struct dentry *efivarfs_alloc_dentry(struct dentry *parent, char *name)
@@ -184,55 +209,59 @@ static struct dentry *efivarfs_alloc_dentry(struct dentry *parent, char *name)
 	return ERR_PTR(-ENOMEM);
 }
 
-static int efivarfs_callback(efi_char16_t *name16, efi_guid_t vendor,
-			     unsigned long name_size, void *data,
-			     struct list_head *list)
+bool efivarfs_variable_is_present(efi_char16_t *variable_name,
+				  efi_guid_t *vendor, void *data)
 {
-	struct super_block *sb = (struct super_block *)data;
+	char *name = efivar_get_utf8name(variable_name, vendor);
+	struct super_block *sb = data;
+	struct dentry *dentry;
+
+	if (!name)
+		/*
+		 * If the allocation failed there'll already be an
+		 * error in the log (and likely a huge and growing
+		 * number of them since they system will be under
+		 * extreme memory pressure), so simply assume
+		 * collision for safety but don't add to the log
+		 * flood.
+		 */
+		return true;
+
+	dentry = try_lookup_noperm(&QSTR(name), sb->s_root);
+	kfree(name);
+	if (!IS_ERR_OR_NULL(dentry))
+		dput(dentry);
+
+	return dentry != NULL;
+}
+
+static int efivarfs_create_dentry(struct super_block *sb, efi_char16_t *name16,
+				  unsigned long name_size, efi_guid_t vendor,
+				  char *name)
+{
 	struct efivar_entry *entry;
-	struct inode *inode = NULL;
+	struct inode *inode;
 	struct dentry *dentry, *root = sb->s_root;
 	unsigned long size = 0;
-	char *name;
 	int len;
 	int err = -ENOMEM;
 	bool is_removable = false;
 
-	if (guid_equal(&vendor, &LINUX_EFI_RANDOM_SEED_TABLE_GUID))
-		return 0;
+	/* length of the variable name itself: remove GUID and separator */
+	len = strlen(name) - EFI_VARIABLE_GUID_LEN - 1;
 
-	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
-	if (!entry)
-		return err;
-
-	memcpy(entry->var.VariableName, name16, name_size);
-	memcpy(&(entry->var.VendorGuid), &vendor, sizeof(efi_guid_t));
-
-	len = ucs2_utf8size(entry->var.VariableName);
-
-	/* name, plus '-', plus GUID, plus NUL*/
-	name = kmalloc(len + 1 + EFI_VARIABLE_GUID_LEN + 1, GFP_KERNEL);
-	if (!name)
-		goto fail;
-
-	ucs2_as_utf8(name, entry->var.VariableName, len);
-
-	if (efivar_variable_is_removable(entry->var.VendorGuid, name, len))
+	if (efivar_variable_is_removable(vendor, name, len))
 		is_removable = true;
-
-	name[len] = '-';
-
-	efi_guid_to_str(&entry->var.VendorGuid, name + len + 1);
-
-	name[len + EFI_VARIABLE_GUID_LEN+1] = '\0';
-
-	/* replace invalid slashes like kobject_set_name_vargs does for /sys/firmware/efi/vars. */
-	strreplace(name, '/', '!');
 
 	inode = efivarfs_get_inode(sb, d_inode(root), S_IFREG | 0644, 0,
 				   is_removable);
 	if (!inode)
 		goto fail_name;
+
+	entry = efivar_entry(inode);
+
+	memcpy(entry->var.VariableName, name16, name_size);
+	memcpy(&(entry->var.VendorGuid), &vendor, sizeof(efi_guid_t));
 
 	dentry = efivarfs_alloc_dentry(root, name);
 	if (IS_ERR(dentry)) {
@@ -241,14 +270,13 @@ static int efivarfs_callback(efi_char16_t *name16, efi_guid_t vendor,
 	}
 
 	__efivar_entry_get(entry, NULL, &size, NULL);
-	__efivar_entry_add(entry, list);
 
 	/* copied by the above to local storage in the dentry. */
 	kfree(name);
 
 	inode_lock(inode);
 	inode->i_private = entry;
-	i_size_write(inode, size + sizeof(entry->var.Attributes));
+	i_size_write(inode, size + sizeof(__u32)); /* attributes + data */
 	inode_unlock(inode);
 	d_add(dentry, inode);
 
@@ -258,16 +286,24 @@ fail_inode:
 	iput(inode);
 fail_name:
 	kfree(name);
-fail:
-	kfree(entry);
+
 	return err;
 }
 
-static int efivarfs_destroy(struct efivar_entry *entry, void *data)
+static int efivarfs_callback(efi_char16_t *name16, efi_guid_t vendor,
+			     unsigned long name_size, void *data)
 {
-	efivar_entry_remove(entry);
-	kfree(entry);
-	return 0;
+	struct super_block *sb = (struct super_block *)data;
+	char *name;
+
+	if (guid_equal(&vendor, &LINUX_EFI_RANDOM_SEED_TABLE_GUID))
+		return 0;
+
+	name = efivar_get_utf8name(name16, &vendor);
+	if (!name)
+		return -ENOMEM;
+
+	return efivarfs_create_dentry(sb, name16, name_size, vendor, name);
 }
 
 enum {
@@ -317,7 +353,8 @@ static int efivarfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	sb->s_blocksize_bits    = PAGE_SHIFT;
 	sb->s_magic             = EFIVARFS_MAGIC;
 	sb->s_op                = &efivarfs_ops;
-	sb->s_d_op		= &efivarfs_d_ops;
+	set_default_d_op(sb, &efivarfs_d_ops);
+	sb->s_d_flags |= DCACHE_DONTCACHE;
 	sb->s_time_gran         = 1;
 
 	if (!efivar_supports_writes())
@@ -339,7 +376,7 @@ static int efivarfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	if (err)
 		return err;
 
-	return efivar_init(efivarfs_callback, sb, &sfi->efivarfs_list);
+	return efivar_init(efivarfs_callback, sb, true);
 }
 
 static int efivarfs_get_tree(struct fs_context *fc)
@@ -357,11 +394,108 @@ static int efivarfs_reconfigure(struct fs_context *fc)
 	return 0;
 }
 
+static void efivarfs_free(struct fs_context *fc)
+{
+	kfree(fc->s_fs_info);
+}
+
 static const struct fs_context_operations efivarfs_context_ops = {
 	.get_tree	= efivarfs_get_tree,
 	.parse_param	= efivarfs_parse_param,
 	.reconfigure	= efivarfs_reconfigure,
+	.free		= efivarfs_free,
 };
+
+static int efivarfs_check_missing(efi_char16_t *name16, efi_guid_t vendor,
+				  unsigned long name_size, void *data)
+{
+	char *name;
+	struct super_block *sb = data;
+	struct dentry *dentry;
+	int err;
+
+	if (guid_equal(&vendor, &LINUX_EFI_RANDOM_SEED_TABLE_GUID))
+		return 0;
+
+	name = efivar_get_utf8name(name16, &vendor);
+	if (!name)
+		return -ENOMEM;
+
+	dentry = try_lookup_noperm(&QSTR(name), sb->s_root);
+	if (IS_ERR(dentry)) {
+		err = PTR_ERR(dentry);
+		goto out;
+	}
+
+	if (!dentry) {
+		/* found missing entry */
+		pr_info("efivarfs: creating variable %s\n", name);
+		return efivarfs_create_dentry(sb, name16, name_size, vendor, name);
+	}
+
+	dput(dentry);
+	err = 0;
+
+ out:
+	kfree(name);
+
+	return err;
+}
+
+static struct file_system_type efivarfs_type;
+
+static int efivarfs_freeze_fs(struct super_block *sb)
+{
+	/* Nothing for us to do. */
+	return 0;
+}
+
+static int efivarfs_unfreeze_fs(struct super_block *sb)
+{
+	struct dentry *child = NULL;
+
+	/*
+	 * Unconditionally resync the variable state on a thaw request.
+	 * Given the size of efivarfs it really doesn't matter to simply
+	 * iterate through all of the entries and resync. Freeze/thaw
+	 * requests are rare enough for that to not matter and the
+	 * number of entries is pretty low too. So we really don't care.
+	 */
+	pr_info("efivarfs: resyncing variable state\n");
+	for (;;) {
+		int err;
+		unsigned long size = 0;
+		struct inode *inode;
+		struct efivar_entry *entry;
+
+		child = find_next_child(sb->s_root, child);
+		if (!child)
+			break;
+
+		inode = d_inode(child);
+		entry = efivar_entry(inode);
+
+		err = efivar_entry_size(entry, &size);
+		if (err)
+			size = 0;
+		else
+			size += sizeof(__u32);
+
+		inode_lock(inode);
+		i_size_write(inode, size);
+		inode_unlock(inode);
+
+		/* The variable doesn't exist anymore, delete it. */
+		if (!size) {
+			pr_info("efivarfs: removing variable %pd\n", child);
+			simple_recursive_removal(child, NULL);
+		}
+	}
+
+	efivar_init(efivarfs_check_missing, sb, false);
+	pr_info("efivarfs: finished resyncing variable state\n");
+	return 0;
+}
 
 static int efivarfs_init_fs_context(struct fs_context *fc)
 {
@@ -374,13 +508,12 @@ static int efivarfs_init_fs_context(struct fs_context *fc)
 	if (!sfi)
 		return -ENOMEM;
 
-	INIT_LIST_HEAD(&sfi->efivarfs_list);
-
 	sfi->mount_opts.uid = GLOBAL_ROOT_UID;
 	sfi->mount_opts.gid = GLOBAL_ROOT_GID;
 
 	fc->s_fs_info = sfi;
 	fc->ops = &efivarfs_context_ops;
+
 	return 0;
 }
 
@@ -391,8 +524,6 @@ static void efivarfs_kill_sb(struct super_block *sb)
 	blocking_notifier_chain_unregister(&efivar_ops_nh, &sfi->nb);
 	kill_litter_super(sb);
 
-	/* Remove all entries and destroy */
-	efivar_entry_iter(efivarfs_destroy, &sfi->efivarfs_list, NULL);
 	kfree(sfi);
 }
 
@@ -402,6 +533,7 @@ static struct file_system_type efivarfs_type = {
 	.init_fs_context = efivarfs_init_fs_context,
 	.kill_sb = efivarfs_kill_sb,
 	.parameters = efivarfs_parameters,
+	.fs_flags = FS_POWER_FREEZE,
 };
 
 static __init int efivarfs_init(void)

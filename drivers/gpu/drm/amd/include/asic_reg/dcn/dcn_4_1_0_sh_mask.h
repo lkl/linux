@@ -2847,6 +2847,14 @@
 #define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP0_AUTH_FAIL_INTERRUPT_DEST__SHIFT                                   0x1
 #define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP0_I2C_XFER_REQ_INTERRUPT_DEST__SHIFT                                0x2
 #define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP0_I2C_XFER_DONE_INTERRUPT_DEST__SHIFT                               0x3
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP1_AUTH_SUCCESS_INTERRUPT_DEST__SHIFT                                0x4
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP1_AUTH_FAIL_INTERRUPT_DEST__SHIFT                                   0x5
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP1_I2C_XFER_REQ_INTERRUPT_DEST__SHIFT                                0x6
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP1_I2C_XFER_DONE_INTERRUPT_DEST__SHIFT                               0x7
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP2_AUTH_SUCCESS_INTERRUPT_DEST__SHIFT                                0x8
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP2_AUTH_FAIL_INTERRUPT_DEST__SHIFT                                   0x9
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP2_I2C_XFER_REQ_INTERRUPT_DEST__SHIFT                                0xa
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP2_I2C_XFER_DONE_INTERRUPT_DEST__SHIFT                               0xb
 #define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP3_AUTH_SUCCESS_INTERRUPT_DEST__SHIFT                                0xc
 #define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP3_AUTH_FAIL_INTERRUPT_DEST__SHIFT                                   0xd
 #define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP3_I2C_XFER_REQ_INTERRUPT_DEST__SHIFT                                0xe
@@ -2871,6 +2879,14 @@
 #define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP0_AUTH_FAIL_INTERRUPT_DEST_MASK                                     0x00000002L
 #define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP0_I2C_XFER_REQ_INTERRUPT_DEST_MASK                                  0x00000004L
 #define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP0_I2C_XFER_DONE_INTERRUPT_DEST_MASK                                 0x00000008L
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP1_AUTH_SUCCESS_INTERRUPT_DEST_MASK                                  0x00000010L
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP1_AUTH_FAIL_INTERRUPT_DEST_MASK                                     0x00000020L
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP1_I2C_XFER_REQ_INTERRUPT_DEST_MASK                                  0x00000040L
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP1_I2C_XFER_DONE_INTERRUPT_DEST_MASK                                 0x00000080L
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP2_AUTH_SUCCESS_INTERRUPT_DEST_MASK                                  0x00000100L
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP2_AUTH_FAIL_INTERRUPT_DEST_MASK                                     0x00000200L
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP2_I2C_XFER_REQ_INTERRUPT_DEST_MASK                                  0x00000400L
+#define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP2_I2C_XFER_DONE_INTERRUPT_DEST_MASK                                 0x00000800L
 #define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP3_AUTH_SUCCESS_INTERRUPT_DEST_MASK                                  0x00001000L
 #define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP3_AUTH_FAIL_INTERRUPT_DEST_MASK                                     0x00002000L
 #define HDCP_INTERRUPT_DEST__DOUT_IHC_HDCP3_I2C_XFER_REQ_INTERRUPT_DEST_MASK                                  0x00004000L
@@ -6199,10 +6215,12 @@
 #define DCHUBBUB_CTRL_STATUS__ROB_UNDERFLOW_STATUS__SHIFT                                                     0x1
 #define DCHUBBUB_CTRL_STATUS__ROB_OVERFLOW_STATUS__SHIFT                                                      0x2
 #define DCHUBBUB_CTRL_STATUS__ROB_OVERFLOW_CLEAR__SHIFT                                                       0x3
+#define DCHUBBUB_CTRL_STATUS__DCHUBBUB_HW_DEBUG__SHIFT                                                        0x4
 #define DCHUBBUB_CTRL_STATUS__CSTATE_SWATH_CHK_GOOD_MODE__SHIFT                                               0x1f
 #define DCHUBBUB_CTRL_STATUS__ROB_UNDERFLOW_STATUS_MASK                                                       0x00000002L
 #define DCHUBBUB_CTRL_STATUS__ROB_OVERFLOW_STATUS_MASK                                                        0x00000004L
 #define DCHUBBUB_CTRL_STATUS__ROB_OVERFLOW_CLEAR_MASK                                                         0x00000008L
+#define DCHUBBUB_CTRL_STATUS__DCHUBBUB_HW_DEBUG_MASK                                                          0x3FFFFFF0L
 #define DCHUBBUB_CTRL_STATUS__CSTATE_SWATH_CHK_GOOD_MODE_MASK                                                 0x80000000L
 //DCHUBBUB_TIMEOUT_DETECTION_CTRL1
 #define DCHUBBUB_TIMEOUT_DETECTION_CTRL1__DCHUBBUB_TIMEOUT_ERROR_STATUS__SHIFT                                0x0

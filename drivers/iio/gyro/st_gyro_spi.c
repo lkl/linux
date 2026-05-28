@@ -59,7 +59,7 @@ static const struct of_device_id st_gyro_of_match[] = {
 		.compatible = "st,lsm9ds0-gyro",
 		.data = LSM9DS0_GYRO_DEV_NAME,
 	},
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(of, st_gyro_of_match);
 
@@ -107,7 +107,7 @@ static const struct spi_device_id st_gyro_id_table[] = {
 	{ L3G4IS_GYRO_DEV_NAME },
 	{ LSM330_GYRO_DEV_NAME },
 	{ LSM9DS0_GYRO_DEV_NAME },
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(spi, st_gyro_id_table);
 
@@ -124,4 +124,4 @@ module_spi_driver(st_gyro_driver);
 MODULE_AUTHOR("Denis Ciocca <denis.ciocca@st.com>");
 MODULE_DESCRIPTION("STMicroelectronics gyroscopes spi driver");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(IIO_ST_SENSORS);
+MODULE_IMPORT_NS("IIO_ST_SENSORS");

@@ -5,7 +5,7 @@
 #define _ICE_ESWITCH_H_
 
 #include <net/devlink.h>
-#include "devlink/devlink_port.h"
+#include "devlink/port.h"
 
 #ifdef CONFIG_ICE_SWITCHDEV
 void ice_eswitch_detach_vf(struct ice_pf *pf, struct ice_vf *vf);
@@ -59,11 +59,6 @@ ice_eswitch_set_target_vsi(struct sk_buff *skb,
 
 static inline void
 ice_eswitch_update_repr(unsigned long *repr_id, struct ice_vsi *vsi) { }
-
-static inline int ice_eswitch_configure(struct ice_pf *pf)
-{
-	return 0;
-}
 
 static inline int ice_eswitch_mode_get(struct devlink *devlink, u16 *mode)
 {

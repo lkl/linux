@@ -41,12 +41,12 @@ static inline struct kvm_pmc *get_gp_pmc_amd(struct kvm_pmu *pmu, u32 msr,
 	struct kvm_vcpu *vcpu = pmu_to_vcpu(pmu);
 	unsigned int idx;
 
-	if (!vcpu->kvm->arch.enable_pmu)
+	if (!pmu->version)
 		return NULL;
 
 	switch (msr) {
 	case MSR_F15H_PERF_CTL0 ... MSR_F15H_PERF_CTR5:
-		if (!guest_cpuid_has(vcpu, X86_FEATURE_PERFCTR_CORE))
+		if (!guest_cpu_cap_has(vcpu, X86_FEATURE_PERFCTR_CORE))
 			return NULL;
 		/*
 		 * Each PMU counter has a pair of CTL and CTR MSRs. CTLn
@@ -109,10 +109,11 @@ static bool amd_is_valid_msr(struct kvm_vcpu *vcpu, u32 msr)
 	case MSR_K7_EVNTSEL0 ... MSR_K7_PERFCTR3:
 		return pmu->version > 0;
 	case MSR_F15H_PERF_CTL0 ... MSR_F15H_PERF_CTR5:
-		return guest_cpuid_has(vcpu, X86_FEATURE_PERFCTR_CORE);
+		return guest_cpu_cap_has(vcpu, X86_FEATURE_PERFCTR_CORE);
 	case MSR_AMD64_PERF_CNTR_GLOBAL_STATUS:
 	case MSR_AMD64_PERF_CNTR_GLOBAL_CTL:
 	case MSR_AMD64_PERF_CNTR_GLOBAL_STATUS_CLR:
+	case MSR_AMD64_PERF_CNTR_GLOBAL_STATUS_SET:
 		return pmu->version > 1;
 	default:
 		if (msr > MSR_F15H_PERF_CTR5 &&
@@ -179,7 +180,7 @@ static void amd_pmu_refresh(struct kvm_vcpu *vcpu)
 	union cpuid_0x80000022_ebx ebx;
 
 	pmu->version = 1;
-	if (guest_cpuid_has(vcpu, X86_FEATURE_PERFMON_V2)) {
+	if (guest_cpu_cap_has(vcpu, X86_FEATURE_PERFMON_V2)) {
 		pmu->version = 2;
 		/*
 		 * Note, PERFMON_V2 is also in 0x80000022.0x0, i.e. the guest
@@ -189,7 +190,7 @@ static void amd_pmu_refresh(struct kvm_vcpu *vcpu)
 			     x86_feature_cpuid(X86_FEATURE_PERFMON_V2).index);
 		ebx.full = kvm_find_cpuid_entry_index(vcpu, 0x80000022, 0)->ebx;
 		pmu->nr_arch_gp_counters = ebx.split.num_core_pmc;
-	} else if (guest_cpuid_has(vcpu, X86_FEATURE_PERFCTR_CORE)) {
+	} else if (guest_cpu_cap_has(vcpu, X86_FEATURE_PERFCTR_CORE)) {
 		pmu->nr_arch_gp_counters = AMD64_NUM_COUNTERS_CORE;
 	} else {
 		pmu->nr_arch_gp_counters = AMD64_NUM_COUNTERS;
@@ -199,17 +200,16 @@ static void amd_pmu_refresh(struct kvm_vcpu *vcpu)
 					 kvm_pmu_cap.num_counters_gp);
 
 	if (pmu->version > 1) {
-		pmu->global_ctrl_rsvd = ~((1ull << pmu->nr_arch_gp_counters) - 1);
+		pmu->global_ctrl_rsvd = ~(BIT_ULL(pmu->nr_arch_gp_counters) - 1);
 		pmu->global_status_rsvd = pmu->global_ctrl_rsvd;
 	}
 
-	pmu->counter_bitmask[KVM_PMC_GP] = ((u64)1 << 48) - 1;
+	pmu->counter_bitmask[KVM_PMC_GP] = BIT_ULL(48) - 1;
 	pmu->reserved_bits = 0xfffffff000280000ull;
 	pmu->raw_event_mask = AMD64_RAW_EVENT_MASK;
 	/* not applicable to AMD; but clean them to prevent any fall out */
 	pmu->counter_bitmask[KVM_PMC_FIXED] = 0;
 	pmu->nr_arch_fixed_counters = 0;
-	bitmap_set(pmu->all_valid_pmc_idx, 0, pmu->nr_arch_gp_counters);
 }
 
 static void amd_pmu_init(struct kvm_vcpu *vcpu)

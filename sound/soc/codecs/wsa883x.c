@@ -6,6 +6,7 @@
 #include <linux/bitops.h>
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
+#include <linux/hwmon.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -13,6 +14,7 @@
 #include <linux/printk.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
+#include <linux/reset.h>
 #include <linux/slab.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_registers.h>
@@ -156,8 +158,28 @@
 #define WSA883X_PA_FSM_ERR_COND         (WSA883X_DIG_CTRL_BASE + 0x0014)
 #define WSA883X_PA_FSM_MSK              (WSA883X_DIG_CTRL_BASE + 0x0015)
 #define WSA883X_PA_FSM_BYP              (WSA883X_DIG_CTRL_BASE + 0x0016)
+#define WSA883X_PA_FSM_BYP_DC_CAL_EN_MASK		0x01
+#define WSA883X_PA_FSM_BYP_DC_CAL_EN_SHIFT		0
+#define WSA883X_PA_FSM_BYP_CLK_WD_EN_MASK		0x02
+#define WSA883X_PA_FSM_BYP_CLK_WD_EN_SHIFT		1
+#define WSA883X_PA_FSM_BYP_BG_EN_MASK			0x04
+#define WSA883X_PA_FSM_BYP_BG_EN_SHIFT			2
+#define WSA883X_PA_FSM_BYP_BOOST_EN_MASK		0x08
+#define WSA883X_PA_FSM_BYP_BOOST_EN_SHIFT		3
+#define WSA883X_PA_FSM_BYP_PA_EN_MASK			0x10
+#define WSA883X_PA_FSM_BYP_PA_EN_SHIFT			4
+#define WSA883X_PA_FSM_BYP_D_UNMUTE_MASK		0x20
+#define WSA883X_PA_FSM_BYP_D_UNMUTE_SHIFT		5
+#define WSA883X_PA_FSM_BYP_SPKR_PROT_EN_MASK		0x40
+#define WSA883X_PA_FSM_BYP_SPKR_PROT_EN_SHIFT		6
+#define WSA883X_PA_FSM_BYP_TSADC_EN_MASK		0x80
+#define WSA883X_PA_FSM_BYP_TSADC_EN_SHIFT		7
 #define WSA883X_PA_FSM_DBG              (WSA883X_DIG_CTRL_BASE + 0x0017)
 #define WSA883X_TADC_VALUE_CTL          (WSA883X_DIG_CTRL_BASE + 0x0020)
+#define WSA883X_TADC_VALUE_CTL_TEMP_VALUE_RD_EN_MASK	0x01
+#define WSA883X_TADC_VALUE_CTL_TEMP_VALUE_RD_EN_SHIFT	0
+#define WSA883X_TADC_VALUE_CTL_VBAT_VALUE_RD_EN_MASK	0x02
+#define WSA883X_TADC_VALUE_CTL_VBAT_VALUE_RD_EN_SHIFT	1
 #define WSA883X_TEMP_DETECT_CTL         (WSA883X_DIG_CTRL_BASE + 0x0021)
 #define WSA883X_TEMP_MSB                (WSA883X_DIG_CTRL_BASE + 0x0022)
 #define WSA883X_TEMP_LSB                (WSA883X_DIG_CTRL_BASE + 0x0023)
@@ -427,6 +449,17 @@
 		SNDRV_PCM_FMTBIT_S24_LE |\
 		SNDRV_PCM_FMTBIT_S24_3LE | SNDRV_PCM_FMTBIT_S32_LE)
 
+/* Two-point trimming for temperature calibration */
+#define WSA883X_T1_TEMP			-10L
+#define WSA883X_T2_TEMP			150L
+
+/*
+ * Device will report senseless data in many cases, so discard any measurements
+ * outside of valid range.
+ */
+#define WSA883X_LOW_TEMP_THRESHOLD	5
+#define WSA883X_HIGH_TEMP_THRESHOLD	45
+
 struct wsa883x_priv {
 	struct regmap *regmap;
 	struct device *dev;
@@ -436,11 +469,19 @@ struct wsa883x_priv {
 	struct sdw_stream_runtime *sruntime;
 	struct sdw_port_config port_config[WSA883X_MAX_SWR_PORTS];
 	struct gpio_desc *sd_n;
+	struct reset_control *sd_reset;
 	bool port_prepared[WSA883X_MAX_SWR_PORTS];
 	bool port_enable[WSA883X_MAX_SWR_PORTS];
 	int active_ports;
 	int dev_mode;
 	int comp_offset;
+	/*
+	 * Protects temperature reading code (related to speaker protection) and
+	 * fields: temperature and pa_on.
+	 */
+	struct mutex sp_lock;
+	unsigned int temperature;
+	bool pa_on;
 };
 
 enum {
@@ -529,11 +570,11 @@ static const struct sdw_port_config wsa883x_pconfig[WSA883X_MAX_SWR_PORTS] = {
 	},
 	[WSA883X_PORT_VISENSE] = {
 		.num = WSA883X_PORT_VISENSE + 1,
-		.ch_mask = 0x3,
+		.ch_mask = 0x1,
 	},
 };
 
-static struct reg_default wsa883x_defaults[] = {
+static const struct reg_default wsa883x_defaults[] = {
 	{ WSA883X_REF_CTRL, 0xD5 },
 	{ WSA883X_TEST_CTL_0, 0x06 },
 	{ WSA883X_BIAS_0, 0xD2 },
@@ -1186,6 +1227,10 @@ static int wsa883x_spkr_event(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
+		mutex_lock(&wsa883x->sp_lock);
+		wsa883x->pa_on = true;
+		mutex_unlock(&wsa883x->sp_lock);
+
 		switch (wsa883x->dev_mode) {
 		case RECEIVER:
 			snd_soc_component_write_field(component, WSA883X_CDC_PATH_MODE,
@@ -1235,6 +1280,9 @@ static int wsa883x_spkr_event(struct snd_soc_dapm_widget *w,
 					      WSA883X_GLOBAL_PA_EN_MASK, 0);
 		snd_soc_component_write_field(component, WSA883X_PDM_WD_CTL,
 					      WSA883X_PDM_EN_MASK, 0);
+		mutex_lock(&wsa883x->sp_lock);
+		wsa883x->pa_on = false;
+		mutex_unlock(&wsa883x->sp_lock);
 		break;
 	}
 	return 0;
@@ -1367,6 +1415,179 @@ static struct snd_soc_dai_driver wsa883x_dais[] = {
 	},
 };
 
+static int wsa883x_get_temp(struct wsa883x_priv *wsa883x, long *temp)
+{
+	unsigned int d1_msb = 0, d1_lsb = 0, d2_msb = 0, d2_lsb = 0;
+	unsigned int dmeas_msb = 0, dmeas_lsb = 0;
+	int d1, d2, dmeas;
+	unsigned int mask;
+	int ret, range;
+	long val;
+
+	guard(mutex)(&wsa883x->sp_lock);
+
+	if (wsa883x->pa_on) {
+		/*
+		 * Reading temperature is possible only when Power Amplifier is
+		 * off. Report last cached data.
+		 */
+		*temp = wsa883x->temperature * 1000;
+		return 0;
+	}
+
+	ret = pm_runtime_resume_and_get(wsa883x->dev);
+	if (ret < 0)
+		return ret;
+
+	mask = WSA883X_PA_FSM_BYP_DC_CAL_EN_MASK |
+	       WSA883X_PA_FSM_BYP_CLK_WD_EN_MASK |
+	       WSA883X_PA_FSM_BYP_BG_EN_MASK |
+	       WSA883X_PA_FSM_BYP_D_UNMUTE_MASK |
+	       WSA883X_PA_FSM_BYP_SPKR_PROT_EN_MASK |
+	       WSA883X_PA_FSM_BYP_TSADC_EN_MASK;
+
+	/*
+	 * Here and further do not care about read or update failures.
+	 * For example, before turning the amplifier on for the first
+	 * time, reading WSA883X_TEMP_DIN_MSB will always return 0.
+	 * Instead, check if returned value is within reasonable
+	 * thresholds.
+	 */
+	regmap_update_bits(wsa883x->regmap, WSA883X_PA_FSM_BYP, mask, mask);
+
+	regmap_update_bits(wsa883x->regmap, WSA883X_TADC_VALUE_CTL,
+			   WSA883X_TADC_VALUE_CTL_TEMP_VALUE_RD_EN_MASK,
+			   FIELD_PREP(WSA883X_TADC_VALUE_CTL_TEMP_VALUE_RD_EN_MASK, 0x0));
+
+	regmap_read(wsa883x->regmap, WSA883X_TEMP_MSB, &dmeas_msb);
+	regmap_read(wsa883x->regmap, WSA883X_TEMP_LSB, &dmeas_lsb);
+
+	regmap_update_bits(wsa883x->regmap, WSA883X_TADC_VALUE_CTL,
+			   WSA883X_TADC_VALUE_CTL_TEMP_VALUE_RD_EN_MASK,
+			   FIELD_PREP(WSA883X_TADC_VALUE_CTL_TEMP_VALUE_RD_EN_MASK, 0x1));
+
+	regmap_read(wsa883x->regmap, WSA883X_OTP_REG_1, &d1_msb);
+	regmap_read(wsa883x->regmap, WSA883X_OTP_REG_2, &d1_lsb);
+	regmap_read(wsa883x->regmap, WSA883X_OTP_REG_3, &d2_msb);
+	regmap_read(wsa883x->regmap, WSA883X_OTP_REG_4, &d2_lsb);
+
+	regmap_update_bits(wsa883x->regmap, WSA883X_PA_FSM_BYP, mask, 0x0);
+
+	dmeas = (((dmeas_msb & 0xff) << 0x8) | (dmeas_lsb & 0xff)) >> 0x6;
+	d1 = (((d1_msb & 0xff) << 0x8) | (d1_lsb & 0xff)) >> 0x6;
+	d2 = (((d2_msb & 0xff) << 0x8) | (d2_lsb & 0xff)) >> 0x6;
+
+	if (d1 == d2) {
+		/* Incorrect data in OTP? */
+		ret = -EINVAL;
+		goto out;
+	}
+
+	val = WSA883X_T1_TEMP + (((dmeas - d1) * (WSA883X_T2_TEMP - WSA883X_T1_TEMP)) / (d2 - d1));
+	range = WSA883X_HIGH_TEMP_THRESHOLD - WSA883X_LOW_TEMP_THRESHOLD;
+	if (in_range(val, WSA883X_LOW_TEMP_THRESHOLD, range)) {
+		wsa883x->temperature = val;
+		*temp = val * 1000;
+		ret = 0;
+	} else {
+		ret = -EAGAIN;
+	}
+out:
+	pm_runtime_put_autosuspend(wsa883x->dev);
+
+	return ret;
+}
+
+static umode_t wsa883x_hwmon_is_visible(const void *data,
+					enum hwmon_sensor_types type, u32 attr,
+					int channel)
+{
+	if (type != hwmon_temp)
+		return 0;
+
+	switch (attr) {
+	case hwmon_temp_input:
+		return 0444;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static int wsa883x_hwmon_read(struct device *dev,
+			      enum hwmon_sensor_types type,
+			      u32 attr, int channel, long *temp)
+{
+	int ret;
+
+	switch (attr) {
+	case hwmon_temp_input:
+		ret = wsa883x_get_temp(dev_get_drvdata(dev), temp);
+		break;
+	default:
+		ret = -EOPNOTSUPP;
+		break;
+	}
+
+	return ret;
+}
+
+static const struct hwmon_channel_info *const wsa883x_hwmon_info[] = {
+	HWMON_CHANNEL_INFO(temp, HWMON_T_INPUT),
+	NULL
+};
+
+static const struct hwmon_ops wsa883x_hwmon_ops = {
+	.is_visible	= wsa883x_hwmon_is_visible,
+	.read		= wsa883x_hwmon_read,
+};
+
+static const struct hwmon_chip_info wsa883x_hwmon_chip_info = {
+	.ops	= &wsa883x_hwmon_ops,
+	.info	= wsa883x_hwmon_info,
+};
+
+static void wsa883x_reset_assert(void *data)
+{
+	struct wsa883x_priv *wsa883x = data;
+
+	if (wsa883x->sd_reset)
+		reset_control_assert(wsa883x->sd_reset);
+	else
+		gpiod_direction_output(wsa883x->sd_n, 1);
+}
+
+static void wsa883x_reset_deassert(struct wsa883x_priv *wsa883x)
+{
+	if (wsa883x->sd_reset)
+		reset_control_deassert(wsa883x->sd_reset);
+	else
+		gpiod_direction_output(wsa883x->sd_n, 0);
+}
+
+static int wsa883x_get_reset(struct device *dev, struct wsa883x_priv *wsa883x)
+{
+	wsa883x->sd_reset = devm_reset_control_get_optional_shared(dev, NULL);
+	if (IS_ERR(wsa883x->sd_reset))
+		return dev_err_probe(dev, PTR_ERR(wsa883x->sd_reset),
+				     "Failed to get reset\n");
+	/*
+	 * if sd_reset: NULL, so use the backwards compatible way for powerdown-gpios,
+	 * which does not handle sharing GPIO properly.
+	 */
+	if (!wsa883x->sd_reset) {
+		wsa883x->sd_n = devm_gpiod_get_optional(dev, "powerdown",
+							GPIOD_FLAGS_BIT_NONEXCLUSIVE |
+							GPIOD_OUT_HIGH);
+		if (IS_ERR(wsa883x->sd_n))
+			return dev_err_probe(dev, PTR_ERR(wsa883x->sd_n),
+					     "Shutdown Control GPIO not found\n");
+	}
+
+	return 0;
+}
+
 static int wsa883x_probe(struct sdw_slave *pdev,
 			 const struct sdw_device_id *id)
 {
@@ -1387,13 +1608,9 @@ static int wsa883x_probe(struct sdw_slave *pdev,
 	if (ret)
 		return dev_err_probe(dev, ret, "Failed to enable vdd regulator\n");
 
-	wsa883x->sd_n = devm_gpiod_get_optional(dev, "powerdown",
-						GPIOD_FLAGS_BIT_NONEXCLUSIVE | GPIOD_OUT_HIGH);
-	if (IS_ERR(wsa883x->sd_n)) {
-		ret = dev_err_probe(dev, PTR_ERR(wsa883x->sd_n),
-				    "Shutdown Control GPIO not found\n");
+	ret = wsa883x_get_reset(dev, wsa883x);
+	if (ret)
 		goto err;
-	}
 
 	dev_set_drvdata(dev, wsa883x);
 	wsa883x->slave = pdev;
@@ -1402,8 +1619,9 @@ static int wsa883x_probe(struct sdw_slave *pdev,
 	wsa883x->sconfig.bps = 1;
 	wsa883x->sconfig.direction = SDW_DATA_DIR_RX;
 	wsa883x->sconfig.type = SDW_STREAM_PDM;
+	mutex_init(&wsa883x->sp_lock);
 
-	/**
+	/*
 	 * Port map index starts with 0, however the data port for this codec
 	 * are from index 1
 	 */
@@ -1415,15 +1633,31 @@ static int wsa883x_probe(struct sdw_slave *pdev,
 	pdev->prop.simple_clk_stop_capable = true;
 	pdev->prop.sink_dpn_prop = wsa_sink_dpn_prop;
 	pdev->prop.scp_int1_mask = SDW_SCP_INT1_BUS_CLASH | SDW_SCP_INT1_PARITY;
-	gpiod_direction_output(wsa883x->sd_n, 0);
+
+	wsa883x_reset_deassert(wsa883x);
+	ret = devm_add_action_or_reset(dev, wsa883x_reset_assert, wsa883x);
+	if (ret)
+		return ret;
 
 	wsa883x->regmap = devm_regmap_init_sdw(pdev, &wsa883x_regmap_config);
 	if (IS_ERR(wsa883x->regmap)) {
-		gpiod_direction_output(wsa883x->sd_n, 1);
 		ret = dev_err_probe(dev, PTR_ERR(wsa883x->regmap),
 				    "regmap_init failed\n");
 		goto err;
 	}
+
+	if (IS_REACHABLE(CONFIG_HWMON)) {
+		struct device *hwmon;
+
+		hwmon = devm_hwmon_device_register_with_info(dev, "wsa883x",
+							     wsa883x,
+							     &wsa883x_hwmon_chip_info,
+							     NULL);
+		if (IS_ERR(hwmon))
+			return dev_err_probe(dev, PTR_ERR(hwmon),
+					     "Failed to register hwmon sensor\n");
+	}
+
 	pm_runtime_set_autosuspend_delay(dev, 3000);
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_mark_last_busy(dev);
@@ -1442,7 +1676,7 @@ err:
 
 }
 
-static int __maybe_unused wsa883x_runtime_suspend(struct device *dev)
+static int wsa883x_runtime_suspend(struct device *dev)
 {
 	struct regmap *regmap = dev_get_regmap(dev, NULL);
 
@@ -1452,7 +1686,7 @@ static int __maybe_unused wsa883x_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused wsa883x_runtime_resume(struct device *dev)
+static int wsa883x_runtime_resume(struct device *dev)
 {
 	struct regmap *regmap = dev_get_regmap(dev, NULL);
 
@@ -1463,7 +1697,7 @@ static int __maybe_unused wsa883x_runtime_resume(struct device *dev)
 }
 
 static const struct dev_pm_ops wsa883x_pm_ops = {
-	SET_RUNTIME_PM_OPS(wsa883x_runtime_suspend, wsa883x_runtime_resume, NULL)
+	RUNTIME_PM_OPS(wsa883x_runtime_suspend, wsa883x_runtime_resume, NULL)
 };
 
 static const struct sdw_device_id wsa883x_swr_id[] = {
@@ -1476,7 +1710,7 @@ MODULE_DEVICE_TABLE(sdw, wsa883x_swr_id);
 static struct sdw_driver wsa883x_codec_driver = {
 	.driver = {
 		.name = "wsa883x-codec",
-		.pm = &wsa883x_pm_ops,
+		.pm = pm_ptr(&wsa883x_pm_ops),
 		.suppress_bind_attrs = true,
 	},
 	.probe = wsa883x_probe,

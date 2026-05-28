@@ -144,16 +144,13 @@
 #define ARC_AUX_AGU_MOD2	0x5E2
 #define ARC_AUX_AGU_MOD3	0x5E3
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
-#include <soc/arc/aux.h>
+#include <soc/arc/arc_aux.h>
 
 /* Helpers */
 #define TO_KB(bytes)		((bytes) >> 10)
 #define TO_MB(bytes)		(TO_KB(bytes) >> 10)
-#define PAGES_TO_KB(n_pages)	((n_pages) << (PAGE_SHIFT - 10))
-#define PAGES_TO_MB(n_pages)	(PAGES_TO_KB(n_pages) >> 10)
-
 
 /*
  ***************************************************************

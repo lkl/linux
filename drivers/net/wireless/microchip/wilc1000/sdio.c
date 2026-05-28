@@ -182,10 +182,18 @@ static int wilc_sdio_probe(struct sdio_func *func,
 
 	wilc_sdio_init(wilc, false);
 
+	ret = wilc_get_chipid(wilc);
+	if (ret)
+		goto dispose_irq;
+
+	ret = wilc_cfg80211_register(wilc);
+	if (ret)
+		goto dispose_irq;
+
 	ret = wilc_load_mac_from_nv(wilc);
 	if (ret) {
 		pr_err("Can not retrieve MAC address from chip\n");
-		goto dispose_irq;
+		goto unregister_wiphy;
 	}
 
 	wilc_sdio_deinit(wilc);
@@ -194,15 +202,18 @@ static int wilc_sdio_probe(struct sdio_func *func,
 				   NL80211_IFTYPE_STATION, false);
 	if (IS_ERR(vif)) {
 		ret = PTR_ERR(vif);
-		goto dispose_irq;
+		goto unregister_wiphy;
 	}
 
 	dev_info(&func->dev, "Driver Initializing success\n");
 	return 0;
 
+unregister_wiphy:
+	wiphy_unregister(wilc->wiphy);
 dispose_irq:
 	irq_dispose_mapping(wilc->dev_irq_num);
 	wilc_netdev_cleanup(wilc);
+	wiphy_free(wilc->wiphy);
 free:
 	kfree(sdio_priv->cmd53_buf);
 	kfree(sdio_priv);
@@ -215,6 +226,8 @@ static void wilc_sdio_remove(struct sdio_func *func)
 	struct wilc_sdio *sdio_priv = wilc->bus_data;
 
 	wilc_netdev_cleanup(wilc);
+	wiphy_unregister(wilc->wiphy);
+	wiphy_free(wilc->wiphy);
 	kfree(sdio_priv->cmd53_buf);
 	kfree(sdio_priv);
 }
@@ -667,7 +680,6 @@ static int wilc_sdio_init(struct wilc *wilc, bool resume)
 	struct wilc_sdio *sdio_priv = wilc->bus_data;
 	struct sdio_cmd52 cmd;
 	int loop, ret;
-	u32 chipid;
 
 	/**
 	 *      function 0 csa enable
@@ -756,18 +768,6 @@ static int wilc_sdio_init(struct wilc *wilc, bool resume)
 		return ret;
 	}
 
-	/**
-	 *      make sure can read back chip id correctly
-	 **/
-	if (!resume) {
-		ret = wilc_sdio_read_reg(wilc, WILC_CHIPID, &chipid);
-		if (ret) {
-			dev_err(&func->dev, "Fail cmd read chip id...\n");
-			return ret;
-		}
-		dev_err(&func->dev, "chipid (%08x)\n", chipid);
-	}
-
 	sdio_priv->isinit = true;
 	return 0;
 }
@@ -815,13 +815,19 @@ static int wilc_sdio_read_int(struct wilc *wilc, u32 *int_status)
 		cmd.address = WILC_SDIO_EXT_IRQ_FLAG_REG;
 	} else {
 		cmd.function = 0;
-		cmd.address = WILC_SDIO_IRQ_FLAG_REG;
+		cmd.address = is_wilc1000(wilc->chipid) ?
+			      WILC1000_SDIO_IRQ_FLAG_REG :
+			      WILC3000_SDIO_IRQ_FLAG_REG;
 	}
 	cmd.raw = 0;
 	cmd.read_write = 0;
 	cmd.data = 0;
 	wilc_sdio_cmd52(wilc, &cmd);
 	irq_flags = cmd.data;
+
+	if (sdio_priv->irq_gpio)
+		irq_flags &= is_wilc1000(wilc->chipid) ? 0x1f : 0x0f;
+
 	tmp |= FIELD_PREP(IRG_FLAGS_MASK, cmd.data);
 
 	if (FIELD_GET(UNHANDLED_IRQ_MASK, irq_flags))
@@ -843,22 +849,56 @@ static int wilc_sdio_clear_int_ext(struct wilc *wilc, u32 val)
 	if (sdio_priv->irq_gpio)
 		reg = val & (BIT(MAX_NUM_INT) - 1);
 
-	/* select VMM table 0 */
-	if (val & SEL_VMM_TBL0)
-		reg |= BIT(5);
-	/* select VMM table 1 */
-	if (val & SEL_VMM_TBL1)
-		reg |= BIT(6);
-	/* enable VMM */
-	if (val & EN_VMM)
-		reg |= BIT(7);
+	if (is_wilc1000(wilc->chipid)) {
+		/* select VMM table 0 */
+		if (val & SEL_VMM_TBL0)
+			reg |= BIT(5);
+		/* select VMM table 1 */
+		if (val & SEL_VMM_TBL1)
+			reg |= BIT(6);
+		/* enable VMM */
+		if (val & EN_VMM)
+			reg |= BIT(7);
+	} else {
+		if (sdio_priv->irq_gpio && reg) {
+			struct sdio_cmd52 cmd;
+
+			cmd.read_write = 1;
+			cmd.function = 0;
+			cmd.raw = 0;
+			cmd.address = WILC3000_SDIO_IRQ_FLAG_REG;
+			cmd.data = reg;
+
+			ret = wilc_sdio_cmd52(wilc, &cmd);
+			if (ret) {
+				dev_err(&func->dev,
+					"Failed cmd52, set 0xfe data (%d) ...\n",
+					__LINE__);
+				return ret;
+			}
+		}
+
+		reg = 0;
+		/* select VMM table 0 */
+		if (val & SEL_VMM_TBL0)
+			reg |= BIT(0);
+		/* select VMM table 1 */
+		if (val & SEL_VMM_TBL1)
+			reg |= BIT(1);
+		/* enable VMM */
+		if (val & EN_VMM)
+			reg |= BIT(2);
+	}
+
 	if (reg) {
 		struct sdio_cmd52 cmd;
 
 		cmd.read_write = 1;
 		cmd.function = 0;
 		cmd.raw = 0;
-		cmd.address = WILC_SDIO_IRQ_CLEAR_FLAG_REG;
+		cmd.address = is_wilc1000(wilc->chipid) ?
+			      WILC1000_SDIO_IRQ_CLEAR_FLAG_REG :
+			      WILC3000_SDIO_VMM_TBL_CTRL_REG;
 		cmd.data = reg;
 
 		ret = wilc_sdio_cmd52(wilc, &cmd);
@@ -979,17 +1019,15 @@ static int wilc_sdio_suspend(struct device *dev)
 	if (!IS_ERR(wilc->rtc_clk))
 		clk_disable_unprepare(wilc->rtc_clk);
 
-	host_sleep_notify(wilc);
-
-	wilc_sdio_disable_interrupt(wilc);
-
-	ret = wilc_sdio_reset(wilc);
+	ret = host_sleep_notify(wilc);
 	if (ret) {
-		dev_err(&func->dev, "Fail reset sdio\n");
+		clk_prepare_enable(wilc->rtc_clk);
 		return ret;
 	}
 
-	return 0;
+	wilc_sdio_disable_interrupt(wilc);
+
+	return sdio_set_host_pm_flags(func, MMC_PM_KEEP_POWER);
 }
 
 static int wilc_sdio_resume(struct device *dev)
@@ -1008,9 +1046,7 @@ static int wilc_sdio_resume(struct device *dev)
 	wilc_sdio_init(wilc, true);
 	wilc_sdio_enable_interrupt(wilc);
 
-	host_wakeup_notify(wilc);
-
-	return 0;
+	return host_wakeup_notify(wilc);
 }
 
 static const struct of_device_id wilc_of_match[] = {

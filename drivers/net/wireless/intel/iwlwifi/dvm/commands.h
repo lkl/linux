@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
- * Copyright (C) 2005-2014, 2023-2024 Intel Corporation
+ * Copyright (C) 2005-2014, 2023-2025 Intel Corporation
  */
 /*
  * Please use this file (commands.h) only for uCode API definitions.
@@ -614,7 +614,7 @@ struct iwl_rxon_time_cmd {
  * REPLY_CHANNEL_SWITCH = 0x72 (command, has simple generic response)
  */
 /**
- * struct iwl5000_channel_switch_cmd
+ * struct iwl5000_channel_switch_cmd - channel switch command (5000 series)
  * @band: 0- 5.2GHz, 1- 2.4GHz
  * @expect_beacon: 0- resume transmits after channel switch
  *		   1- wait for beacon to resume transmits
@@ -635,7 +635,7 @@ struct iwl5000_channel_switch_cmd {
 } __packed;
 
 /**
- * struct iwl6000_channel_switch_cmd
+ * struct iwl6000_channel_switch_cmd - channel switch command (6000 series)
  * @band: 0- 5.2GHz, 1- 2.4GHz
  * @expect_beacon: 0- resume transmits after channel switch
  *		   1- wait for beacon to resume transmits
@@ -791,7 +791,7 @@ struct iwl_keyinfo {
 } __packed;
 
 /**
- * struct sta_id_modify
+ * struct sta_id_modify - station modify command
  * @addr: station's MAC address
  * @reserved1: reserved for alignment
  * @sta_id: index of station in uCode's station table
@@ -1180,85 +1180,87 @@ struct iwl_dram_scratch {
 } __packed;
 
 struct iwl_tx_cmd {
-	/*
-	 * MPDU byte count:
-	 * MAC header (24/26/30/32 bytes) + 2 bytes pad if 26/30 header size,
-	 * + 8 byte IV for CCM or TKIP (not used for WEP)
-	 * + Data payload
-	 * + 8-byte MIC (not used for CCM/WEP)
-	 * NOTE:  Does not include Tx command bytes, post-MAC pad bytes,
-	 *        MIC (CCM) 8 bytes, ICV (WEP/TKIP/CKIP) 4 bytes, CRC 4 bytes.i
-	 * Range: 14-2342 bytes.
-	 */
-	__le16 len;
+	/* New members MUST be added within the __struct_group() macro below. */
+	__struct_group(iwl_tx_cmd_hdr, __hdr, __packed,
+		/*
+		 * MPDU byte count:
+		 * MAC header (24/26/30/32 bytes) + 2 bytes pad if 26/30 header size,
+		 * + 8 byte IV for CCM or TKIP (not used for WEP)
+		 * + Data payload
+		 * + 8-byte MIC (not used for CCM/WEP)
+		 * NOTE:  Does not include Tx command bytes, post-MAC pad bytes,
+		 *        MIC (CCM) 8 bytes, ICV (WEP/TKIP/CKIP) 4 bytes, CRC 4 bytes.i
+		 * Range: 14-2342 bytes.
+		 */
+		__le16 len;
 
-	/*
-	 * MPDU or MSDU byte count for next frame.
-	 * Used for fragmentation and bursting, but not 11n aggregation.
-	 * Same as "len", but for next frame.  Set to 0 if not applicable.
-	 */
-	__le16 next_frame_len;
+		/*
+		 * MPDU or MSDU byte count for next frame.
+		 * Used for fragmentation and bursting, but not 11n aggregation.
+		 * Same as "len", but for next frame.  Set to 0 if not applicable.
+		 */
+		__le16 next_frame_len;
 
-	__le32 tx_flags;	/* TX_CMD_FLG_* */
+		__le32 tx_flags;	/* TX_CMD_FLG_* */
 
-	/* uCode may modify this field of the Tx command (in host DRAM!).
-	 * Driver must also set dram_lsb_ptr and dram_msb_ptr in this cmd. */
-	struct iwl_dram_scratch scratch;
+		/* uCode may modify this field of the Tx command (in host DRAM!).
+		 * Driver must also set dram_lsb_ptr and dram_msb_ptr in this cmd. */
+		struct iwl_dram_scratch scratch;
 
-	/* Rate for *all* Tx attempts, if TX_CMD_FLG_STA_RATE_MSK is cleared. */
-	__le32 rate_n_flags;	/* RATE_MCS_* */
+		/* Rate for *all* Tx attempts, if TX_CMD_FLG_STA_RATE_MSK is cleared. */
+		__le32 rate_n_flags;	/* RATE_MCS_* */
 
-	/* Index of destination station in uCode's station table */
-	u8 sta_id;
+		/* Index of destination station in uCode's station table */
+		u8 sta_id;
 
-	/* Type of security encryption:  CCM or TKIP */
-	u8 sec_ctl;		/* TX_CMD_SEC_* */
+		/* Type of security encryption:  CCM or TKIP */
+		u8 sec_ctl;		/* TX_CMD_SEC_* */
 
-	/*
-	 * Index into rate table (see REPLY_TX_LINK_QUALITY_CMD) for initial
-	 * Tx attempt, if TX_CMD_FLG_STA_RATE_MSK is set.  Normally "0" for
-	 * data frames, this field may be used to selectively reduce initial
-	 * rate (via non-0 value) for special frames (e.g. management), while
-	 * still supporting rate scaling for all frames.
-	 */
-	u8 initial_rate_index;
-	u8 reserved;
-	u8 key[16];
-	__le16 next_frame_flags;
-	__le16 reserved2;
-	union {
-		__le32 life_time;
-		__le32 attempt;
-	} stop_time;
+		/*
+		 * Index into rate table (see REPLY_TX_LINK_QUALITY_CMD) for initial
+		 * Tx attempt, if TX_CMD_FLG_STA_RATE_MSK is set.  Normally "0" for
+		 * data frames, this field may be used to selectively reduce initial
+		 * rate (via non-0 value) for special frames (e.g. management), while
+		 * still supporting rate scaling for all frames.
+		 */
+		u8 initial_rate_index;
+		u8 reserved;
+		u8 key[16];
+		__le16 next_frame_flags;
+		__le16 reserved2;
+		union {
+			__le32 life_time;
+			__le32 attempt;
+		} stop_time;
 
-	/* Host DRAM physical address pointer to "scratch" in this command.
-	 * Must be dword aligned.  "0" in dram_lsb_ptr disables usage. */
-	__le32 dram_lsb_ptr;
-	u8 dram_msb_ptr;
+		/* Host DRAM physical address pointer to "scratch" in this command.
+		 * Must be dword aligned.  "0" in dram_lsb_ptr disables usage. */
+		__le32 dram_lsb_ptr;
+		u8 dram_msb_ptr;
 
-	u8 rts_retry_limit;	/*byte 50 */
-	u8 data_retry_limit;	/*byte 51 */
-	u8 tid_tspec;
-	union {
-		__le16 pm_frame_timeout;
-		__le16 attempt_duration;
-	} timeout;
+		u8 rts_retry_limit;	/*byte 50 */
+		u8 data_retry_limit;	/*byte 51 */
+		u8 tid_tspec;
+		union {
+			__le16 pm_frame_timeout;
+			__le16 attempt_duration;
+		} timeout;
 
-	/*
-	 * Duration of EDCA burst Tx Opportunity, in 32-usec units.
-	 * Set this if txop time is not specified by HCCA protocol (e.g. by AP).
-	 */
-	__le16 driver_txop;
+		/*
+		 * Duration of EDCA burst Tx Opportunity, in 32-usec units.
+		 * Set this if txop time is not specified by HCCA protocol (e.g. by AP).
+		 */
+		__le16 driver_txop;
 
+	);
 	/*
 	 * MAC header goes here, followed by 2 bytes padding if MAC header
 	 * length is 26 or 30 bytes, followed by payload data
 	 */
-	union {
-		DECLARE_FLEX_ARRAY(u8, payload);
-		DECLARE_FLEX_ARRAY(struct ieee80211_hdr, hdr);
-	};
+	struct ieee80211_hdr hdr[];
 } __packed;
+static_assert(offsetof(struct iwl_tx_cmd, hdr) == sizeof(struct iwl_tx_cmd_hdr),
+	      "struct member likely outside of __struct_group()");
 
 /*
  * TX command response is sent after *agn* transmission attempts.
@@ -2024,7 +2026,7 @@ struct iwl_spectrum_notification {
 	u8 channel;
 	u8 type;		/* see enum iwl_measurement_type */
 	u8 reserved1;
-	/* NOTE:  cca_ofdm, cca_cck, basic_type, and histogram are only only
+	/* NOTE:  cca_ofdm, cca_cck, basic_type, and histogram are only
 	 * valid if applicable for measurement type requested. */
 	__le32 cca_ofdm;	/* cca fraction time in 40Mhz clock periods */
 	__le32 cca_cck;		/* cca fraction time in 44Mhz clock periods */
@@ -2312,7 +2314,7 @@ struct iwl_scan_cmd {
 
 	/* For active scans (set to all-0s for passive scans).
 	 * Does not include payload.  Must specify Tx rate; no rate scaling. */
-	struct iwl_tx_cmd tx_cmd;
+	struct iwl_tx_cmd_hdr tx_cmd;
 
 	/* For directed active scans (set to all-0s otherwise) */
 	struct iwl_ssid_ie direct_scan[PROBE_OPTION_MAX];
@@ -2423,7 +2425,7 @@ struct iwlagn_beacon_notif {
  */
 
 struct iwl_tx_beacon_cmd {
-	struct iwl_tx_cmd tx;
+	struct iwl_tx_cmd_hdr tx;
 	__le16 tim_idx;
 	u8 tim_size;
 	u8 reserved1;
@@ -2990,7 +2992,7 @@ struct iwl_missed_beacon_notif {
 #define SENSITIVITY_CMD_CONTROL_WORK_TABLE	cpu_to_le16(1)
 
 /**
- * struct iwl_sensitivity_cmd
+ * struct iwl_sensitivity_cmd - sensitivity configuration command
  * @control:  (1) updates working table, (0) updates default table
  * @table:  energy threshold values, use HD_* as index into table
  *
@@ -3846,7 +3848,7 @@ struct iwlagn_wowlan_status {
 #define IWL_MIN_SLOT_TIME	20
 
 /**
- * struct iwl_wipan_slot
+ * struct iwl_wipan_slot - WiPAN slot configuration
  * @width: Time in TU
  * @type:
  *   0 - BSS
@@ -3866,7 +3868,7 @@ struct iwl_wipan_slot {
 #define IWL_WIPAN_PARAMS_FLG_FULL_SLOTTED_MODE		BIT(5)
 
 /**
- * struct iwl_wipan_params_cmd
+ * struct iwl_wipan_params_cmd - WiPAN parameters
  * @flags:
  *   bit0: reserved
  *   bit1: CP leave channel with CTS

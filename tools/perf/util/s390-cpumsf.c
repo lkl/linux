@@ -345,7 +345,7 @@ static bool s390_cpumsf_trailer_show(const char *color, size_t pos,
 	}
 	color_fprintf(stdout, color, "    [%#08zx] Trailer %c%c%c bsdes:%d"
 		      " dsdes:%d Overflow:%lld Time:%#llx\n"
-		      "\t\tC:%d TOD:%#lx\n",
+		      "\t\tC:%d TOD:%#llx\n",
 		      pos,
 		      te->f ? 'F' : ' ',
 		      te->a ? 'A' : ' ',
@@ -513,6 +513,7 @@ static bool s390_cpumsf_make_event(size_t pos,
 				.period = 1
 			    };
 	union perf_event event;
+	int ret;
 
 	memset(&event, 0, sizeof(event));
 	if (basic->CL == 1)	/* Native LPAR mode */
@@ -536,8 +537,9 @@ static bool s390_cpumsf_make_event(size_t pos,
 	pr_debug4("%s pos:%#zx ip:%#" PRIx64 " P:%d CL:%d pid:%d.%d cpumode:%d cpu:%d\n",
 		 __func__, pos, sample.ip, basic->P, basic->CL, sample.pid,
 		 sample.tid, sample.cpumode, sample.cpu);
-	if (perf_session__deliver_synth_event(sfq->sf->session, &event,
-					      &sample)) {
+	ret = perf_session__deliver_synth_event(sfq->sf->session, &event, &sample);
+	perf_sample__exit(&sample);
+	if (ret) {
 		pr_err("s390 Auxiliary Trace: failed to deliver event\n");
 		return false;
 	}
@@ -1140,7 +1142,7 @@ int s390_cpumsf_process_auxtrace_info(union perf_event *event,
 	sf->machine = &session->machines.host; /* No kvm support */
 	sf->auxtrace_type = auxtrace_info->type;
 	sf->pmu_type = PERF_TYPE_RAW;
-	sf->machine_type = s390_cpumsf_get_type(session->evlist->env->cpuid);
+	sf->machine_type = s390_cpumsf_get_type(perf_session__env(session)->cpuid);
 
 	sf->auxtrace.process_event = s390_cpumsf_process_event;
 	sf->auxtrace.process_auxtrace_event = s390_cpumsf_process_auxtrace_event;

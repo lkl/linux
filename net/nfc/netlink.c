@@ -96,6 +96,11 @@ static int nfc_genl_send_target(struct sk_buff *msg, struct nfc_target *target,
 			goto nla_put_failure;
 	}
 
+	if (target->ats_len > 0 &&
+	    nla_put(msg, NFC_ATTR_TARGET_ATS, target->ats_len,
+		    target->ats))
+		goto nla_put_failure;
+
 	genlmsg_end(msg, hdr);
 	return 0;
 
@@ -1187,7 +1192,7 @@ static int nfc_genl_llc_sdreq(struct sk_buff *skb, struct genl_info *info)
 			continue;
 
 		uri = nla_data(sdp_attrs[NFC_SDP_ATTR_URI]);
-		if (uri == NULL || *uri == 0)
+		if (*uri == 0)
 			continue;
 
 		tid = local->sdreq_next_tid++;
@@ -1535,10 +1540,6 @@ static int nfc_genl_se_io(struct sk_buff *skb, struct genl_info *info)
 	}
 
 	apdu = nla_data(info->attrs[NFC_ATTR_SE_APDU]);
-	if (!apdu) {
-		rc = -EINVAL;
-		goto put_dev;
-	}
 
 	ctx = kzalloc(sizeof(struct se_io_ctx), GFP_KERNEL);
 	if (!ctx) {

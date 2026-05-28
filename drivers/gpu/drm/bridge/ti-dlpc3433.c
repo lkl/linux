@@ -94,7 +94,7 @@ static const struct regmap_access_table dlpc_volatile_table = {
 	.n_yes_ranges = ARRAY_SIZE(dlpc_volatile_ranges),
 };
 
-static struct regmap_config dlpc_regmap_config = {
+static const struct regmap_config dlpc_regmap_config = {
 	.reg_bits		= 8,
 	.val_bits		= 8,
 	.max_register		= WR_DSI_PORT_EN,
@@ -105,7 +105,7 @@ static struct regmap_config dlpc_regmap_config = {
 };
 
 static void dlpc_atomic_enable(struct drm_bridge *bridge,
-			       struct drm_bridge_state *old_bridge_state)
+			       struct drm_atomic_state *state)
 {
 	struct dlpc *dlpc = bridge_to_dlpc(bridge);
 	struct device *dev = dlpc->dev;
@@ -170,7 +170,7 @@ static void dlpc_atomic_enable(struct drm_bridge *bridge,
 }
 
 static void dlpc_atomic_pre_enable(struct drm_bridge *bridge,
-				   struct drm_bridge_state *old_bridge_state)
+				   struct drm_atomic_state *state)
 {
 	struct dlpc *dlpc = bridge_to_dlpc(bridge);
 	int ret;
@@ -193,7 +193,7 @@ static void dlpc_atomic_pre_enable(struct drm_bridge *bridge,
 }
 
 static void dlpc_atomic_post_disable(struct drm_bridge *bridge,
-				     struct drm_bridge_state *old_bridge_state)
+				     struct drm_atomic_state *state)
 {
 	struct dlpc *dlpc = bridge_to_dlpc(bridge);
 
@@ -242,12 +242,12 @@ static void dlpc_mode_set(struct drm_bridge *bridge,
 	drm_mode_copy(&dlpc->mode, adjusted_mode);
 }
 
-static int dlpc_attach(struct drm_bridge *bridge,
+static int dlpc_attach(struct drm_bridge *bridge, struct drm_encoder *encoder,
 		       enum drm_bridge_attach_flags flags)
 {
 	struct dlpc *dlpc = bridge_to_dlpc(bridge);
 
-	return drm_bridge_attach(bridge->encoder, dlpc->next_bridge, bridge, flags);
+	return drm_bridge_attach(encoder, dlpc->next_bridge, bridge, flags);
 }
 
 static const struct drm_bridge_funcs dlpc_bridge_funcs = {
@@ -348,9 +348,10 @@ static int dlpc3433_probe(struct i2c_client *client)
 	struct dlpc *dlpc;
 	int ret;
 
-	dlpc = devm_kzalloc(dev, sizeof(*dlpc), GFP_KERNEL);
-	if (!dlpc)
-		return -ENOMEM;
+	dlpc = devm_drm_bridge_alloc(dev, struct dlpc, bridge,
+				     &dlpc_bridge_funcs);
+	if (IS_ERR(dlpc))
+		return PTR_ERR(dlpc);
 
 	dlpc->dev = dev;
 
@@ -365,7 +366,6 @@ static int dlpc3433_probe(struct i2c_client *client)
 	dev_set_drvdata(dev, dlpc);
 	i2c_set_clientdata(client, dlpc);
 
-	dlpc->bridge.funcs = &dlpc_bridge_funcs;
 	dlpc->bridge.of_node = dev->of_node;
 	drm_bridge_add(&dlpc->bridge);
 
@@ -389,7 +389,7 @@ static void dlpc3433_remove(struct i2c_client *client)
 }
 
 static const struct i2c_device_id dlpc3433_id[] = {
-	{ "ti,dlpc3433", 0 },
+	{ "ti,dlpc3433" },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(i2c, dlpc3433_id);

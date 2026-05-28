@@ -184,8 +184,8 @@ def bpftool_prog_list(expected=None, ns="", exclude_orphaned=True):
         progs = [ p for p in progs if not p['orphaned'] ]
     if expected is not None:
         if len(progs) != expected:
-            fail(True, "%d BPF programs loaded, expected %d" %
-                 (len(progs), expected))
+            fail(True, "%d BPF programs loaded, expected %d\nLoaded Progs:\n%s" %
+                 (len(progs), expected, pp.pformat(progs)))
     return progs
 
 def bpftool_map_list(expected=None, ns=""):
@@ -207,20 +207,24 @@ def bpftool_prog_list_wait(expected=0, n_retry=20):
     raise Exception("Time out waiting for program counts to stabilize want %d, have %d" % (expected, nprogs))
 
 def bpftool_map_list_wait(expected=0, n_retry=20, ns=""):
+    nmaps = None
     for i in range(n_retry):
         maps = bpftool_map_list(ns=ns)
-        if len(maps) == expected:
+        nmaps = len(maps)
+        if nmaps == expected:
             return maps
         time.sleep(0.05)
     raise Exception("Time out waiting for map counts to stabilize want %d, have %d" % (expected, nmaps))
 
 def bpftool_prog_load(sample, file_name, maps=[], prog_type="xdp", dev=None,
-                      fail=True, include_stderr=False):
+                      fail=True, include_stderr=False, dev_bind=None):
     args = "prog load %s %s" % (os.path.join(bpf_test_dir, sample), file_name)
     if prog_type is not None:
         args += " type " + prog_type
     if dev is not None:
         args += " dev " + dev
+    elif dev_bind is not None:
+        args += " xdpmeta_dev " + dev_bind
     if len(maps):
         args += " map " + " map ".join(maps)
 
@@ -594,8 +598,9 @@ def check_extack_nsim(output, reference, args):
     check_extack(output, "netdevsim: " + reference, args)
 
 def check_no_extack(res, needle):
-    fail((res[1] + res[2]).count(needle) or (res[1] + res[2]).count("Warning:"),
-         "Found '%s' in command output, leaky extack?" % (needle))
+    haystack = (res[1] + res[2]).strip()
+    fail(haystack.count(needle) or haystack.count("Warning:"),
+         "Unexpected command output, leaky extack? ('%s', '%s')" % (needle, haystack))
 
 def check_verifier_log(output, reference):
     lines = output.split("\n")
@@ -707,6 +712,7 @@ _, base_maps = bpftool("map")
 base_map_names = [
     'pid_iter.rodata', # created on each bpftool invocation
     'libbpf_det_bind', # created on each bpftool invocation
+    'libbpf_global',
 ]
 
 # Check netdevsim
@@ -977,6 +983,16 @@ try:
     fail(ret == 0, "attached offloaded XDP program to drv")
     check_extack(err, "Using offloaded program without HW_MODE flag is not supported.", args)
     rm("/sys/fs/bpf/offload")
+    sim.wait_for_flush()
+
+    bpftool_prog_load("sample_ret0.bpf.o", "/sys/fs/bpf/devbound",
+                      dev_bind=sim['ifname'])
+    devbound = bpf_pinned("/sys/fs/bpf/devbound")
+    start_test("Test dev-bound program in generic mode...")
+    ret, _, err = sim.set_xdp(devbound, "generic", fail=False, include_stderr=True)
+    fail(ret == 0, "devbound program in generic mode allowed")
+    check_extack(err, "Can't attach device-bound programs in generic mode.", args)
+    rm("/sys/fs/bpf/devbound")
     sim.wait_for_flush()
 
     start_test("Test XDP load failure...")

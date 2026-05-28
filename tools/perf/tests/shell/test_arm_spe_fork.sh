@@ -1,11 +1,11 @@
-#!/bin/sh
+#!/bin/bash
 # Check Arm SPE doesn't hang when there are forks
 
 # SPDX-License-Identifier: GPL-2.0
 # German Gomez <german.gomez@arm.com>, 2022
 
 skip_if_no_arm_spe_event() {
-	perf list | grep -E -q 'arm_spe_[0-9]+//' && return 0
+	perf list pmu | grep -E -q 'arm_spe_[0-9]+//' && return 0
 	return 2
 }
 

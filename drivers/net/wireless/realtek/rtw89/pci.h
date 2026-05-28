@@ -18,11 +18,16 @@
 #define BAC_OOBS_SEL			BIT(4)
 #define RAC_ANA0A			0x0A
 #define B_BAC_EQ_SEL			BIT(5)
+#define RAC_ANA0B			0x0B
+#define MANUAL_LVL_MASK			GENMASK(8, 5)
 #define RAC_ANA0C			0x0C
 #define B_PCIE_BIT_PSAVE		BIT(15)
 #define RAC_ANA0D			0x0D
+#define OFFSET_CAL_MODE			BIT(13)
 #define BAC_RX_TEST_EN			BIT(6)
 #define RAC_ANA10			0x10
+#define ADDR_SEL_MASK		        GENMASK(9, 4)
+#define ADDR_SEL_VAL		        0x3C
 #define ADDR_SEL_PINOUT_DIS_VAL		0x3C4
 #define B_PCIE_BIT_PINOUT_DIS		BIT(3)
 #define RAC_REG_REV2			0x1B
@@ -38,6 +43,7 @@
 #define RAC_ANA1E_G2_VAL		0x6EEA
 #define RAC_ANA1F			0x1F
 #define OOBS_LEVEL_MASK			GENMASK(12, 8)
+#define OFFSET_CAL_MASK		        GENMASK(7, 4)
 #define RAC_ANA24			0x24
 #define B_AX_DEGLITCH			GENMASK(11, 8)
 #define RAC_ANA26			0x26
@@ -133,6 +139,11 @@
 #define R_RAC_DIRECT_OFFSET_G2 0x3880
 #define REG_FILTER_OUT_MASK GENMASK(6, 2)
 #define RAC_MULT 2
+
+#define R_RAC_DIRECT_OFFSET_BE_LANE0_G1 0x3800
+#define R_RAC_DIRECT_OFFSET_BE_LANE1_G1 0x3880
+#define R_RAC_DIRECT_OFFSET_BE_LANE0_G2 0x3900
+#define R_RAC_DIRECT_OFFSET_BE_LANE1_G2 0x3980
 
 #define RTW89_PCI_WR_RETRY_CNT		20
 
@@ -299,6 +310,7 @@
 #define B_BE_L1SS_TIMEOUT_CTRL BIT(18)
 #define B_BE_ASPM_CTRL_L1 BIT(17)
 #define B_BE_ASPM_CTRL_L0 BIT(16)
+#define B_BE_RTK_ASPM_CTRL_MASK GENMASK(17, 16)
 #define B_BE_XFER_PENDING_FW BIT(11)
 #define B_BE_XFER_PENDING BIT(10)
 #define B_BE_REQ_EXIT_L1 BIT(9)
@@ -360,6 +372,14 @@
 #define B_BE_HS0ISR_IND_INT BIT(0)
 
 #define R_BE_PCIE_DMA_IMR_0_V1 0x30B8
+#define B_BE_PCIE_RDU_CH7_IMR BIT(31)
+#define B_BE_PCIE_RDU_CH6_IMR BIT(30)
+#define B_BE_PCIE_RDU_CH5_IMR BIT(29)
+#define B_BE_PCIE_RDU_CH4_IMR BIT(28)
+#define B_BE_PCIE_RDU_CH3_IMR BIT(27)
+#define B_BE_PCIE_RDU_CH2_IMR BIT(26)
+#define B_BE_PCIE_RDU_CH1_IMR BIT(25)
+#define B_BE_PCIE_RDU_CH0_IMR BIT(24)
 #define B_BE_PCIE_RX_RX1P1_IMR0_V1 BIT(23)
 #define B_BE_PCIE_RX_RX0P1_IMR0_V1 BIT(22)
 #define B_BE_PCIE_RX_ROQ1_IMR0_V1 BIT(21)
@@ -385,6 +405,14 @@
 #define B_BE_PCIE_TX_CH0_IMR0 BIT(0)
 
 #define R_BE_PCIE_DMA_ISR 0x30BC
+#define B_BE_PCIE_RDU_CH7_INT BIT(31)
+#define B_BE_PCIE_RDU_CH6_INT BIT(30)
+#define B_BE_PCIE_RDU_CH5_INT BIT(29)
+#define B_BE_PCIE_RDU_CH4_INT BIT(28)
+#define B_BE_PCIE_RDU_CH3_INT BIT(27)
+#define B_BE_PCIE_RDU_CH2_INT BIT(26)
+#define B_BE_PCIE_RDU_CH1_INT BIT(25)
+#define B_BE_PCIE_RDU_CH0_INT BIT(24)
 #define B_BE_PCIE_RX_RX1P1_ISR_V1 BIT(23)
 #define B_BE_PCIE_RX_RX0P1_ISR_V1 BIT(22)
 #define B_BE_PCIE_RX_ROQ1_ISR_V1 BIT(21)
@@ -414,9 +442,13 @@
 #define B_BE_RDU_CH4_INT_IMR_V1 BIT(29)
 #define B_BE_RDU_CH3_INT_IMR_V1 BIT(28)
 #define B_BE_RDU_CH2_INT_IMR_V1 BIT(27)
+#define B_BE_RDU_CH1_INT_EN_V2 BIT(27)
 #define B_BE_RDU_CH1_INT_IMR_V1 BIT(26)
+#define B_BE_RDU_CH0_INT_EN_V2 BIT(26)
 #define B_BE_RDU_CH0_INT_IMR_V1 BIT(25)
+#define B_BE_RXDMA_STUCK_INT_EN_V2 BIT(25)
 #define B_BE_RXDMA_STUCK_INT_EN_V1 BIT(24)
+#define B_BE_TXDMA_STUCK_INT_EN_V2 BIT(24)
 #define B_BE_TXDMA_STUCK_INT_EN_V1 BIT(23)
 #define B_BE_TXDMA_CH14_INT_EN_V1 BIT(22)
 #define B_BE_TXDMA_CH13_INT_EN_V1 BIT(21)
@@ -443,34 +475,40 @@
 #define B_BE_RX0DMA_INT_EN BIT(0)
 
 #define R_BE_HAXI_HISR00 0xB0B4
-#define B_BE_RDU_CH6_INT BIT(28)
-#define B_BE_RDU_CH5_INT BIT(27)
-#define B_BE_RDU_CH4_INT BIT(26)
-#define B_BE_RDU_CH2_INT BIT(25)
-#define B_BE_RDU_CH1_INT BIT(24)
-#define B_BE_RDU_CH0_INT BIT(23)
-#define B_BE_RXDMA_STUCK_INT BIT(22)
-#define B_BE_TXDMA_STUCK_INT BIT(21)
-#define B_BE_TXDMA_CH14_INT BIT(20)
-#define B_BE_TXDMA_CH13_INT BIT(19)
-#define B_BE_TXDMA_CH12_INT BIT(18)
-#define B_BE_TXDMA_CH11_INT BIT(17)
-#define B_BE_TXDMA_CH10_INT BIT(16)
-#define B_BE_TXDMA_CH9_INT BIT(15)
-#define B_BE_TXDMA_CH8_INT BIT(14)
-#define B_BE_TXDMA_CH7_INT BIT(13)
-#define B_BE_TXDMA_CH6_INT BIT(12)
-#define B_BE_TXDMA_CH5_INT BIT(11)
-#define B_BE_TXDMA_CH4_INT BIT(10)
-#define B_BE_TXDMA_CH3_INT BIT(9)
-#define B_BE_TXDMA_CH2_INT BIT(8)
-#define B_BE_TXDMA_CH1_INT BIT(7)
-#define B_BE_TXDMA_CH0_INT BIT(6)
-#define B_BE_RPQ1DMA_INT BIT(5)
-#define B_BE_RX1P1DMA_INT BIT(4)
+#define B_BE_RDU_CH5_INT_V1 BIT(30)
+#define B_BE_RDU_CH4_INT_V1 BIT(29)
+#define B_BE_RDU_CH3_INT_V1 BIT(28)
+#define B_BE_RDU_CH2_INT_V1 BIT(27)
+#define B_BE_RDU_CH1_INT_V2 BIT(27)
+#define B_BE_RDU_CH1_INT_V1 BIT(26)
+#define B_BE_RDU_CH0_INT_V2 BIT(26)
+#define B_BE_RDU_CH0_INT_V1 BIT(25)
+#define B_BE_RXDMA_STUCK_INT_V2 BIT(25)
+#define B_BE_RXDMA_STUCK_INT_V1 BIT(24)
+#define B_BE_TXDMA_STUCK_INT_V2 BIT(24)
+#define B_BE_TXDMA_STUCK_INT_V1 BIT(23)
+#define B_BE_TXDMA_CH14_INT_V1 BIT(22)
+#define B_BE_TXDMA_CH13_INT_V1 BIT(21)
+#define B_BE_TXDMA_CH12_INT_V1 BIT(20)
+#define B_BE_TXDMA_CH11_INT_V1 BIT(19)
+#define B_BE_TXDMA_CH10_INT_V1 BIT(18)
+#define B_BE_TXDMA_CH9_INT_V1 BIT(17)
+#define B_BE_TXDMA_CH8_INT_V1 BIT(16)
+#define B_BE_TXDMA_CH7_INT_V1 BIT(15)
+#define B_BE_TXDMA_CH6_INT_V1 BIT(14)
+#define B_BE_TXDMA_CH5_INT_V1 BIT(13)
+#define B_BE_TXDMA_CH4_INT_V1 BIT(12)
+#define B_BE_TXDMA_CH3_INT_V1 BIT(11)
+#define B_BE_TXDMA_CH2_INT_V1 BIT(10)
+#define B_BE_TXDMA_CH1_INT_V1 BIT(9)
+#define B_BE_TXDMA_CH0_INT_V1 BIT(8)
+#define B_BE_RX1P1DMA_INT_V1 BIT(7)
+#define B_BE_RX0P1DMA_INT_V1 BIT(6)
+#define B_BE_RO1DMA_INT BIT(5)
+#define B_BE_RP1DMA_INT BIT(4)
 #define B_BE_RX1DMA_INT BIT(3)
-#define B_BE_RPQ0DMA_INT BIT(2)
-#define B_BE_RX0P1DMA_INT BIT(1)
+#define B_BE_RO0DMA_INT BIT(2)
+#define B_BE_RP0DMA_INT BIT(1)
 #define B_BE_RX0DMA_INT BIT(0)
 
 /* TX/RX */
@@ -770,8 +808,24 @@
 #define R_BE_CH13_TXBD_NUM_V1 0xB04C
 #define R_BE_CH14_TXBD_NUM_V1 0xB04E
 
+#define R_BE_CH0_TXBD_CFG 0xB030
+#define R_BE_CH2_TXBD_CFG 0xB034
+#define R_BE_CH4_TXBD_CFG 0xB038
+#define R_BE_CH6_TXBD_CFG 0xB03C
+#define R_BE_CH8_TXBD_CFG 0xB040
+#define R_BE_CH10_TXBD_CFG 0xB044
+#define R_BE_CH12_TXBD_CFG 0xB048
+#define B_BE_TX_FLAG BIT(14)
+#define B_BE_TX_START_OFFSET_MASK GENMASK(12, 4)
+#define B_BE_TX_NUM_SEL_MASK GENMASK(2, 0)
+
 #define R_BE_RXQ0_RXBD_NUM_V1 0xB050
 #define R_BE_RPQ0_RXBD_NUM_V1 0xB052
+
+#define R_BE_RX_CH0_RXBD_CONFIG 0xB050
+#define R_BE_RX_CH1_RXBD_CONFIG 0xB052
+#define B_BE_RX_START_OFFSET_MASK GENMASK(11, 4)
+#define B_BE_RX_NUM_SEL_MASK GENMASK(2, 0)
 
 #define R_BE_CH0_TXBD_IDX_V1 0xB100
 #define R_BE_CH1_TXBD_IDX_V1 0xB104
@@ -823,10 +877,24 @@
 #define R_BE_CH14_TXBD_DESA_L_V1 0xB270
 #define R_BE_CH14_TXBD_DESA_H_V1 0xB274
 
+#define R_BE_ACQ_TXBD_DESA_L 0xB200
+#define B_BE_TX_ACQ_DESA_L_MASK GENMASK(31, 3)
+#define R_BE_ACQ_TXBD_DESA_H 0xB204
+#define B_BE_TX_ACQ_DESA_H_MASK GENMASK(7, 0)
+#define R_BE_NACQ_TXBD_DESA_L 0xB240
+#define B_BE_TX_NACQ_DESA_L_MASK GENMASK(31, 3)
+#define R_BE_NACQ_TXBD_DESA_H 0xB244
+#define B_BE_TX_NACQ_DESA_H_MASK GENMASK(7, 0)
+
 #define R_BE_RXQ0_RXBD_DESA_L_V1 0xB300
 #define R_BE_RXQ0_RXBD_DESA_H_V1 0xB304
 #define R_BE_RPQ0_RXBD_DESA_L_V1 0xB308
 #define R_BE_RPQ0_RXBD_DESA_H_V1 0xB30C
+
+#define R_BE_HOST0_RXBD_DESA_L 0xB300
+#define B_BE_RX_HOST0_DESA_L_MASK GENMASK(31, 3)
+#define R_BE_HOST0_RXBD_DESA_H 0xB304
+#define B_BE_RX_HOST0_DESA_H_MASK GENMASK(7, 0)
 
 #define R_BE_WP_ADDR_H_SEL0_3_V1 0xB420
 #define R_BE_WP_ADDR_H_SEL4_7_V1 0xB424
@@ -1039,7 +1107,8 @@
 #define RTW89_PCI_TXWD_NUM_MAX		512
 #define RTW89_PCI_TXWD_PAGE_SIZE	128
 #define RTW89_PCI_ADDRINFO_MAX		4
-#define RTW89_PCI_RX_BUF_SIZE		(11454 + 40) /* +40 for rtw89_rxdesc_long_v2 */
+/* +40 for rtw89_rxdesc_long_v2; +4 for rtw89_pci_rxbd_info */
+#define RTW89_PCI_RX_BUF_SIZE		(11454 + 40 + 4)
 
 #define RTW89_PCI_POLL_BDRAM_RST_CNT	100
 #define RTW89_PCI_MULTITAG		8
@@ -1234,7 +1303,7 @@ struct rtw89_pci_bd_idx_addr {
 };
 
 struct rtw89_pci_ch_dma_addr {
-	u32 num;
+	u32 num; /* also `offset` addr for group_bd_addr design */
 	u32 idx;
 	u32 bdram;
 	u32 desa_l;
@@ -1252,13 +1321,15 @@ struct rtw89_pci_bd_ram {
 	u8 min_num;
 };
 
-struct rtw89_pci_gen_def {
+struct rtw89_pci_isr_def {
 	u32 isr_rdu;
 	u32 isr_halt_c2h;
 	u32 isr_wdt_timeout;
 	struct rtw89_reg2_def isr_clear_rpq;
 	struct rtw89_reg2_def isr_clear_rxq;
+};
 
+struct rtw89_pci_gen_def {
 	int (*mac_pre_init)(struct rtw89_dev *rtwdev);
 	int (*mac_pre_deinit)(struct rtw89_dev *rtwdev);
 	int (*mac_post_init)(struct rtw89_dev *rtwdev);
@@ -1276,10 +1347,34 @@ struct rtw89_pci_gen_def {
 	void (*aspm_set)(struct rtw89_dev *rtwdev, bool enable);
 	void (*clkreq_set)(struct rtw89_dev *rtwdev, bool enable);
 	void (*l1ss_set)(struct rtw89_dev *rtwdev, bool enable);
+
+	void (*disable_eq)(struct rtw89_dev *rtwdev);
+	void (*power_wake)(struct rtw89_dev *rtwdev, bool pwr_up);
+};
+
+#define RTW89_PCI_SSID(v, d, ssv, ssd, cust) \
+	.vendor = v, .device = d, .subsystem_vendor = ssv, .subsystem_device = ssd, \
+	.custid = RTW89_CUSTID_ ##cust
+
+struct rtw89_pci_ssid_quirk {
+	unsigned short vendor;
+	unsigned short device;
+	unsigned short subsystem_vendor;
+	unsigned short subsystem_device;
+	enum rtw89_custid custid;
+	unsigned long bitmap; /* bitmap of rtw89_quirks */
+};
+
+struct rtw89_pci_rpp_info {
+	u16 seq;
+	u8 qsel;
+	u8 tx_status;
+	u8 txch;
 };
 
 struct rtw89_pci_info {
 	const struct rtw89_pci_gen_def *gen_def;
+	const struct rtw89_pci_isr_def *isr_def;
 	enum mac_ax_bd_trunc_mode txbd_trunc_mode;
 	enum mac_ax_bd_trunc_mode rxbd_trunc_mode;
 	enum mac_ax_rxbd_mode rxbd_mode;
@@ -1296,6 +1391,9 @@ struct rtw89_pci_info {
 	enum mac_ax_io_rcy_tmr io_rcy_tmr;
 	bool rx_ring_eq_is_full;
 	bool check_rx_tag;
+	bool no_rxbd_fs;
+	bool group_bd_addr;
+	u32 rpp_fmt_size;
 
 	u32 init_cfg_reg;
 	u32 txhci_en_bit;
@@ -1325,12 +1423,16 @@ struct rtw89_pci_info {
 	u32 (*fill_txaddr_info)(struct rtw89_dev *rtwdev,
 				void *txaddr_info_addr, u32 total_len,
 				dma_addr_t dma, u8 *add_info_nr);
+	void (*parse_rpp)(struct rtw89_dev *rtwdev, void *rpp,
+			  struct rtw89_pci_rpp_info *rpp_info);
 	void (*config_intr_mask)(struct rtw89_dev *rtwdev);
 	void (*enable_intr)(struct rtw89_dev *rtwdev, struct rtw89_pci *rtwpci);
 	void (*disable_intr)(struct rtw89_dev *rtwdev, struct rtw89_pci *rtwpci);
 	void (*recognize_intrs)(struct rtw89_dev *rtwdev,
 				struct rtw89_pci *rtwpci,
 				struct rtw89_pci_isrs *isrs);
+
+	const struct rtw89_pci_ssid_quirk *ssid_quirks;
 };
 
 struct rtw89_pci_tx_data {
@@ -1396,6 +1498,19 @@ struct rtw89_pci_rpp_fmt {
 	__le32 dword;
 } __packed;
 
+#define RTW89_PCI_RPP_W0_MACID_V1_MASK		GENMASK(9, 0)
+#define RTW89_PCI_RPP_W0_DMA_CH_MASK		GENMASK(13, 10)
+#define RTW89_PCI_RPP_W0_TX_STATUS_V1_MASK	GENMASK(16, 14)
+#define RTW89_PCI_RPP_W0_PCIE_SEQ_V1_MASK	GENMASK(31, 17)
+#define RTW89_PCI_RPP_W1_QSEL_V1_MASK		GENMASK(5, 0)
+#define RTW89_PCI_RPP_W1_TID_IND		BIT(6)
+#define RTW89_PCI_RPP_W1_CHANGE_LINK		BIT(7)
+
+struct rtw89_pci_rpp_fmt_v1 {
+	__le32 w0;
+	__le32 w1;
+} __packed;
+
 struct rtw89_pci_rx_bd_32 {
 	__le16 buf_size;
 	__le16 opt;
@@ -1434,6 +1549,12 @@ struct rtw89_pci_dma_ring {
 	u32 rp; /* hw idx */
 };
 
+struct rtw89_pci_dma_pool {
+	void *head;
+	dma_addr_t dma;
+	u32 size;
+};
+
 struct rtw89_pci_tx_wd_ring {
 	void *head;
 	dma_addr_t dma;
@@ -1463,6 +1584,11 @@ struct rtw89_pci_tx_ring {
 	u64 tx_mac_id_drop;
 };
 
+struct rtw89_pci_tx_rings {
+	struct rtw89_pci_tx_ring rings[RTW89_TXCH_NUM];
+	struct rtw89_pci_dma_pool bd_pool;
+};
+
 struct rtw89_pci_rx_ring {
 	struct rtw89_pci_dma_ring bd_ring;
 	struct sk_buff *buf[RTW89_PCI_RXBD_NUM_MAX];
@@ -1470,6 +1596,11 @@ struct rtw89_pci_rx_ring {
 	struct sk_buff *diliver_skb;
 	struct rtw89_rx_desc_info diliver_desc;
 	u32 target_rx_tag:13;
+};
+
+struct rtw89_pci_rx_rings {
+	struct rtw89_pci_rx_ring rings[RTW89_RXCH_NUM];
+	struct rtw89_pci_dma_pool bd_pool;
 };
 
 struct rtw89_pci_isrs {
@@ -1489,8 +1620,8 @@ struct rtw89_pci {
 	bool low_power;
 	bool under_recovery;
 	bool enable_dac;
-	struct rtw89_pci_tx_ring tx_rings[RTW89_TXCH_NUM];
-	struct rtw89_pci_rx_ring rx_rings[RTW89_RXCH_NUM];
+	struct rtw89_pci_tx_rings tx;
+	struct rtw89_pci_rx_rings rx;
 	struct sk_buff_head h2c_queue;
 	struct sk_buff_head h2c_release_queue;
 	DECLARE_BITMAP(kick_map, RTW89_TXCH_NUM);
@@ -1503,10 +1634,7 @@ struct rtw89_pci {
 
 static inline struct rtw89_pci_rx_info *RTW89_PCI_RX_SKB_CB(struct sk_buff *skb)
 {
-	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
-
-	BUILD_BUG_ON(sizeof(struct rtw89_pci_tx_data) >
-		     sizeof(info->status.status_driver_data));
+	BUILD_BUG_ON(sizeof(struct rtw89_pci_rx_info) > sizeof(skb->cb));
 
 	return (struct rtw89_pci_rx_info *)skb->cb;
 }
@@ -1536,6 +1664,10 @@ rtw89_pci_rxbd_increase(struct rtw89_pci_rx_ring *rx_ring, u32 cnt)
 static inline struct rtw89_pci_tx_data *RTW89_PCI_TX_SKB_CB(struct sk_buff *skb)
 {
 	struct rtw89_tx_skb_data *data = RTW89_TX_SKB_CB(skb);
+
+	BUILD_BUG_ON(sizeof(struct rtw89_tx_skb_data) +
+		     sizeof(struct rtw89_pci_tx_data) >
+		     sizeof_field(struct ieee80211_tx_info, driver_data));
 
 	return (struct rtw89_pci_tx_data *)data->hci_priv;
 }
@@ -1588,11 +1720,16 @@ static inline bool rtw89_pci_ltr_is_err_reg_val(u32 val)
 
 extern const struct dev_pm_ops rtw89_pm_ops;
 extern const struct dev_pm_ops rtw89_pm_ops_be;
+extern const struct pci_error_handlers rtw89_pci_err_handler;
 extern const struct rtw89_pci_ch_dma_addr_set rtw89_pci_ch_dma_addr_set;
 extern const struct rtw89_pci_ch_dma_addr_set rtw89_pci_ch_dma_addr_set_v1;
 extern const struct rtw89_pci_ch_dma_addr_set rtw89_pci_ch_dma_addr_set_be;
+extern const struct rtw89_pci_ch_dma_addr_set rtw89_pci_ch_dma_addr_set_be_v1;
 extern const struct rtw89_pci_bd_ram rtw89_bd_ram_table_dual[RTW89_TXCH_NUM];
 extern const struct rtw89_pci_bd_ram rtw89_bd_ram_table_single[RTW89_TXCH_NUM];
+extern const struct rtw89_pci_isr_def rtw89_pci_isr_ax;
+extern const struct rtw89_pci_isr_def rtw89_pci_isr_be;
+extern const struct rtw89_pci_isr_def rtw89_pci_isr_be_v1;
 extern const struct rtw89_pci_gen_def rtw89_pci_gen_ax;
 extern const struct rtw89_pci_gen_def rtw89_pci_gen_be;
 
@@ -1600,6 +1737,7 @@ struct pci_device_id;
 
 int rtw89_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id);
 void rtw89_pci_remove(struct pci_dev *pdev);
+void rtw89_pci_basic_cfg(struct rtw89_dev *rtwdev, bool resume);
 void rtw89_pci_ops_reset(struct rtw89_dev *rtwdev);
 int rtw89_pci_ltr_set(struct rtw89_dev *rtwdev, bool en);
 int rtw89_pci_ltr_set_v1(struct rtw89_dev *rtwdev, bool en);
@@ -1610,16 +1748,23 @@ u32 rtw89_pci_fill_txaddr_info(struct rtw89_dev *rtwdev,
 u32 rtw89_pci_fill_txaddr_info_v1(struct rtw89_dev *rtwdev,
 				  void *txaddr_info_addr, u32 total_len,
 				  dma_addr_t dma, u8 *add_info_nr);
+void rtw89_pci_parse_rpp(struct rtw89_dev *rtwdev, void *_rpp,
+			 struct rtw89_pci_rpp_info *rpp_info);
+void rtw89_pci_parse_rpp_v1(struct rtw89_dev *rtwdev, void *_rpp,
+			    struct rtw89_pci_rpp_info *rpp_info);
 void rtw89_pci_ctrl_dma_all(struct rtw89_dev *rtwdev, bool enable);
 void rtw89_pci_config_intr_mask(struct rtw89_dev *rtwdev);
 void rtw89_pci_config_intr_mask_v1(struct rtw89_dev *rtwdev);
 void rtw89_pci_config_intr_mask_v2(struct rtw89_dev *rtwdev);
+void rtw89_pci_config_intr_mask_v3(struct rtw89_dev *rtwdev);
 void rtw89_pci_enable_intr(struct rtw89_dev *rtwdev, struct rtw89_pci *rtwpci);
 void rtw89_pci_disable_intr(struct rtw89_dev *rtwdev, struct rtw89_pci *rtwpci);
 void rtw89_pci_enable_intr_v1(struct rtw89_dev *rtwdev, struct rtw89_pci *rtwpci);
 void rtw89_pci_disable_intr_v1(struct rtw89_dev *rtwdev, struct rtw89_pci *rtwpci);
 void rtw89_pci_enable_intr_v2(struct rtw89_dev *rtwdev, struct rtw89_pci *rtwpci);
 void rtw89_pci_disable_intr_v2(struct rtw89_dev *rtwdev, struct rtw89_pci *rtwpci);
+void rtw89_pci_enable_intr_v3(struct rtw89_dev *rtwdev, struct rtw89_pci *rtwpci);
+void rtw89_pci_disable_intr_v3(struct rtw89_dev *rtwdev, struct rtw89_pci *rtwpci);
 void rtw89_pci_recognize_intrs(struct rtw89_dev *rtwdev,
 			       struct rtw89_pci *rtwpci,
 			       struct rtw89_pci_isrs *isrs);
@@ -1627,6 +1772,9 @@ void rtw89_pci_recognize_intrs_v1(struct rtw89_dev *rtwdev,
 				  struct rtw89_pci *rtwpci,
 				  struct rtw89_pci_isrs *isrs);
 void rtw89_pci_recognize_intrs_v2(struct rtw89_dev *rtwdev,
+				  struct rtw89_pci *rtwpci,
+				  struct rtw89_pci_isrs *isrs);
+void rtw89_pci_recognize_intrs_v3(struct rtw89_dev *rtwdev,
 				  struct rtw89_pci *rtwpci,
 				  struct rtw89_pci_isrs *isrs);
 
@@ -1766,4 +1914,21 @@ static inline int rtw89_pci_poll_txdma_ch_idle(struct rtw89_dev *rtwdev)
 
 	return gen_def->poll_txdma_ch_idle(rtwdev);
 }
+
+static inline void rtw89_pci_disable_eq(struct rtw89_dev *rtwdev)
+{
+	const struct rtw89_pci_info *info = rtwdev->pci_info;
+	const struct rtw89_pci_gen_def *gen_def = info->gen_def;
+
+	gen_def->disable_eq(rtwdev);
+}
+
+static inline void rtw89_pci_power_wake(struct rtw89_dev *rtwdev, bool pwr_up)
+{
+	const struct rtw89_pci_info *info = rtwdev->pci_info;
+	const struct rtw89_pci_gen_def *gen_def = info->gen_def;
+
+	gen_def->power_wake(rtwdev, pwr_up);
+}
+
 #endif

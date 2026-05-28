@@ -249,6 +249,11 @@ static const struct drm_display_mode default_mode = {
 	.flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC,
 };
 
+/*
+ * The mode data for this panel has been reverse engineered without access
+ * to the panel datasheet / manual. Using DRM_MODE_FLAG_PHSYNC like all
+ * other panels results in garbage data on the display.
+ */
 static const struct drm_display_mode t28cp45tn89_mode = {
 	.clock = 6008,
 	.hdisplay = 240,
@@ -261,7 +266,7 @@ static const struct drm_display_mode t28cp45tn89_mode = {
 	.vtotal = 320 + 8 + 4 + 4,
 	.width_mm = 43,
 	.height_mm = 57,
-	.flags = DRM_MODE_FLAG_PVSYNC | DRM_MODE_FLAG_NVSYNC,
+	.flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_PVSYNC,
 };
 
 static const struct drm_display_mode et028013dma_mode = {
@@ -612,9 +617,10 @@ static int st7789v_probe(struct spi_device *spi)
 	struct st7789v *ctx;
 	int ret;
 
-	ctx = devm_kzalloc(dev, sizeof(*ctx), GFP_KERNEL);
-	if (!ctx)
-		return -ENOMEM;
+	ctx = devm_drm_panel_alloc(dev, struct st7789v, panel,
+				   &st7789v_drm_funcs, DRM_MODE_CONNECTOR_DPI);
+	if (IS_ERR(ctx))
+		return PTR_ERR(ctx);
 
 	spi_set_drvdata(spi, ctx);
 	ctx->spi = spi;
@@ -625,9 +631,6 @@ static int st7789v_probe(struct spi_device *spi)
 		return dev_err_probe(&spi->dev, ret, "Failed to setup spi\n");
 
 	ctx->info = device_get_match_data(&spi->dev);
-
-	drm_panel_init(&ctx->panel, dev, &st7789v_drm_funcs,
-		       DRM_MODE_CONNECTOR_DPI);
 
 	ctx->power = devm_regulator_get(dev, "power");
 	ret = PTR_ERR_OR_ZERO(ctx->power);

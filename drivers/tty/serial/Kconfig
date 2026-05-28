@@ -128,7 +128,7 @@ config SERIAL_SB1250_DUART_CONSOLE
 config SERIAL_ATMEL
 	bool "AT91 on-chip serial port support"
 	depends on COMMON_CLK
-	depends on ARCH_AT91 || COMPILE_TEST
+	depends on ARCH_MICROCHIP || COMPILE_TEST
 	select SERIAL_CORE
 	select SERIAL_MCTRL_GPIO if GPIOLIB
 	select MFD_AT91_USART
@@ -178,25 +178,6 @@ config SERIAL_ATMEL_TTYAT
 	  /dev/, and pass "console=ttyATn" to the kernel.
 
 	  Say Y if you have an external 8250/16C550 UART.  If unsure, say N.
-
-config SERIAL_KGDB_NMI
-	bool "Serial console over KGDB NMI debugger port"
-	depends on KGDB_SERIAL_CONSOLE
-	help
-	  This special driver allows you to temporary use NMI debugger port
-	  as a normal console (assuming that the port is attached to KGDB).
-
-	  Unlike KDB's disable_nmi command, with this driver you are always
-	  able to go back to the debugger using KGDB escape sequence ($3#33).
-	  This is because this console driver processes the input in NMI
-	  context, and thus is able to intercept the magic sequence.
-
-	  Note that since the console interprets input and uses polling
-	  communication methods, for things like PPP you still must fully
-	  detach debugger port from the KGDB NMI (i.e. disable_nmi), and
-	  use raw console.
-
-	  If unsure, say N.
 
 config SERIAL_MESON
 	tristate "Meson serial port support"
@@ -303,6 +284,29 @@ config SERIAL_TEGRA_TCU_CONSOLE
 	  system console (the system console is the device which receives all
 	  kernel messages and warnings and which allows logins in single user
 	  mode).
+
+	  If unsure, say Y.
+
+config SERIAL_TEGRA_UTC
+	tristate "NVIDIA Tegra UART Trace Controller"
+	depends on ARCH_TEGRA || COMPILE_TEST
+	select SERIAL_CORE
+	help
+	  Support for Tegra UTC (UART Trace controller) client serial port.
+
+	  UTC is a HW based serial port that allows multiplexing multiple data
+	  streams of up to 16 UTC clients into a single hardware serial port.
+
+config SERIAL_TEGRA_UTC_CONSOLE
+	bool "Support for console on a Tegra UTC serial port"
+	depends on SERIAL_TEGRA_UTC
+	select SERIAL_CORE_CONSOLE
+	default SERIAL_TEGRA_UTC
+	help
+	  If you say Y here, it will be possible to use a Tegra UTC client as
+	  the system console (the system console is the device which receives
+	  all kernel messages and warnings and which allows logins in single
+	  user mode).
 
 	  If unsure, say Y.
 
@@ -671,6 +675,13 @@ config SERIAL_SH_SCI_DMA
 	depends on SERIAL_SH_SCI && DMA_ENGINE
 	default ARCH_RENESAS
 
+config SERIAL_RSCI
+	tristate "Support for Renesas RZ/T2H SCI variant"
+	depends on SERIAL_SH_SCI
+	help
+	  Support for the RZ/T2H SCI variant with fifo.
+	  Say Y if you want to be able to use the RZ/T2H SCI serial port.
+
 config SERIAL_HS_LPC32XX
 	tristate "LPC32XX high speed serial port support"
 	depends on ARCH_LPC32XX || COMPILE_TEST
@@ -771,7 +782,7 @@ config SERIAL_CPM
 	depends on CPM2 || CPM1
 	select SERIAL_CORE
 	help
-	  This driver supports the SCC and SMC serial ports on Motorola 
+	  This driver supports the SCC and SMC serial ports on Motorola
 	  embedded PowerPC that contain a CPM1 (8xx) or CPM2 (8xxx)
 
 config SERIAL_CPM_CONSOLE
@@ -877,7 +888,7 @@ config SERIAL_TXX9_STDSERIAL
 
 config SERIAL_JSM
 	tristate "Digi International NEO and Classic PCI Support"
-	depends on PCI
+	depends on PCI && HAS_IOPORT
 	select SERIAL_CORE
 	help
 	  This is a driver for Digi International's Neo and Classic series
@@ -916,6 +927,14 @@ config SERIAL_QCOM_GENI_CONSOLE
 	help
 	  Serial console driver for Qualcomm Technologies Inc's GENI based
 	  QUP hardware.
+
+config SERIAL_QCOM_GENI_UART_PORTS
+	int "Maximum number of GENI UART ports"
+	depends on SERIAL_QCOM_GENI
+	default "8"
+	help
+	  Set this to the maximum number of serial ports you want the driver
+	  to support.
 
 config SERIAL_VT8500
 	bool "VIA VT8500 on-chip serial port support"
@@ -1401,7 +1420,7 @@ config SERIAL_STM32
 
 config SERIAL_STM32_CONSOLE
 	bool "Support for console on STM32"
-	depends on SERIAL_STM32=y
+	depends on SERIAL_STM32
 	select SERIAL_CORE_CONSOLE
 	select SERIAL_EARLYCON
 

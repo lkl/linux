@@ -178,13 +178,7 @@ static void p2m_init_identity(unsigned long *p2m, unsigned long pfn)
 static void * __ref alloc_p2m_page(void)
 {
 	if (unlikely(!slab_is_available())) {
-		void *ptr = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
-
-		if (!ptr)
-			panic("%s: Failed to allocate %lu bytes align=0x%lx\n",
-			      __func__, PAGE_SIZE, PAGE_SIZE);
-
-		return ptr;
+		return memblock_alloc_or_panic(PAGE_SIZE, PAGE_SIZE);
 	}
 
 	return (void *)__get_free_page(GFP_KERNEL);
@@ -692,7 +686,7 @@ int set_foreign_p2m_mapping(struct gnttab_map_grant_ref *map_ops,
 	int i, ret = 0;
 	pte_t *pte;
 
-	if (xen_feature(XENFEAT_auto_translated_physmap))
+	if (!xen_pv_domain())
 		return 0;
 
 	if (kmap_ops) {
@@ -775,7 +769,7 @@ int clear_foreign_p2m_mapping(struct gnttab_unmap_grant_ref *unmap_ops,
 {
 	int i, ret = 0;
 
-	if (xen_feature(XENFEAT_auto_translated_physmap))
+	if (!xen_pv_domain())
 		return 0;
 
 	for (i = 0; i < count; i++) {

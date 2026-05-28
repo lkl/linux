@@ -5,15 +5,18 @@
  */
 
 #include <linux/errno.h>
+#include <linux/of.h>
 #include <linux/percpu.h>
 #include <linux/spinlock.h>
 
 #include <asm/mips-cps.h>
+#include <asm/smp-cps.h>
 #include <asm/mipsregs.h>
 
 void __iomem *mips_gcr_base;
 void __iomem *mips_cm_l2sync_base;
 int mips_cm_is64;
+bool mips_cm_is_l2_hci_broken;
 
 static char *cm2_tr[8] = {
 	"mem",	"gcr",	"gic",	"mmio",
@@ -237,6 +240,23 @@ static void mips_cm_probe_l2sync(void)
 	mips_cm_l2sync_base = ioremap(addr, MIPS_CM_L2SYNC_SIZE);
 }
 
+void mips_cm_update_property(void)
+{
+	struct device_node *cm_node;
+
+	cm_node = of_find_compatible_node(of_root, NULL, "mobileye,eyeq6-cm");
+	if (!cm_node)
+		return;
+	pr_info("HCI (Hardware Cache Init for the L2 cache) in GCR_L2_RAM_CONFIG from the CM3 is broken");
+	mips_cm_is_l2_hci_broken = true;
+
+	/* Disable MMID only if it was configured */
+	if (cpu_has_mmid)
+		cpu_disable_mmid();
+
+	of_node_put(cm_node);
+}
+
 int mips_cm_probe(void)
 {
 	phys_addr_t addr;
@@ -308,7 +328,9 @@ void mips_cm_lock_other(unsigned int cluster, unsigned int core,
 		      FIELD_PREP(CM3_GCR_Cx_OTHER_VP, vp);
 
 		if (cm_rev >= CM_REV_CM3_5) {
-			val |= CM_GCR_Cx_OTHER_CLUSTER_EN;
+			if (cluster != cpu_cluster(&current_cpu_data))
+				val |= CM_GCR_Cx_OTHER_CLUSTER_EN;
+			val |= CM_GCR_Cx_OTHER_GIC_EN;
 			val |= FIELD_PREP(CM_GCR_Cx_OTHER_CLUSTER, cluster);
 			val |= FIELD_PREP(CM_GCR_Cx_OTHER_BLOCK, block);
 		} else {
@@ -513,39 +535,23 @@ void mips_cm_error_report(void)
 	write_gcr_error_cause(cm_error);
 }
 
-unsigned int mips_cps_first_online_in_cluster(void)
+unsigned int mips_cps_first_online_in_cluster(int *first_cpu)
 {
-	unsigned int local_cl;
-	int i;
-
-	local_cl = cpu_cluster(&current_cpu_data);
+	unsigned int local_cl = cpu_cluster(&current_cpu_data);
+	struct cpumask *local_cl_mask;
 
 	/*
-	 * We rely upon knowledge that CPUs are numbered sequentially by
-	 * cluster - ie. CPUs 0..X will be in cluster 0, CPUs X+1..Y in cluster
-	 * 1, CPUs Y+1..Z in cluster 2 etc. This means that CPUs in the same
-	 * cluster will immediately precede or follow one another.
-	 *
-	 * First we scan backwards, until we find an online CPU in the cluster
-	 * or we move on to another cluster.
+	 * mips_cps_cluster_bootcfg is allocated in cps_prepare_cpus. If it is
+	 * not yet done, then we are so early that only one CPU is running, so
+	 * it is the first online CPU in the cluster.
 	 */
-	for (i = smp_processor_id() - 1; i >= 0; i--) {
-		if (cpu_cluster(&cpu_data[i]) != local_cl)
-			break;
-		if (!cpu_online(i))
-			continue;
-		return false;
-	}
+	if  (IS_ENABLED(CONFIG_MIPS_CPS) && mips_cps_cluster_bootcfg)
+		local_cl_mask = &mips_cps_cluster_bootcfg[local_cl].cpumask;
+	else
+		return true;
 
-	/* Then do the same for higher numbered CPUs */
-	for (i = smp_processor_id() + 1; i < nr_cpu_ids; i++) {
-		if (cpu_cluster(&cpu_data[i]) != local_cl)
-			break;
-		if (!cpu_online(i))
-			continue;
-		return false;
-	}
-
-	/* We found no online CPUs in the local cluster */
-	return true;
+	*first_cpu = cpumask_any_and_but(local_cl_mask,
+					 cpu_online_mask,
+					 smp_processor_id());
+	return (*first_cpu >= nr_cpu_ids);
 }

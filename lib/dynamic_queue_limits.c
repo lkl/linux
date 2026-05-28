@@ -179,7 +179,7 @@ void dql_completed(struct dql *dql, unsigned int count)
 
 	dql->adj_limit = limit + completed;
 	dql->prev_ovlimit = ovlimit;
-	dql->prev_last_obj_cnt = dql->last_obj_cnt;
+	dql->prev_last_obj_cnt = READ_ONCE(dql->last_obj_cnt);
 	dql->num_completed = completed;
 	dql->prev_num_queued = num_queued;
 
@@ -190,7 +190,7 @@ EXPORT_SYMBOL(dql_completed);
 void dql_reset(struct dql *dql)
 {
 	/* Reset all dynamic values */
-	dql->limit = 0;
+	dql->limit = dql->min_limit;
 	dql->num_queued = 0;
 	dql->num_completed = 0;
 	dql->last_obj_cnt = 0;

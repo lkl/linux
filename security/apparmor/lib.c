@@ -25,6 +25,120 @@ struct aa_perms allperms = { .allow = ALL_PERMS_MASK,
 			     .quiet = ALL_PERMS_MASK,
 			     .hide = ALL_PERMS_MASK };
 
+struct val_table_ent {
+	const char *str;
+	int value;
+};
+
+static struct val_table_ent debug_values_table[] = {
+	{ "N", DEBUG_NONE },
+	{ "none", DEBUG_NONE },
+	{ "n", DEBUG_NONE },
+	{ "0", DEBUG_NONE },
+	{ "all", DEBUG_ALL },
+	{ "Y", DEBUG_ALL },
+	{ "y", DEBUG_ALL },
+	{ "1", DEBUG_ALL },
+	{ "abs_root", DEBUG_LABEL_ABS_ROOT },
+	{ "label", DEBUG_LABEL },
+	{ "domain", DEBUG_DOMAIN },
+	{ "policy", DEBUG_POLICY },
+	{ "interface", DEBUG_INTERFACE },
+	{ NULL, 0 }
+};
+
+static struct val_table_ent *val_table_find_ent(struct val_table_ent *table,
+						const char *name, size_t len)
+{
+	struct val_table_ent *entry;
+
+	for (entry = table; entry->str != NULL; entry++) {
+		if (strncmp(entry->str, name, len) == 0 &&
+		    strlen(entry->str) == len)
+			return entry;
+	}
+	return NULL;
+}
+
+int aa_parse_debug_params(const char *str)
+{
+	struct val_table_ent *ent;
+	const char *next;
+	int val = 0;
+
+	do {
+		size_t n = strcspn(str, "\r\n,");
+
+		next = str + n;
+		ent = val_table_find_ent(debug_values_table, str, next - str);
+		if (ent)
+			val |= ent->value;
+		else
+			AA_DEBUG(DEBUG_INTERFACE, "unknown debug type '%.*s'",
+				 (int)(next - str), str);
+		str = next + 1;
+	} while (*next != 0);
+	return val;
+}
+
+/**
+ * val_mask_to_str - convert a perm mask to its short string
+ * @str: character buffer to store string in (at least 10 characters)
+ * @size: size of the @str buffer
+ * @table: NUL-terminated character buffer of permission characters (NOT NULL)
+ * @mask: permission mask to convert
+ */
+static int val_mask_to_str(char *str, size_t size,
+			   const struct val_table_ent *table, u32 mask)
+{
+	const struct val_table_ent *ent;
+	int total = 0;
+
+	for (ent = table; ent->str; ent++) {
+		if (ent->value && (ent->value & mask) == ent->value) {
+			int len = scnprintf(str, size, "%s%s", total ? "," : "",
+					    ent->str);
+			size -= len;
+			str += len;
+			total += len;
+			mask &= ~ent->value;
+		}
+	}
+
+	return total;
+}
+
+int aa_print_debug_params(char *buffer)
+{
+	if (!aa_g_debug)
+		return sprintf(buffer, "N");
+	return val_mask_to_str(buffer, PAGE_SIZE, debug_values_table,
+			       aa_g_debug);
+}
+
+bool aa_resize_str_table(struct aa_str_table *t, int newsize, gfp_t gfp)
+{
+	char **n;
+	int i;
+
+	if (t->size == newsize)
+		return true;
+	n = kcalloc(newsize, sizeof(*n), gfp);
+	if (!n)
+		return false;
+	for (i = 0; i < min(t->size, newsize); i++)
+		n[i] = t->table[i];
+	for (; i < t->size; i++)
+		kfree_sensitive(t->table[i]);
+	if (newsize > t->size)
+		memset(&n[t->size], 0, (newsize-t->size)*sizeof(*n));
+	kfree_sensitive(t->table);
+	t->table = n;
+	t->size = newsize;
+
+	return true;
+}
+
 /**
  * aa_free_str_table - free entries str table
  * @t: the string table to free  (MAYBE NULL)
@@ -43,44 +157,6 @@ void aa_free_str_table(struct aa_str_table *t)
 		t->table = NULL;
 		t->size = 0;
 	}
-}
-
-/**
- * aa_split_fqname - split a fqname into a profile and namespace name
- * @fqname: a full qualified name in namespace profile format (NOT NULL)
- * @ns_name: pointer to portion of the string containing the ns name (NOT NULL)
- *
- * Returns: profile name or NULL if one is not specified
- *
- * Split a namespace name from a profile name (see policy.c for naming
- * description).  If a portion of the name is missing it returns NULL for
- * that portion.
- *
- * NOTE: may modify the @fqname string.  The pointers returned point
- *       into the @fqname string.
- */
-char *aa_split_fqname(char *fqname, char **ns_name)
-{
-	char *name = strim(fqname);
-
-	*ns_name = NULL;
-	if (name[0] == ':') {
-		char *split = strchr(&name[1], ':');
-		*ns_name = skip_spaces(&name[1]);
-		if (split) {
-			/* overwrite ':' with \0 */
-			*split++ = 0;
-			if (strncmp(split, "//", 2) == 0)
-				split += 2;
-			name = skip_spaces(split);
-		} else
-			/* a ns name without a following profile is allowed */
-			name = NULL;
-	}
-	if (name && *name == 0)
-		name = NULL;
-
-	return name;
 }
 
 /**
@@ -276,33 +352,6 @@ void aa_audit_perm_mask(struct audit_buffer *ab, u32 mask, const char *chrs,
 }
 
 /**
- * aa_audit_perms_cb - generic callback fn for auditing perms
- * @ab: audit buffer (NOT NULL)
- * @va: audit struct to audit values of (NOT NULL)
- */
-static void aa_audit_perms_cb(struct audit_buffer *ab, void *va)
-{
-	struct common_audit_data *sa = va;
-	struct apparmor_audit_data *ad = aad(sa);
-
-	if (ad->request) {
-		audit_log_format(ab, " requested_mask=");
-		aa_audit_perm_mask(ab, ad->request, aa_file_perm_chrs,
-				   PERMS_CHRS_MASK, aa_file_perm_names,
-				   PERMS_NAMES_MASK);
-	}
-	if (ad->denied) {
-		audit_log_format(ab, "denied_mask=");
-		aa_audit_perm_mask(ab, ad->denied, aa_file_perm_chrs,
-				   PERMS_CHRS_MASK, aa_file_perm_names,
-				   PERMS_NAMES_MASK);
-	}
-	audit_log_format(ab, " peer=");
-	aa_label_xaudit(ab, labels_ns(ad->subj_label), ad->peer,
-				      FLAGS_NONE, GFP_ATOMIC);
-}
-
-/**
  * aa_apply_modes_to_perms - apply namespace and profile flags to perms
  * @profile: that perms where computed from
  * @perms: perms to apply mode modifiers to
@@ -348,25 +397,6 @@ void aa_profile_match_label(struct aa_profile *profile,
 	aa_label_match(profile, rules, label, state, false, request, perms);
 }
 
-
-/* currently unused */
-int aa_profile_label_perm(struct aa_profile *profile, struct aa_profile *target,
-			  u32 request, int type, u32 *deny,
-			  struct apparmor_audit_data *ad)
-{
-	struct aa_ruleset *rules = list_first_entry(&profile->rules,
-						    typeof(*rules), list);
-	struct aa_perms perms;
-
-	ad->peer = &target->label;
-	ad->request = request;
-
-	aa_profile_match_label(profile, rules, &target->label, type, request,
-			       &perms);
-	aa_apply_modes_to_perms(profile, &perms);
-	*deny |= request & perms.deny;
-	return aa_check_perms(profile, &perms, request, ad, aa_audit_perms_cb);
-}
 
 /**
  * aa_check_perms - do audit mode selection based on perms set

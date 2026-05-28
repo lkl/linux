@@ -2,15 +2,6 @@
 /*
  * Support for Intel Camera Imaging ISP subsystem.
  * Copyright (c) 2015, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #ifndef __IA_CSS_PIPE_H__
@@ -111,8 +102,6 @@ struct ia_css_yuvpp_settings {
 struct osys_object;
 
 struct ia_css_pipe {
-	/* TODO: Remove stop_requested and use stop_requested in the pipeline */
-	bool                            stop_requested;
 	struct ia_css_pipe_config       config;
 	struct ia_css_pipe_extra_config extra_config;
 	struct ia_css_pipe_info         info;

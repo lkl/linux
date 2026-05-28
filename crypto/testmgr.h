@@ -21,6 +21,7 @@
 #define _CRYPTO_TESTMGR_H
 
 #include <linux/oid_registry.h>
+#include <crypto/internal/ecc.h>
 
 #define MAX_IVLEN		32
 
@@ -58,8 +59,6 @@ struct hash_testvec {
  * @wk:		Does the test need CRYPTO_TFM_REQ_FORBID_WEAK_KEYS?
  * 		( e.g. test needs to fail due to a weak key )
  * @fips_skip:	Skip the test vector in FIPS mode
- * @generates_iv: Encryption should ignore the given IV, and output @iv_out.
- *		  Decryption takes @iv_out.  Needed for AES Keywrap ("kw(aes)").
  * @setkey_error: Expected error from setkey()
  * @crypt_error: Expected error from encrypt() and decrypt()
  */
@@ -73,7 +72,6 @@ struct cipher_testvec {
 	unsigned short klen;
 	unsigned int len;
 	bool fips_skip;
-	bool generates_iv;
 	int setkey_error;
 	int crypt_error;
 };
@@ -150,6 +148,16 @@ struct drbg_testvec {
 
 struct akcipher_testvec {
 	const unsigned char *key;
+	const unsigned char *m;
+	const unsigned char *c;
+	unsigned int key_len;
+	unsigned int m_size;
+	unsigned int c_size;
+	bool public_key_vec;
+};
+
+struct sig_testvec {
+	const unsigned char *key;
 	const unsigned char *params;
 	const unsigned char *m;
 	const unsigned char *c;
@@ -158,7 +166,6 @@ struct akcipher_testvec {
 	unsigned int m_size;
 	unsigned int c_size;
 	bool public_key_vec;
-	bool siggen_sigver_test;
 	enum OID algo;
 };
 
@@ -647,274 +654,357 @@ static const struct akcipher_testvec rsa_tv_template[] = {
 	}
 };
 
+#ifdef CONFIG_CPU_BIG_ENDIAN
+#define be64_to_cpua(b1, b2, b3, b4, b5, b6, b7, b8)			\
+	0x##b1, 0x##b2, 0x##b3, 0x##b4, 0x##b5, 0x##b6, 0x##b7, 0x##b8
+#else
+#define be64_to_cpua(b1, b2, b3, b4, b5, b6, b7, b8)			\
+	0x##b8, 0x##b7, 0x##b6, 0x##b5, 0x##b4, 0x##b3, 0x##b2, 0x##b1
+#endif
+
 /*
  * ECDSA test vectors.
  */
-static const struct akcipher_testvec ecdsa_nist_p192_tv_template[] = {
+static const struct sig_testvec ecdsa_nist_p192_tv_template[] = {
 	{
-	.key =
+	.key = /* secp192r1(sha1) */
 	"\x04\xf7\x46\xf8\x2f\x15\xf6\x22\x8e\xd7\x57\x4f\xcc\xe7\xbb\xc1"
 	"\xd4\x09\x73\xcf\xea\xd0\x15\x07\x3d\xa5\x8a\x8a\x95\x43\xe4\x68"
 	"\xea\xc6\x25\xc1\xc1\x01\x25\x4c\x7e\xc3\x3c\xa6\x04\x0a\xe7\x08"
 	"\x98",
 	.key_len = 49,
-	.params =
-	"\x30\x13\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x08\x2a\x86\x48"
-	"\xce\x3d\x03\x01\x01",
-	.param_len = 21,
 	.m =
 	"\xcd\xb9\xd2\x1c\xb7\x6f\xcd\x44\xb3\xfd\x63\xea\xa3\x66\x7f\xae"
 	"\x63\x85\xe7\x82",
 	.m_size = 20,
-	.algo = OID_id_ecdsa_with_sha1,
-	.c =
-	"\x30\x35\x02\x19\x00\xba\xe5\x93\x83\x6e\xb6\x3b\x63\xa0\x27\x91"
-	"\xc6\xf6\x7f\xc3\x09\xad\x59\xad\x88\x27\xd6\x92\x6b\x02\x18\x10"
-	"\x68\x01\x9d\xba\xce\x83\x08\xef\x95\x52\x7b\xa0\x0f\xe4\x18\x86"
-	"\x80\x6f\xa5\x79\x77\xda\xd0",
-	.c_size = 55,
+	.c = (const unsigned char[]){
+	be64_to_cpua(ad, 59, ad, 88, 27, d6, 92, 6b),
+	be64_to_cpua(a0, 27, 91, c6, f6, 7f, c3, 09),
+	be64_to_cpua(ba, e5, 93, 83, 6e, b6, 3b, 63),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(86, 80, 6f, a5, 79, 77, da, d0),
+	be64_to_cpua(ef, 95, 52, 7b, a0, 0f, e4, 18),
+	be64_to_cpua(10, 68, 01, 9d, ba, ce, 83, 08),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	}, {
-	.key =
+	.key = /* secp192r1(sha224) */
 	"\x04\xb6\x4b\xb1\xd1\xac\xba\x24\x8f\x65\xb2\x60\x00\x90\xbf\xbd"
 	"\x78\x05\x73\xe9\x79\x1d\x6f\x7c\x0b\xd2\xc3\x93\xa7\x28\xe1\x75"
 	"\xf7\xd5\x95\x1d\x28\x10\xc0\x75\x50\x5c\x1a\x4f\x3f\x8f\xa5\xee"
 	"\xa3",
 	.key_len = 49,
-	.params =
-	"\x30\x13\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x08\x2a\x86\x48"
-	"\xce\x3d\x03\x01\x01",
-	.param_len = 21,
 	.m =
 	"\x8d\xd6\xb8\x3e\xe5\xff\x23\xf6\x25\xa2\x43\x42\x74\x45\xa7\x40"
 	"\x3a\xff\x2f\xe1\xd3\xf6\x9f\xe8\x33\xcb\x12\x11",
 	.m_size = 28,
-	.algo = OID_id_ecdsa_with_sha224,
-	.c =
-	"\x30\x34\x02\x18\x5a\x8b\x82\x69\x7e\x8a\x0a\x09\x14\xf8\x11\x2b"
-	"\x55\xdc\xae\x37\x83\x7b\x12\xe6\xb6\x5b\xcb\xd4\x02\x18\x6a\x14"
-	"\x4f\x53\x75\xc8\x02\x48\xeb\xc3\x92\x0f\x1e\x72\xee\xc4\xa3\xe3"
-	"\x5c\x99\xdb\x92\x5b\x36",
-	.c_size = 54,
+	.c = (const unsigned char[]){
+	be64_to_cpua(83, 7b, 12, e6, b6, 5b, cb, d4),
+	be64_to_cpua(14, f8, 11, 2b, 55, dc, ae, 37),
+	be64_to_cpua(5a, 8b, 82, 69, 7e, 8a, 0a, 09),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(a3, e3, 5c, 99, db, 92, 5b, 36),
+	be64_to_cpua(eb, c3, 92, 0f, 1e, 72, ee, c4),
+	be64_to_cpua(6a, 14, 4f, 53, 75, c8, 02, 48),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	}, {
-	.key =
+	.key = /* secp192r1(sha256) */
 	"\x04\xe2\x51\x24\x9b\xf7\xb6\x32\x82\x39\x66\x3d\x5b\xec\x3b\xae"
 	"\x0c\xd5\xf2\x67\xd1\xc7\xe1\x02\xe4\xbf\x90\x62\xb8\x55\x75\x56"
 	"\x69\x20\x5e\xcb\x4e\xca\x33\xd6\xcb\x62\x6b\x94\xa9\xa2\xe9\x58"
 	"\x91",
 	.key_len = 49,
-	.params =
-	"\x30\x13\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x08\x2a\x86\x48"
-	"\xce\x3d\x03\x01\x01",
-	.param_len = 21,
 	.m =
 	"\x35\xec\xa1\xa0\x9e\x14\xde\x33\x03\xb6\xf6\xbd\x0c\x2f\xb2\xfd"
 	"\x1f\x27\x82\xa5\xd7\x70\x3f\xef\xa0\x82\x69\x8e\x73\x31\x8e\xd7",
 	.m_size = 32,
-	.algo = OID_id_ecdsa_with_sha256,
-	.c =
-	"\x30\x35\x02\x18\x3f\x72\x3f\x1f\x42\xd2\x3f\x1d\x6b\x1a\x58\x56"
-	"\xf1\x8f\xf7\xfd\x01\x48\xfb\x5f\x72\x2a\xd4\x8f\x02\x19\x00\xb3"
-	"\x69\x43\xfd\x48\x19\x86\xcf\x32\xdd\x41\x74\x6a\x51\xc7\xd9\x7d"
-	"\x3a\x97\xd9\xcd\x1a\x6a\x49",
-	.c_size = 55,
+	.c = (const unsigned char[]){
+	be64_to_cpua(01, 48, fb, 5f, 72, 2a, d4, 8f),
+	be64_to_cpua(6b, 1a, 58, 56, f1, 8f, f7, fd),
+	be64_to_cpua(3f, 72, 3f, 1f, 42, d2, 3f, 1d),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(7d, 3a, 97, d9, cd, 1a, 6a, 49),
+	be64_to_cpua(32, dd, 41, 74, 6a, 51, c7, d9),
+	be64_to_cpua(b3, 69, 43, fd, 48, 19, 86, cf),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	}, {
-	.key =
+	.key = /* secp192r1(sha384) */
 	"\x04\x5a\x13\xfe\x68\x86\x4d\xf4\x17\xc7\xa4\xe5\x8c\x65\x57\xb7"
 	"\x03\x73\x26\x57\xfb\xe5\x58\x40\xd8\xfd\x49\x05\xab\xf1\x66\x1f"
 	"\xe2\x9d\x93\x9e\xc2\x22\x5a\x8b\x4f\xf3\x77\x22\x59\x7e\xa6\x4e"
 	"\x8b",
 	.key_len = 49,
-	.params =
-	"\x30\x13\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x08\x2a\x86\x48"
-	"\xce\x3d\x03\x01\x01",
-	.param_len = 21,
 	.m =
 	"\x9d\x2e\x1a\x8f\xed\x6c\x4b\x61\xae\xac\xd5\x19\x79\xce\x67\xf9"
 	"\xa0\x34\xeb\xb0\x81\xf9\xd9\xdc\x6e\xb3\x5c\xa8\x69\xfc\x8a\x61"
 	"\x39\x81\xfb\xfd\x5c\x30\x6b\xa8\xee\xed\x89\xaf\xa3\x05\xe4\x78",
 	.m_size = 48,
-	.algo = OID_id_ecdsa_with_sha384,
-	.c =
-	"\x30\x35\x02\x19\x00\xf0\xa3\x38\xce\x2b\xf8\x9d\x1a\xcf\x7f\x34"
-	"\xb4\xb4\xe5\xc5\x00\xdd\x15\xbb\xd6\x8c\xa7\x03\x78\x02\x18\x64"
-	"\xbc\x5a\x1f\x82\x96\x61\xd7\xd1\x01\x77\x44\x5d\x53\xa4\x7c\x93"
-	"\x12\x3b\x3b\x28\xfb\x6d\xe1",
-	.c_size = 55,
+	.c = (const unsigned char[]){
+	be64_to_cpua(dd, 15, bb, d6, 8c, a7, 03, 78),
+	be64_to_cpua(cf, 7f, 34, b4, b4, e5, c5, 00),
+	be64_to_cpua(f0, a3, 38, ce, 2b, f8, 9d, 1a),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(93, 12, 3b, 3b, 28, fb, 6d, e1),
+	be64_to_cpua(d1, 01, 77, 44, 5d, 53, a4, 7c),
+	be64_to_cpua(64, bc, 5a, 1f, 82, 96, 61, d7),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	}, {
-	.key =
+	.key = /* secp192r1(sha512) */
 	"\x04\xd5\xf2\x6e\xc3\x94\x5c\x52\xbc\xdf\x86\x6c\x14\xd1\xca\xea"
 	"\xcc\x72\x3a\x8a\xf6\x7a\x3a\x56\x36\x3b\xca\xc6\x94\x0e\x17\x1d"
 	"\x9e\xa0\x58\x28\xf9\x4b\xe6\xd1\xa5\x44\x91\x35\x0d\xe7\xf5\x11"
 	"\x57",
 	.key_len = 49,
-	.params =
-	"\x30\x13\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x08\x2a\x86\x48"
-	"\xce\x3d\x03\x01\x01",
-	.param_len = 21,
 	.m =
 	"\xd5\x4b\xe9\x36\xda\xd8\x6e\xc0\x50\x03\xbe\x00\x43\xff\xf0\x23"
 	"\xac\xa2\x42\xe7\x37\x77\x79\x52\x8f\x3e\xc0\x16\xc1\xfc\x8c\x67"
 	"\x16\xbc\x8a\x5d\x3b\xd3\x13\xbb\xb6\xc0\x26\x1b\xeb\x33\xcc\x70"
 	"\x4a\xf2\x11\x37\xe8\x1b\xba\x55\xac\x69\xe1\x74\x62\x7c\x6e\xb5",
 	.m_size = 64,
-	.algo = OID_id_ecdsa_with_sha512,
-	.c =
-	"\x30\x35\x02\x19\x00\x88\x5b\x8f\x59\x43\xbf\xcf\xc6\xdd\x3f\x07"
-	"\x87\x12\xa0\xd4\xac\x2b\x11\x2d\x1c\xb6\x06\xc9\x6c\x02\x18\x73"
-	"\xb4\x22\x9a\x98\x73\x3c\x83\xa9\x14\x2a\x5e\xf5\xe5\xfb\x72\x28"
-	"\x6a\xdf\x97\xfd\x82\x76\x24",
-	.c_size = 55,
+	.c = (const unsigned char[]){
+	be64_to_cpua(2b, 11, 2d, 1c, b6, 06, c9, 6c),
+	be64_to_cpua(dd, 3f, 07, 87, 12, a0, d4, ac),
+	be64_to_cpua(88, 5b, 8f, 59, 43, bf, cf, c6),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(28, 6a, df, 97, fd, 82, 76, 24),
+	be64_to_cpua(a9, 14, 2a, 5e, f5, e5, fb, 72),
+	be64_to_cpua(73, b4, 22, 9a, 98, 73, 3c, 83),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	},
 };
 
-static const struct akcipher_testvec ecdsa_nist_p256_tv_template[] = {
+static const struct sig_testvec ecdsa_nist_p256_tv_template[] = {
 	{
-	.key =
+	.key = /* secp256r1(sha1) */
 	"\x04\xb9\x7b\xbb\xd7\x17\x64\xd2\x7e\xfc\x81\x5d\x87\x06\x83\x41"
 	"\x22\xd6\x9a\xaa\x87\x17\xec\x4f\x63\x55\x2f\x94\xba\xdd\x83\xe9"
 	"\x34\x4b\xf3\xe9\x91\x13\x50\xb6\xcb\xca\x62\x08\xe7\x3b\x09\xdc"
 	"\xc3\x63\x4b\x2d\xb9\x73\x53\xe4\x45\xe6\x7c\xad\xe7\x6b\xb0\xe8"
 	"\xaf",
 	.key_len = 65,
-	.params =
-	"\x30\x13\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x08\x2a\x86\x48"
-	"\xce\x3d\x03\x01\x07",
-	.param_len = 21,
 	.m =
 	"\xc2\x2b\x5f\x91\x78\x34\x26\x09\x42\x8d\x6f\x51\xb2\xc5\xaf\x4c"
 	"\x0b\xde\x6a\x42",
 	.m_size = 20,
-	.algo = OID_id_ecdsa_with_sha1,
-	.c =
-	"\x30\x46\x02\x21\x00\xf9\x25\xce\x9f\x3a\xa6\x35\x81\xcf\xd4\xe7"
-	"\xb7\xf0\x82\x56\x41\xf7\xd4\xad\x8d\x94\x5a\x69\x89\xee\xca\x6a"
-	"\x52\x0e\x48\x4d\xcc\x02\x21\x00\xd7\xe4\xef\x52\x66\xd3\x5b\x9d"
-	"\x8a\xfa\x54\x93\x29\xa7\x70\x86\xf1\x03\x03\xf3\x3b\xe2\x73\xf7"
-	"\xfb\x9d\x8b\xde\xd4\x8d\x6f\xad",
-	.c_size = 72,
+	.c = (const unsigned char[]){
+	be64_to_cpua(ee, ca, 6a, 52, 0e, 48, 4d, cc),
+	be64_to_cpua(f7, d4, ad, 8d, 94, 5a, 69, 89),
+	be64_to_cpua(cf, d4, e7, b7, f0, 82, 56, 41),
+	be64_to_cpua(f9, 25, ce, 9f, 3a, a6, 35, 81),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(fb, 9d, 8b, de, d4, 8d, 6f, ad),
+	be64_to_cpua(f1, 03, 03, f3, 3b, e2, 73, f7),
+	be64_to_cpua(8a, fa, 54, 93, 29, a7, 70, 86),
+	be64_to_cpua(d7, e4, ef, 52, 66, d3, 5b, 9d),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	}, {
-	.key =
+	.key = /* secp256r1(sha224) */
 	"\x04\x8b\x6d\xc0\x33\x8e\x2d\x8b\x67\xf5\xeb\xc4\x7f\xa0\xf5\xd9"
 	"\x7b\x03\xa5\x78\x9a\xb5\xea\x14\xe4\x23\xd0\xaf\xd7\x0e\x2e\xa0"
 	"\xc9\x8b\xdb\x95\xf8\xb3\xaf\xac\x00\x2c\x2c\x1f\x7a\xfd\x95\x88"
 	"\x43\x13\xbf\xf3\x1c\x05\x1a\x14\x18\x09\x3f\xd6\x28\x3e\xc5\xa0"
 	"\xd4",
 	.key_len = 65,
-	.params =
-	"\x30\x13\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x08\x2a\x86\x48"
-	"\xce\x3d\x03\x01\x07",
-	.param_len = 21,
 	.m =
 	"\x1a\x15\xbc\xa3\xe4\xed\x3a\xb8\x23\x67\xc6\xc4\x34\xf8\x6c\x41"
 	"\x04\x0b\xda\xc5\x77\xfa\x1c\x2d\xe6\x2c\x3b\xe0",
 	.m_size = 28,
-	.algo = OID_id_ecdsa_with_sha224,
-	.c =
-	"\x30\x44\x02\x20\x20\x43\xfa\xc0\x9f\x9d\x7b\xe7\xae\xce\x77\x59"
-	"\x1a\xdb\x59\xd5\x34\x62\x79\xcb\x6a\x91\x67\x2e\x7d\x25\xd8\x25"
-	"\xf5\x81\xd2\x1e\x02\x20\x5f\xf8\x74\xf8\x57\xd0\x5e\x54\x76\x20"
-	"\x4a\x77\x22\xec\xc8\x66\xbf\x50\x05\x58\x39\x0e\x26\x92\xce\xd5"
-	"\x2e\x8b\xde\x5a\x04\x0e",
-	.c_size = 70,
+	.c = (const unsigned char[]){
+	be64_to_cpua(7d, 25, d8, 25, f5, 81, d2, 1e),
+	be64_to_cpua(34, 62, 79, cb, 6a, 91, 67, 2e),
+	be64_to_cpua(ae, ce, 77, 59, 1a, db, 59, d5),
+	be64_to_cpua(20, 43, fa, c0, 9f, 9d, 7b, e7),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(ce, d5, 2e, 8b, de, 5a, 04, 0e),
+	be64_to_cpua(bf, 50, 05, 58, 39, 0e, 26, 92),
+	be64_to_cpua(76, 20, 4a, 77, 22, ec, c8, 66),
+	be64_to_cpua(5f, f8, 74, f8, 57, d0, 5e, 54),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	}, {
-	.key =
+	.key = /* secp256r1(sha256) */
 	"\x04\xf1\xea\xc4\x53\xf3\xb9\x0e\x9f\x7e\xad\xe3\xea\xd7\x0e\x0f"
 	"\xd6\x98\x9a\xca\x92\x4d\x0a\x80\xdb\x2d\x45\xc7\xec\x4b\x97\x00"
 	"\x2f\xe9\x42\x6c\x29\xdc\x55\x0e\x0b\x53\x12\x9b\x2b\xad\x2c\xe9"
 	"\x80\xe6\xc5\x43\xc2\x1d\x5e\xbb\x65\x21\x50\xb6\x37\xb0\x03\x8e"
 	"\xb8",
 	.key_len = 65,
-	.params =
-	"\x30\x13\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x08\x2a\x86\x48"
-	"\xce\x3d\x03\x01\x07",
-	.param_len = 21,
 	.m =
 	"\x8f\x43\x43\x46\x64\x8f\x6b\x96\xdf\x89\xdd\xa9\x01\xc5\x17\x6b"
 	"\x10\xa6\xd8\x39\x61\xdd\x3c\x1a\xc8\x8b\x59\xb2\xdc\x32\x7a\xa4",
 	.m_size = 32,
-	.algo = OID_id_ecdsa_with_sha256,
-	.c =
-	"\x30\x45\x02\x20\x08\x31\xfa\x74\x0d\x1d\x21\x5d\x09\xdc\x29\x63"
-	"\xa8\x1a\xad\xfc\xac\x44\xc3\xe8\x24\x11\x2d\xa4\x91\xdc\x02\x67"
-	"\xdc\x0c\xd0\x82\x02\x21\x00\xbd\xff\xce\xee\x42\xc3\x97\xff\xf9"
-	"\xa9\x81\xac\x4a\x50\xd0\x91\x0a\x6e\x1b\xc4\xaf\xe1\x83\xc3\x4f"
-	"\x2a\x65\x35\x23\xe3\x1d\xfa",
-	.c_size = 71,
+	.c = (const unsigned char[]){
+	be64_to_cpua(91, dc, 02, 67, dc, 0c, d0, 82),
+	be64_to_cpua(ac, 44, c3, e8, 24, 11, 2d, a4),
+	be64_to_cpua(09, dc, 29, 63, a8, 1a, ad, fc),
+	be64_to_cpua(08, 31, fa, 74, 0d, 1d, 21, 5d),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(4f, 2a, 65, 35, 23, e3, 1d, fa),
+	be64_to_cpua(0a, 6e, 1b, c4, af, e1, 83, c3),
+	be64_to_cpua(f9, a9, 81, ac, 4a, 50, d0, 91),
+	be64_to_cpua(bd, ff, ce, ee, 42, c3, 97, ff),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	}, {
-	.key =
+	.key = /* secp256r1(sha384) */
 	"\x04\xc5\xc6\xea\x60\xc9\xce\xad\x02\x8d\xf5\x3e\x24\xe3\x52\x1d"
 	"\x28\x47\x3b\xc3\x6b\xa4\x99\x35\x99\x11\x88\x88\xc8\xf4\xee\x7e"
 	"\x8c\x33\x8f\x41\x03\x24\x46\x2b\x1a\x82\xf9\x9f\xe1\x97\x1b\x00"
 	"\xda\x3b\x24\x41\xf7\x66\x33\x58\x3d\x3a\x81\xad\xcf\x16\xe9\xe2"
 	"\x7c",
 	.key_len = 65,
-	.params =
-	"\x30\x13\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x08\x2a\x86\x48"
-	"\xce\x3d\x03\x01\x07",
-	.param_len = 21,
 	.m =
 	"\x3e\x78\x70\xfb\xcd\x66\xba\x91\xa1\x79\xff\x1e\x1c\x6b\x78\xe6"
 	"\xc0\x81\x3a\x65\x97\x14\x84\x36\x14\x1a\x9a\xb7\xc5\xab\x84\x94"
 	"\x5e\xbb\x1b\x34\x71\xcb\x41\xe1\xf6\xfc\x92\x7b\x34\xbb\x86\xbb",
 	.m_size = 48,
-	.algo = OID_id_ecdsa_with_sha384,
-	.c =
-	"\x30\x46\x02\x21\x00\x8e\xf3\x6f\xdc\xf8\x69\xa6\x2e\xd0\x2e\x95"
-	"\x54\xd1\x95\x64\x93\x08\xb2\x6b\x24\x94\x48\x46\x5e\xf2\xe4\x6c"
-	"\xc7\x94\xb1\xd5\xfe\x02\x21\x00\xeb\xa7\x80\x26\xdc\xf9\x3a\x44"
-	"\x19\xfb\x5f\x92\xf4\xc9\x23\x37\x69\xf4\x3b\x4f\x47\xcf\x9b\x16"
-	"\xc0\x60\x11\x92\xdc\x17\x89\x12",
-	.c_size = 72,
+	.c = (const unsigned char[]){
+	be64_to_cpua(f2, e4, 6c, c7, 94, b1, d5, fe),
+	be64_to_cpua(08, b2, 6b, 24, 94, 48, 46, 5e),
+	be64_to_cpua(d0, 2e, 95, 54, d1, 95, 64, 93),
+	be64_to_cpua(8e, f3, 6f, dc, f8, 69, a6, 2e),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(c0, 60, 11, 92, dc, 17, 89, 12),
+	be64_to_cpua(69, f4, 3b, 4f, 47, cf, 9b, 16),
+	be64_to_cpua(19, fb, 5f, 92, f4, c9, 23, 37),
+	be64_to_cpua(eb, a7, 80, 26, dc, f9, 3a, 44),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	}, {
-	.key =
+	.key = /* secp256r1(sha512) */
 	"\x04\xd7\x27\x46\x49\xf6\x26\x85\x12\x40\x76\x8e\xe2\xe6\x2a\x7a"
 	"\x83\xb1\x4e\x7a\xeb\x3b\x5c\x67\x4a\xb5\xa4\x92\x8c\x69\xff\x38"
 	"\xee\xd9\x4e\x13\x29\x59\xad\xde\x6b\xbb\x45\x31\xee\xfd\xd1\x1b"
 	"\x64\xd3\xb5\xfc\xaf\x9b\x4b\x88\x3b\x0e\xb7\xd6\xdf\xf1\xd5\x92"
 	"\xbf",
 	.key_len = 65,
-	.params =
-	"\x30\x13\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x08\x2a\x86\x48"
-	"\xce\x3d\x03\x01\x07",
-	.param_len = 21,
 	.m =
 	"\x57\xb7\x9e\xe9\x05\x0a\x8c\x1b\xc9\x13\xe5\x4a\x24\xc7\xe2\xe9"
 	"\x43\xc3\xd1\x76\x62\xf4\x98\x1a\x9c\x13\xb0\x20\x1b\xe5\x39\xca"
 	"\x4f\xd9\x85\x34\x95\xa2\x31\xbc\xbb\xde\xdd\x76\xbb\x61\xe3\xcf"
 	"\x9d\xc0\x49\x7a\xf3\x7a\xc4\x7d\xa8\x04\x4b\x8d\xb4\x4d\x5b\xd6",
 	.m_size = 64,
-	.algo = OID_id_ecdsa_with_sha512,
-	.c =
-	"\x30\x45\x02\x21\x00\xb8\x6d\x87\x81\x43\xdf\xfb\x9f\x40\xea\x44"
-	"\x81\x00\x4e\x29\x08\xed\x8c\x73\x30\x6c\x22\xb3\x97\x76\xf6\x04"
-	"\x99\x09\x37\x4d\xfa\x02\x20\x1e\xb9\x75\x31\xf6\x04\xa5\x4d\xf8"
-	"\x00\xdd\xab\xd4\xc0\x2b\xe6\x5c\xad\xc3\x78\x1c\xc2\xc1\x19\x76"
-	"\x31\x79\x4a\xe9\x81\x6a\xee",
-	.c_size = 71,
+	.c = (const unsigned char[]){
+	be64_to_cpua(76, f6, 04, 99, 09, 37, 4d, fa),
+	be64_to_cpua(ed, 8c, 73, 30, 6c, 22, b3, 97),
+	be64_to_cpua(40, ea, 44, 81, 00, 4e, 29, 08),
+	be64_to_cpua(b8, 6d, 87, 81, 43, df, fb, 9f),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(76, 31, 79, 4a, e9, 81, 6a, ee),
+	be64_to_cpua(5c, ad, c3, 78, 1c, c2, c1, 19),
+	be64_to_cpua(f8, 00, dd, ab, d4, c0, 2b, e6),
+	be64_to_cpua(1e, b9, 75, 31, f6, 04, a5, 4d),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	},
 };
 
-static const struct akcipher_testvec ecdsa_nist_p384_tv_template[] = {
+static const struct sig_testvec ecdsa_nist_p384_tv_template[] = {
 	{
 	.key = /* secp384r1(sha1) */
 	"\x04\x89\x25\xf3\x97\x88\xcb\xb0\x78\xc5\x72\x9a\x14\x6e\x7a\xb1"
@@ -925,26 +1015,31 @@ static const struct akcipher_testvec ecdsa_nist_p384_tv_template[] = {
 	"\x0b\x25\xd6\x80\x5c\x3b\xe6\x1a\x98\x48\x91\x45\x7a\x73\xb0\xc3"
 	"\xf1",
 	.key_len = 97,
-	.params =
-	"\x30\x10\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x05\x2b\x81\x04"
-	"\x00\x22",
-	.param_len = 18,
 	.m =
 	"\x12\x55\x28\xf0\x77\xd5\xb6\x21\x71\x32\x48\xcd\x28\xa8\x25\x22"
 	"\x3a\x69\xc1\x93",
 	.m_size = 20,
-	.algo = OID_id_ecdsa_with_sha1,
-	.c =
-	"\x30\x66\x02\x31\x00\xf5\x0f\x24\x4c\x07\x93\x6f\x21\x57\x55\x07"
-	"\x20\x43\x30\xde\xa0\x8d\x26\x8e\xae\x63\x3f\xbc\x20\x3a\xc6\xf1"
-	"\x32\x3c\xce\x70\x2b\x78\xf1\x4c\x26\xe6\x5b\x86\xcf\xec\x7c\x7e"
-	"\xd0\x87\xd7\xd7\x6e\x02\x31\x00\xcd\xbb\x7e\x81\x5d\x8f\x63\xc0"
-	"\x5f\x63\xb1\xbe\x5e\x4c\x0e\xa1\xdf\x28\x8c\x1b\xfa\xf9\x95\x88"
-	"\x74\xa0\x0f\xbf\xaf\xc3\x36\x76\x4a\xa1\x59\xf1\x1c\xa4\x58\x26"
-	"\x79\x12\x2a\xb7\xc5\x15\x92\xc5",
-	.c_size = 104,
+	.c = (const unsigned char[]){
+	be64_to_cpua(ec, 7c, 7e, d0, 87, d7, d7, 6e),
+	be64_to_cpua(78, f1, 4c, 26, e6, 5b, 86, cf),
+	be64_to_cpua(3a, c6, f1, 32, 3c, ce, 70, 2b),
+	be64_to_cpua(8d, 26, 8e, ae, 63, 3f, bc, 20),
+	be64_to_cpua(57, 55, 07, 20, 43, 30, de, a0),
+	be64_to_cpua(f5, 0f, 24, 4c, 07, 93, 6f, 21),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(79, 12, 2a, b7, c5, 15, 92, c5),
+	be64_to_cpua(4a, a1, 59, f1, 1c, a4, 58, 26),
+	be64_to_cpua(74, a0, 0f, bf, af, c3, 36, 76),
+	be64_to_cpua(df, 28, 8c, 1b, fa, f9, 95, 88),
+	be64_to_cpua(5f, 63, b1, be, 5e, 4c, 0e, a1),
+	be64_to_cpua(cd, bb, 7e, 81, 5d, 8f, 63, c0),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	}, {
 	.key = /* secp384r1(sha224) */
 	"\x04\x69\x6c\xcf\x62\xee\xd0\x0d\xe5\xb5\x2f\x70\x54\xcf\x26\xa0"
@@ -955,26 +1050,31 @@ static const struct akcipher_testvec ecdsa_nist_p384_tv_template[] = {
 	"\x6b\x93\x99\x6c\x66\x4c\x42\x3f\x65\x60\x6c\x1c\x0b\x93\x9b\x9d"
 	"\xe0",
 	.key_len = 97,
-	.params =
-	"\x30\x10\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x05\x2b\x81\x04"
-	"\x00\x22",
-	.param_len = 18,
 	.m =
 	"\x12\x80\xb6\xeb\x25\xe2\x3d\xf0\x21\x32\x96\x17\x3a\x38\x39\xfd"
 	"\x1f\x05\x34\x7b\xb8\xf9\x71\x66\x03\x4f\xd5\xe5",
 	.m_size = 28,
-	.algo = OID_id_ecdsa_with_sha224,
-	.c =
-	"\x30\x66\x02\x31\x00\x8a\x51\x84\xce\x13\x1e\xd2\xdc\xec\xcb\xe4"
-	"\x89\x47\xb2\xf7\xbc\x97\xf1\xc8\x72\x26\xcf\x5a\x5e\xc5\xda\xb4"
-	"\xe3\x93\x07\xe0\x99\xc9\x9c\x11\xb8\x10\x01\xc5\x41\x3f\xdd\x15"
-	"\x1b\x68\x2b\x9d\x8b\x02\x31\x00\x8b\x03\x2c\xfc\x1f\xd1\xa9\xa4"
-	"\x4b\x00\x08\x31\x6c\xf5\xd5\xf6\xdf\xd8\x68\xa2\x64\x42\x65\xf3"
-	"\x4d\xd0\xc6\x6e\xb0\xe9\xfc\x14\x9f\x19\xd0\x42\x8b\x93\xc2\x11"
-	"\x88\x2b\x82\x26\x5e\x1c\xda\xfb",
-	.c_size = 104,
+	.c = (const unsigned char[]){
+	be64_to_cpua(3f, dd, 15, 1b, 68, 2b, 9d, 8b),
+	be64_to_cpua(c9, 9c, 11, b8, 10, 01, c5, 41),
+	be64_to_cpua(c5, da, b4, e3, 93, 07, e0, 99),
+	be64_to_cpua(97, f1, c8, 72, 26, cf, 5a, 5e),
+	be64_to_cpua(ec, cb, e4, 89, 47, b2, f7, bc),
+	be64_to_cpua(8a, 51, 84, ce, 13, 1e, d2, dc),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(88, 2b, 82, 26, 5e, 1c, da, fb),
+	be64_to_cpua(9f, 19, d0, 42, 8b, 93, c2, 11),
+	be64_to_cpua(4d, d0, c6, 6e, b0, e9, fc, 14),
+	be64_to_cpua(df, d8, 68, a2, 64, 42, 65, f3),
+	be64_to_cpua(4b, 00, 08, 31, 6c, f5, d5, f6),
+	be64_to_cpua(8b, 03, 2c, fc, 1f, d1, a9, a4),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	}, {
 	.key = /* secp384r1(sha256) */
 	"\x04\xee\xd6\xda\x3e\x94\x90\x00\x27\xed\xf8\x64\x55\xd6\x51\x9a"
@@ -985,26 +1085,31 @@ static const struct akcipher_testvec ecdsa_nist_p384_tv_template[] = {
 	"\x17\xc3\x34\x29\xd6\x40\xea\x5c\xb9\x3f\xfb\x32\x2e\x12\x33\xbc"
 	"\xab",
 	.key_len = 97,
-	.params =
-	"\x30\x10\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x05\x2b\x81\x04"
-	"\x00\x22",
-	.param_len = 18,
 	.m =
 	"\xaa\xe7\xfd\x03\x26\xcb\x94\x71\xe4\xce\x0f\xc5\xff\xa6\x29\xa3"
 	"\xe1\xcc\x4c\x35\x4e\xde\xca\x80\xab\x26\x0c\x25\xe6\x68\x11\xc2",
 	.m_size = 32,
-	.algo = OID_id_ecdsa_with_sha256,
-	.c =
-	"\x30\x64\x02\x30\x08\x09\x12\x9d\x6e\x96\x64\xa6\x8e\x3f\x7e\xce"
-	"\x0a\x9b\xaa\x59\xcc\x47\x53\x87\xbc\xbd\x83\x3f\xaf\x06\x3f\x84"
-	"\x04\xe2\xf9\x67\xb6\xc6\xfc\x70\x2e\x66\x3c\x77\xc8\x8d\x2c\x79"
-	"\x3a\x8e\x32\xc4\x02\x30\x40\x34\xb8\x90\xa9\x80\xab\x47\x26\xa2"
-	"\xb0\x89\x42\x0a\xda\xd9\xdd\xce\xbc\xb2\x97\xf4\x9c\xf3\x15\x68"
-	"\xc0\x75\x3e\x23\x5e\x36\x4f\x8d\xde\x1e\x93\x8d\x95\xbb\x10\x0e"
-	"\xf4\x1f\x39\xca\x4d\x43",
-	.c_size = 102,
+	.c = (const unsigned char[]){
+	be64_to_cpua(c8, 8d, 2c, 79, 3a, 8e, 32, c4),
+	be64_to_cpua(b6, c6, fc, 70, 2e, 66, 3c, 77),
+	be64_to_cpua(af, 06, 3f, 84, 04, e2, f9, 67),
+	be64_to_cpua(cc, 47, 53, 87, bc, bd, 83, 3f),
+	be64_to_cpua(8e, 3f, 7e, ce, 0a, 9b, aa, 59),
+	be64_to_cpua(08, 09, 12, 9d, 6e, 96, 64, a6),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(10, 0e, f4, 1f, 39, ca, 4d, 43),
+	be64_to_cpua(4f, 8d, de, 1e, 93, 8d, 95, bb),
+	be64_to_cpua(15, 68, c0, 75, 3e, 23, 5e, 36),
+	be64_to_cpua(dd, ce, bc, b2, 97, f4, 9c, f3),
+	be64_to_cpua(26, a2, b0, 89, 42, 0a, da, d9),
+	be64_to_cpua(40, 34, b8, 90, a9, 80, ab, 47),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	}, {
 	.key = /* secp384r1(sha384) */
 	"\x04\x3a\x2f\x62\xe7\x1a\xcf\x24\xd0\x0b\x7c\xe0\xed\x46\x0a\x4f"
@@ -1015,27 +1120,32 @@ static const struct akcipher_testvec ecdsa_nist_p384_tv_template[] = {
 	"\x21\x67\xe5\x1b\x5a\x52\x31\x68\xd6\xee\xf0\x19\xb0\x55\xed\x89"
 	"\x9e",
 	.key_len = 97,
-	.params =
-	"\x30\x10\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x05\x2b\x81\x04"
-	"\x00\x22",
-	.param_len = 18,
 	.m =
 	"\x8d\xf2\xc0\xe9\xa8\xf3\x8e\x44\xc4\x8c\x1a\xa0\xb8\xd7\x17\xdf"
 	"\xf2\x37\x1b\xc6\xe3\xf5\x62\xcc\x68\xf5\xd5\x0b\xbf\x73\x2b\xb1"
 	"\xb0\x4c\x04\x00\x31\xab\xfe\xc8\xd6\x09\xc8\xf2\xea\xd3\x28\xff",
 	.m_size = 48,
-	.algo = OID_id_ecdsa_with_sha384,
-	.c =
-	"\x30\x66\x02\x31\x00\x9b\x28\x68\xc0\xa1\xea\x8c\x50\xee\x2e\x62"
-	"\x35\x46\xfa\x00\xd8\x2d\x7a\x91\x5f\x49\x2d\x22\x08\x29\xe6\xfb"
-	"\xca\x8c\xd6\xb6\xb4\x3b\x1f\x07\x8f\x15\x02\xfe\x1d\xa2\xa4\xc8"
-	"\xf2\xea\x9d\x11\x1f\x02\x31\x00\xfc\x50\xf6\x43\xbd\x50\x82\x0e"
-	"\xbf\xe3\x75\x24\x49\xac\xfb\xc8\x71\xcd\x8f\x18\x99\xf0\x0f\x13"
-	"\x44\x92\x8c\x86\x99\x65\xb3\x97\x96\x17\x04\xc9\x05\x77\xf1\x8e"
-	"\xab\x8d\x4e\xde\xe6\x6d\x9b\x66",
-	.c_size = 104,
+	.c = (const unsigned char[]){
+	be64_to_cpua(a2, a4, c8, f2, ea, 9d, 11, 1f),
+	be64_to_cpua(3b, 1f, 07, 8f, 15, 02, fe, 1d),
+	be64_to_cpua(29, e6, fb, ca, 8c, d6, b6, b4),
+	be64_to_cpua(2d, 7a, 91, 5f, 49, 2d, 22, 08),
+	be64_to_cpua(ee, 2e, 62, 35, 46, fa, 00, d8),
+	be64_to_cpua(9b, 28, 68, c0, a1, ea, 8c, 50),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(ab, 8d, 4e, de, e6, 6d, 9b, 66),
+	be64_to_cpua(96, 17, 04, c9, 05, 77, f1, 8e),
+	be64_to_cpua(44, 92, 8c, 86, 99, 65, b3, 97),
+	be64_to_cpua(71, cd, 8f, 18, 99, f0, 0f, 13),
+	be64_to_cpua(bf, e3, 75, 24, 49, ac, fb, c8),
+	be64_to_cpua(fc, 50, f6, 43, bd, 50, 82, 0e),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	}, {
 	.key = /* secp384r1(sha512) */
 	"\x04\xb4\xe7\xc1\xeb\x64\x25\x22\x46\xc3\x86\x61\x80\xbe\x1e\x46"
@@ -1046,32 +1156,37 @@ static const struct akcipher_testvec ecdsa_nist_p384_tv_template[] = {
 	"\xdf\x42\x5c\xc2\x5a\xc7\x0c\xf4\x15\xf7\x1b\xa3\x2e\xd7\x00\xac"
 	"\xa3",
 	.key_len = 97,
-	.params =
-	"\x30\x10\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x05\x2b\x81\x04"
-	"\x00\x22",
-	.param_len = 18,
 	.m =
 	"\xe8\xb7\x52\x7d\x1a\x44\x20\x05\x53\x6b\x3a\x68\xf2\xe7\x6c\xa1"
 	"\xae\x9d\x84\xbb\xba\x52\x43\x3e\x2c\x42\x78\x49\xbf\x78\xb2\x71"
 	"\xeb\xe1\xe0\xe8\x42\x7b\x11\xad\x2b\x99\x05\x1d\x36\xe6\xac\xfc"
 	"\x55\x73\xf0\x15\x63\x39\xb8\x6a\x6a\xc5\x91\x5b\xca\x6a\xa8\x0e",
 	.m_size = 64,
-	.algo = OID_id_ecdsa_with_sha512,
-	.c =
-	"\x30\x63\x02\x2f\x1d\x20\x94\x77\xfe\x31\xfa\x4d\xc6\xef\xda\x02"
-	"\xe7\x0f\x52\x9a\x02\xde\x93\xe8\x83\xe4\x84\x4c\xfc\x6f\x80\xe3"
-	"\xaf\xb3\xd9\xdc\x2b\x43\x0e\x6a\xb3\x53\x6f\x3e\xb3\xc7\xa8\xb3"
-	"\x17\x77\xd1\x02\x30\x63\xf6\xf0\x3d\x5f\x5f\x99\x3f\xde\x3a\x3d"
-	"\x16\xaf\xb4\x52\x6a\xec\x63\xe3\x0c\xec\x50\xdc\xcc\xc4\x6a\x03"
-	"\x5f\x8d\x7a\xf9\xfb\x34\xe4\x8b\x80\xa5\xb6\xda\x2c\x4e\x45\xcf"
-	"\x3c\x93\xff\x50\x5d",
-	.c_size = 101,
+	.c = (const unsigned char[]){
+	be64_to_cpua(3e, b3, c7, a8, b3, 17, 77, d1),
+	be64_to_cpua(dc, 2b, 43, 0e, 6a, b3, 53, 6f),
+	be64_to_cpua(4c, fc, 6f, 80, e3, af, b3, d9),
+	be64_to_cpua(9a, 02, de, 93, e8, 83, e4, 84),
+	be64_to_cpua(4d, c6, ef, da, 02, e7, 0f, 52),
+	be64_to_cpua(00, 1d, 20, 94, 77, fe, 31, fa),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(4e, 45, cf, 3c, 93, ff, 50, 5d),
+	be64_to_cpua(34, e4, 8b, 80, a5, b6, da, 2c),
+	be64_to_cpua(c4, 6a, 03, 5f, 8d, 7a, f9, fb),
+	be64_to_cpua(ec, 63, e3, 0c, ec, 50, dc, cc),
+	be64_to_cpua(de, 3a, 3d, 16, af, b4, 52, 6a),
+	be64_to_cpua(63, f6, f0, 3d, 5f, 5f, 99, 3f),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 00) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	},
 };
 
-static const struct akcipher_testvec ecdsa_nist_p521_tv_template[] = {
+static const struct sig_testvec ecdsa_nist_p521_tv_template[] = {
 	{
 	.key = /* secp521r1(sha224) */
 	"\x04\x01\x4f\x43\x18\xb6\xa9\xc9\x5d\x68\xd3\xa9\x42\xf8\x98\xc0"
@@ -1084,28 +1199,31 @@ static const struct akcipher_testvec ecdsa_nist_p521_tv_template[] = {
 	"\xed\x37\x0f\x99\x3f\x26\xba\xa3\x8e\xff\x79\x34\x7c\x3a\xfe\x1f"
 	"\x3b\x83\x82\x2f\x14",
 	.key_len = 133,
-	.params =
-	"\x30\x10\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x05\x2b\x81\x04"
-	"\x00\x23",
-	.param_len = 18,
 	.m =
 	"\xa2\x3a\x6a\x8c\x7b\x3c\xf2\x51\xf8\xbe\x5f\x4f\x3b\x15\x05\xc4"
 	"\xb5\xbc\x19\xe7\x21\x85\xe9\x23\x06\x33\x62\xfb",
 	.m_size = 28,
-	.algo = OID_id_ecdsa_with_sha224,
-	.c =
-	"\x30\x81\x86\x02\x41\x01\xd6\x43\xe7\xff\x42\xb2\xba\x74\x35\xf6"
-	"\xdc\x6d\x02\x7b\x22\xac\xe2\xef\x07\x92\xee\x60\x94\x06\xf8\x3f"
-	"\x59\x0f\x74\xf0\x3f\xd8\x18\xc6\x37\x8a\xcb\xa7\xd8\x7d\x98\x85"
-	"\x29\x88\xff\x0b\x94\x94\x6c\xa6\x9b\x89\x8b\x1e\xfd\x09\x46\x6b"
-	"\xc7\xaf\x7a\xb9\x19\x0a\x02\x41\x3a\x26\x0d\x55\xcd\x23\x1e\x7d"
-	"\xa0\x5e\xf9\x88\xf3\xd2\x32\x90\x57\x0f\xf8\x65\x97\x6b\x09\x4d"
-	"\x22\x26\x0b\x5f\x49\x32\x6b\x91\x99\x30\x90\x0f\x1c\x8f\x78\xd3"
-	"\x9f\x0e\x64\xcc\xc4\xe8\x43\xd9\x0e\x1c\xad\x22\xda\x82\x00\x35"
-	"\xa3\x50\xb1\xa5\x98\x92\x2a\xa5\x52",
-	.c_size = 137,
+	.c = (const unsigned char[]){
+	be64_to_cpua(46, 6b, c7, af, 7a, b9, 19, 0a),
+	be64_to_cpua(6c, a6, 9b, 89, 8b, 1e, fd, 09),
+	be64_to_cpua(98, 85, 29, 88, ff, 0b, 94, 94),
+	be64_to_cpua(18, c6, 37, 8a, cb, a7, d8, 7d),
+	be64_to_cpua(f8, 3f, 59, 0f, 74, f0, 3f, d8),
+	be64_to_cpua(e2, ef, 07, 92, ee, 60, 94, 06),
+	be64_to_cpua(35, f6, dc, 6d, 02, 7b, 22, ac),
+	be64_to_cpua(d6, 43, e7, ff, 42, b2, ba, 74),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 01),
+	be64_to_cpua(50, b1, a5, 98, 92, 2a, a5, 52),
+	be64_to_cpua(1c, ad, 22, da, 82, 00, 35, a3),
+	be64_to_cpua(0e, 64, cc, c4, e8, 43, d9, 0e),
+	be64_to_cpua(30, 90, 0f, 1c, 8f, 78, d3, 9f),
+	be64_to_cpua(26, 0b, 5f, 49, 32, 6b, 91, 99),
+	be64_to_cpua(0f, f8, 65, 97, 6b, 09, 4d, 22),
+	be64_to_cpua(5e, f9, 88, f3, d2, 32, 90, 57),
+	be64_to_cpua(26, 0d, 55, cd, 23, 1e, 7d, a0),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 3a) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	},
 	{
 	.key = /* secp521r1(sha256) */
@@ -1119,28 +1237,31 @@ static const struct akcipher_testvec ecdsa_nist_p521_tv_template[] = {
 	"\x8a\xe9\x53\xa8\xcf\xce\x43\x0e\x82\x20\x86\xbc\x88\x9c\xb7\xe3"
 	"\xe6\x77\x1e\x1f\x8a",
 	.key_len = 133,
-	.params =
-	"\x30\x10\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x05\x2b\x81\x04"
-	"\x00\x23",
-	.param_len = 18,
 	.m =
 	"\xcc\x97\x73\x0c\x73\xa2\x53\x2b\xfa\xd7\x83\x1d\x0c\x72\x1b\x39"
 	"\x80\x71\x8d\xdd\xc5\x9b\xff\x55\x32\x98\x25\xa2\x58\x2e\xb7\x73",
 	.m_size = 32,
-	.algo = OID_id_ecdsa_with_sha256,
-	.c =
-	"\x30\x81\x88\x02\x42\x00\xcd\xa5\x5f\x57\x52\x27\x78\x3a\xb5\x06"
-	"\x0f\xfd\x83\xfc\x0e\xd9\xce\x50\x9f\x7d\x1f\xca\x8b\xa8\x2d\x56"
-	"\x3c\xf6\xf0\xd8\xe1\xb7\x5d\x95\x35\x6f\x02\x0e\xaf\xe1\x4c\xae"
-	"\xce\x54\x76\x9a\xc2\x8f\xb8\x38\x1f\x46\x0b\x04\x64\x34\x79\xde"
-	"\x7e\xd7\x59\x10\xe9\xd9\xd5\x02\x42\x01\xcf\x50\x85\x38\xf9\x15"
-	"\x83\x18\x04\x6b\x35\xae\x65\xb5\x99\x12\x0a\xa9\x79\x24\xb9\x37"
-	"\x35\xdd\xa0\xe0\x87\x2c\x44\x4b\x5a\xee\xaf\xfa\x10\xdd\x9b\xfb"
-	"\x36\x1a\x31\x03\x42\x02\x5f\x50\xf0\xa2\x0d\x1c\x57\x56\x8f\x12"
-	"\xb7\x1d\x91\x55\x38\xb6\xf6\x34\x65\xc7\xbd",
-	.c_size = 139,
+	.c = (const unsigned char[]){
+	be64_to_cpua(de, 7e, d7, 59, 10, e9, d9, d5),
+	be64_to_cpua(38, 1f, 46, 0b, 04, 64, 34, 79),
+	be64_to_cpua(ae, ce, 54, 76, 9a, c2, 8f, b8),
+	be64_to_cpua(95, 35, 6f, 02, 0e, af, e1, 4c),
+	be64_to_cpua(56, 3c, f6, f0, d8, e1, b7, 5d),
+	be64_to_cpua(50, 9f, 7d, 1f, ca, 8b, a8, 2d),
+	be64_to_cpua(06, 0f, fd, 83, fc, 0e, d9, ce),
+	be64_to_cpua(a5, 5f, 57, 52, 27, 78, 3a, b5),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, cd),
+	be64_to_cpua(55, 38, b6, f6, 34, 65, c7, bd),
+	be64_to_cpua(1c, 57, 56, 8f, 12, b7, 1d, 91),
+	be64_to_cpua(03, 42, 02, 5f, 50, f0, a2, 0d),
+	be64_to_cpua(fa, 10, dd, 9b, fb, 36, 1a, 31),
+	be64_to_cpua(e0, 87, 2c, 44, 4b, 5a, ee, af),
+	be64_to_cpua(a9, 79, 24, b9, 37, 35, dd, a0),
+	be64_to_cpua(6b, 35, ae, 65, b5, 99, 12, 0a),
+	be64_to_cpua(50, 85, 38, f9, 15, 83, 18, 04),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 01, cf) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	},
 	{
 	.key = /* secp521r1(sha384) */
@@ -1154,29 +1275,32 @@ static const struct akcipher_testvec ecdsa_nist_p521_tv_template[] = {
 	"\x22\x6e\xd7\x35\xc7\x23\xb7\x13\xae\xb6\x34\xff\xd7\x80\xe5\x39"
 	"\xb3\x3b\x5b\x1b\x94",
 	.key_len = 133,
-	.params =
-	"\x30\x10\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x05\x2b\x81\x04"
-	"\x00\x23",
-	.param_len = 18,
 	.m =
 	"\x36\x98\xd6\x82\xfa\xad\xed\x3c\xb9\x40\xb6\x4d\x9e\xb7\x04\x26"
 	"\xad\x72\x34\x44\xd2\x81\xb4\x9b\xbe\x01\x04\x7a\xd8\x50\xf8\x59"
 	"\xba\xad\x23\x85\x6b\x59\xbe\xfb\xf6\x86\xd4\x67\xa8\x43\x28\x76",
 	.m_size = 48,
-	.algo = OID_id_ecdsa_with_sha384,
-	.c =
-	"\x30\x81\x88\x02\x42\x00\x93\x96\x76\x3c\x27\xea\xaa\x9c\x26\xec"
-	"\x51\xdc\xe8\x35\x5e\xae\x16\xf2\x4b\x64\x98\xf7\xec\xda\xc7\x7e"
-	"\x42\x71\x86\x57\x2d\xf1\x7d\xe4\xdf\x9b\x7d\x9e\x47\xca\x33\x32"
-	"\x76\x06\xd0\xf9\xc0\xe4\xe6\x84\x59\xfd\x1a\xc4\x40\xdd\x43\xb8"
-	"\x6a\xdd\xfb\xe6\x63\x4e\x28\x02\x42\x00\xff\xc3\x6a\x87\x6e\xb5"
-	"\x13\x1f\x20\x55\xce\x37\x97\xc9\x05\x51\xe5\xe4\x3c\xbc\x93\x65"
-	"\x57\x1c\x30\xda\xa7\xcd\x26\x28\x76\x3b\x52\xdf\xc4\xc0\xdb\x54"
-	"\xdb\x8a\x0d\x6a\xc3\xf3\x7a\xd1\xfa\xe7\xa7\xe5\x5a\x94\x56\xcf"
-	"\x8f\xb4\x22\xc6\x4f\xab\x2b\x62\xc1\x42\xb1",
-	.c_size = 139,
+	.c = (const unsigned char[]){
+	be64_to_cpua(b8, 6a, dd, fb, e6, 63, 4e, 28),
+	be64_to_cpua(84, 59, fd, 1a, c4, 40, dd, 43),
+	be64_to_cpua(32, 76, 06, d0, f9, c0, e4, e6),
+	be64_to_cpua(e4, df, 9b, 7d, 9e, 47, ca, 33),
+	be64_to_cpua(7e, 42, 71, 86, 57, 2d, f1, 7d),
+	be64_to_cpua(f2, 4b, 64, 98, f7, ec, da, c7),
+	be64_to_cpua(ec, 51, dc, e8, 35, 5e, ae, 16),
+	be64_to_cpua(96, 76, 3c, 27, ea, aa, 9c, 26),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, 93),
+	be64_to_cpua(c6, 4f, ab, 2b, 62, c1, 42, b1),
+	be64_to_cpua(e5, 5a, 94, 56, cf, 8f, b4, 22),
+	be64_to_cpua(6a, c3, f3, 7a, d1, fa, e7, a7),
+	be64_to_cpua(df, c4, c0, db, 54, db, 8a, 0d),
+	be64_to_cpua(da, a7, cd, 26, 28, 76, 3b, 52),
+	be64_to_cpua(e4, 3c, bc, 93, 65, 57, 1c, 30),
+	be64_to_cpua(55, ce, 37, 97, c9, 05, 51, e5),
+	be64_to_cpua(c3, 6a, 87, 6e, b5, 13, 1f, 20),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 00, ff) },
+	.c_size = ECC_MAX_BYTES * 2,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	},
 	{
 	.key = /* secp521r1(sha512) */
@@ -1190,17 +1314,479 @@ static const struct akcipher_testvec ecdsa_nist_p521_tv_template[] = {
 	"\xfe\x3a\x05\x1a\xdb\xa9\x0f\xc0\x6c\x76\x30\x8c\xd8\xde\x44\xae"
 	"\xd0\x17\xdf\x49\x6a",
 	.key_len = 133,
-	.params =
-	"\x30\x10\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x05\x2b\x81\x04"
-	"\x00\x23",
-	.param_len = 18,
 	.m =
 	"\x5c\xa6\xbc\x79\xb8\xa0\x1e\x11\x83\xf7\xe9\x05\xdf\xba\xf7\x69"
 	"\x97\x22\x32\xe4\x94\x7c\x65\xbd\x74\xc6\x9a\x8b\xbd\x0d\xdc\xed"
 	"\xf5\x9c\xeb\xe1\xc5\x68\x40\xf2\xc7\x04\xde\x9e\x0d\x76\xc5\xa3"
 	"\xf9\x3c\x6c\x98\x08\x31\xbd\x39\xe8\x42\x7f\x80\x39\x6f\xfe\x68",
 	.m_size = 64,
-	.algo = OID_id_ecdsa_with_sha512,
+	.c = (const unsigned char[]){
+	be64_to_cpua(28, b5, 04, b0, b6, 33, 1c, 7e),
+	be64_to_cpua(80, a6, 13, fc, b6, 90, f7, bb),
+	be64_to_cpua(27, 93, e8, 6c, 49, 7d, 28, fc),
+	be64_to_cpua(1f, 12, 3e, b7, 7e, 51, ff, 7f),
+	be64_to_cpua(fb, 62, 1e, 42, 03, 6c, 74, 8a),
+	be64_to_cpua(63, 0e, 02, cc, 94, a9, 05, b9),
+	be64_to_cpua(aa, 86, ec, a8, 05, 03, 52, 56),
+	be64_to_cpua(71, 86, 96, ac, 21, 33, 7e, 4e),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 01, 5c),
+	be64_to_cpua(46, 1e, 77, 44, 78, e0, d1, 04),
+	be64_to_cpua(72, 74, 13, 63, 39, a6, e5, 25),
+	be64_to_cpua(00, 55, bb, 6a, b4, 73, 00, d2),
+	be64_to_cpua(71, d0, e9, ca, a7, c0, cb, aa),
+	be64_to_cpua(7a, 76, 37, 51, 47, 49, 98, 12),
+	be64_to_cpua(88, 05, 3e, 43, 39, 01, bd, b7),
+	be64_to_cpua(95, 35, 89, 4f, 41, 5f, 9e, 19),
+	be64_to_cpua(43, 52, 1d, e3, c6, bd, 5a, 40),
+	be64_to_cpua(00, 00, 00, 00, 00, 00, 01, 70) },
+	.c_size = ECC_MAX_BYTES * 2,
+	.public_key_vec = true,
+	},
+};
+
+/*
+ * ECDSA X9.62 test vectors.
+ *
+ * Identical to ECDSA test vectors, except signature in "c" is X9.62 encoded.
+ */
+static const struct sig_testvec x962_ecdsa_nist_p192_tv_template[] = {
+	{
+	.key = /* secp192r1(sha1) */
+	"\x04\xf7\x46\xf8\x2f\x15\xf6\x22\x8e\xd7\x57\x4f\xcc\xe7\xbb\xc1"
+	"\xd4\x09\x73\xcf\xea\xd0\x15\x07\x3d\xa5\x8a\x8a\x95\x43\xe4\x68"
+	"\xea\xc6\x25\xc1\xc1\x01\x25\x4c\x7e\xc3\x3c\xa6\x04\x0a\xe7\x08"
+	"\x98",
+	.key_len = 49,
+	.m =
+	"\xcd\xb9\xd2\x1c\xb7\x6f\xcd\x44\xb3\xfd\x63\xea\xa3\x66\x7f\xae"
+	"\x63\x85\xe7\x82",
+	.m_size = 20,
+	.c =
+	"\x30\x35\x02\x19\x00\xba\xe5\x93\x83\x6e\xb6\x3b\x63\xa0\x27\x91"
+	"\xc6\xf6\x7f\xc3\x09\xad\x59\xad\x88\x27\xd6\x92\x6b\x02\x18\x10"
+	"\x68\x01\x9d\xba\xce\x83\x08\xef\x95\x52\x7b\xa0\x0f\xe4\x18\x86"
+	"\x80\x6f\xa5\x79\x77\xda\xd0",
+	.c_size = 55,
+	.public_key_vec = true,
+	}, {
+	.key = /* secp192r1(sha224) */
+	"\x04\xb6\x4b\xb1\xd1\xac\xba\x24\x8f\x65\xb2\x60\x00\x90\xbf\xbd"
+	"\x78\x05\x73\xe9\x79\x1d\x6f\x7c\x0b\xd2\xc3\x93\xa7\x28\xe1\x75"
+	"\xf7\xd5\x95\x1d\x28\x10\xc0\x75\x50\x5c\x1a\x4f\x3f\x8f\xa5\xee"
+	"\xa3",
+	.key_len = 49,
+	.m =
+	"\x8d\xd6\xb8\x3e\xe5\xff\x23\xf6\x25\xa2\x43\x42\x74\x45\xa7\x40"
+	"\x3a\xff\x2f\xe1\xd3\xf6\x9f\xe8\x33\xcb\x12\x11",
+	.m_size = 28,
+	.c =
+	"\x30\x34\x02\x18\x5a\x8b\x82\x69\x7e\x8a\x0a\x09\x14\xf8\x11\x2b"
+	"\x55\xdc\xae\x37\x83\x7b\x12\xe6\xb6\x5b\xcb\xd4\x02\x18\x6a\x14"
+	"\x4f\x53\x75\xc8\x02\x48\xeb\xc3\x92\x0f\x1e\x72\xee\xc4\xa3\xe3"
+	"\x5c\x99\xdb\x92\x5b\x36",
+	.c_size = 54,
+	.public_key_vec = true,
+	}, {
+	.key = /* secp192r1(sha256) */
+	"\x04\xe2\x51\x24\x9b\xf7\xb6\x32\x82\x39\x66\x3d\x5b\xec\x3b\xae"
+	"\x0c\xd5\xf2\x67\xd1\xc7\xe1\x02\xe4\xbf\x90\x62\xb8\x55\x75\x56"
+	"\x69\x20\x5e\xcb\x4e\xca\x33\xd6\xcb\x62\x6b\x94\xa9\xa2\xe9\x58"
+	"\x91",
+	.key_len = 49,
+	.m =
+	"\x35\xec\xa1\xa0\x9e\x14\xde\x33\x03\xb6\xf6\xbd\x0c\x2f\xb2\xfd"
+	"\x1f\x27\x82\xa5\xd7\x70\x3f\xef\xa0\x82\x69\x8e\x73\x31\x8e\xd7",
+	.m_size = 32,
+	.c =
+	"\x30\x35\x02\x18\x3f\x72\x3f\x1f\x42\xd2\x3f\x1d\x6b\x1a\x58\x56"
+	"\xf1\x8f\xf7\xfd\x01\x48\xfb\x5f\x72\x2a\xd4\x8f\x02\x19\x00\xb3"
+	"\x69\x43\xfd\x48\x19\x86\xcf\x32\xdd\x41\x74\x6a\x51\xc7\xd9\x7d"
+	"\x3a\x97\xd9\xcd\x1a\x6a\x49",
+	.c_size = 55,
+	.public_key_vec = true,
+	}, {
+	.key = /* secp192r1(sha384) */
+	"\x04\x5a\x13\xfe\x68\x86\x4d\xf4\x17\xc7\xa4\xe5\x8c\x65\x57\xb7"
+	"\x03\x73\x26\x57\xfb\xe5\x58\x40\xd8\xfd\x49\x05\xab\xf1\x66\x1f"
+	"\xe2\x9d\x93\x9e\xc2\x22\x5a\x8b\x4f\xf3\x77\x22\x59\x7e\xa6\x4e"
+	"\x8b",
+	.key_len = 49,
+	.m =
+	"\x9d\x2e\x1a\x8f\xed\x6c\x4b\x61\xae\xac\xd5\x19\x79\xce\x67\xf9"
+	"\xa0\x34\xeb\xb0\x81\xf9\xd9\xdc\x6e\xb3\x5c\xa8\x69\xfc\x8a\x61"
+	"\x39\x81\xfb\xfd\x5c\x30\x6b\xa8\xee\xed\x89\xaf\xa3\x05\xe4\x78",
+	.m_size = 48,
+	.c =
+	"\x30\x35\x02\x19\x00\xf0\xa3\x38\xce\x2b\xf8\x9d\x1a\xcf\x7f\x34"
+	"\xb4\xb4\xe5\xc5\x00\xdd\x15\xbb\xd6\x8c\xa7\x03\x78\x02\x18\x64"
+	"\xbc\x5a\x1f\x82\x96\x61\xd7\xd1\x01\x77\x44\x5d\x53\xa4\x7c\x93"
+	"\x12\x3b\x3b\x28\xfb\x6d\xe1",
+	.c_size = 55,
+	.public_key_vec = true,
+	}, {
+	.key = /* secp192r1(sha512) */
+	"\x04\xd5\xf2\x6e\xc3\x94\x5c\x52\xbc\xdf\x86\x6c\x14\xd1\xca\xea"
+	"\xcc\x72\x3a\x8a\xf6\x7a\x3a\x56\x36\x3b\xca\xc6\x94\x0e\x17\x1d"
+	"\x9e\xa0\x58\x28\xf9\x4b\xe6\xd1\xa5\x44\x91\x35\x0d\xe7\xf5\x11"
+	"\x57",
+	.key_len = 49,
+	.m =
+	"\xd5\x4b\xe9\x36\xda\xd8\x6e\xc0\x50\x03\xbe\x00\x43\xff\xf0\x23"
+	"\xac\xa2\x42\xe7\x37\x77\x79\x52\x8f\x3e\xc0\x16\xc1\xfc\x8c\x67"
+	"\x16\xbc\x8a\x5d\x3b\xd3\x13\xbb\xb6\xc0\x26\x1b\xeb\x33\xcc\x70"
+	"\x4a\xf2\x11\x37\xe8\x1b\xba\x55\xac\x69\xe1\x74\x62\x7c\x6e\xb5",
+	.m_size = 64,
+	.c =
+	"\x30\x35\x02\x19\x00\x88\x5b\x8f\x59\x43\xbf\xcf\xc6\xdd\x3f\x07"
+	"\x87\x12\xa0\xd4\xac\x2b\x11\x2d\x1c\xb6\x06\xc9\x6c\x02\x18\x73"
+	"\xb4\x22\x9a\x98\x73\x3c\x83\xa9\x14\x2a\x5e\xf5\xe5\xfb\x72\x28"
+	"\x6a\xdf\x97\xfd\x82\x76\x24",
+	.c_size = 55,
+	.public_key_vec = true,
+	},
+};
+
+static const struct sig_testvec x962_ecdsa_nist_p256_tv_template[] = {
+	{
+	.key = /* secp256r1(sha1) */
+	"\x04\xb9\x7b\xbb\xd7\x17\x64\xd2\x7e\xfc\x81\x5d\x87\x06\x83\x41"
+	"\x22\xd6\x9a\xaa\x87\x17\xec\x4f\x63\x55\x2f\x94\xba\xdd\x83\xe9"
+	"\x34\x4b\xf3\xe9\x91\x13\x50\xb6\xcb\xca\x62\x08\xe7\x3b\x09\xdc"
+	"\xc3\x63\x4b\x2d\xb9\x73\x53\xe4\x45\xe6\x7c\xad\xe7\x6b\xb0\xe8"
+	"\xaf",
+	.key_len = 65,
+	.m =
+	"\xc2\x2b\x5f\x91\x78\x34\x26\x09\x42\x8d\x6f\x51\xb2\xc5\xaf\x4c"
+	"\x0b\xde\x6a\x42",
+	.m_size = 20,
+	.c =
+	"\x30\x46\x02\x21\x00\xf9\x25\xce\x9f\x3a\xa6\x35\x81\xcf\xd4\xe7"
+	"\xb7\xf0\x82\x56\x41\xf7\xd4\xad\x8d\x94\x5a\x69\x89\xee\xca\x6a"
+	"\x52\x0e\x48\x4d\xcc\x02\x21\x00\xd7\xe4\xef\x52\x66\xd3\x5b\x9d"
+	"\x8a\xfa\x54\x93\x29\xa7\x70\x86\xf1\x03\x03\xf3\x3b\xe2\x73\xf7"
+	"\xfb\x9d\x8b\xde\xd4\x8d\x6f\xad",
+	.c_size = 72,
+	.public_key_vec = true,
+	}, {
+	.key = /* secp256r1(sha224) */
+	"\x04\x8b\x6d\xc0\x33\x8e\x2d\x8b\x67\xf5\xeb\xc4\x7f\xa0\xf5\xd9"
+	"\x7b\x03\xa5\x78\x9a\xb5\xea\x14\xe4\x23\xd0\xaf\xd7\x0e\x2e\xa0"
+	"\xc9\x8b\xdb\x95\xf8\xb3\xaf\xac\x00\x2c\x2c\x1f\x7a\xfd\x95\x88"
+	"\x43\x13\xbf\xf3\x1c\x05\x1a\x14\x18\x09\x3f\xd6\x28\x3e\xc5\xa0"
+	"\xd4",
+	.key_len = 65,
+	.m =
+	"\x1a\x15\xbc\xa3\xe4\xed\x3a\xb8\x23\x67\xc6\xc4\x34\xf8\x6c\x41"
+	"\x04\x0b\xda\xc5\x77\xfa\x1c\x2d\xe6\x2c\x3b\xe0",
+	.m_size = 28,
+	.c =
+	"\x30\x44\x02\x20\x20\x43\xfa\xc0\x9f\x9d\x7b\xe7\xae\xce\x77\x59"
+	"\x1a\xdb\x59\xd5\x34\x62\x79\xcb\x6a\x91\x67\x2e\x7d\x25\xd8\x25"
+	"\xf5\x81\xd2\x1e\x02\x20\x5f\xf8\x74\xf8\x57\xd0\x5e\x54\x76\x20"
+	"\x4a\x77\x22\xec\xc8\x66\xbf\x50\x05\x58\x39\x0e\x26\x92\xce\xd5"
+	"\x2e\x8b\xde\x5a\x04\x0e",
+	.c_size = 70,
+	.public_key_vec = true,
+	}, {
+	.key = /* secp256r1(sha256) */
+	"\x04\xf1\xea\xc4\x53\xf3\xb9\x0e\x9f\x7e\xad\xe3\xea\xd7\x0e\x0f"
+	"\xd6\x98\x9a\xca\x92\x4d\x0a\x80\xdb\x2d\x45\xc7\xec\x4b\x97\x00"
+	"\x2f\xe9\x42\x6c\x29\xdc\x55\x0e\x0b\x53\x12\x9b\x2b\xad\x2c\xe9"
+	"\x80\xe6\xc5\x43\xc2\x1d\x5e\xbb\x65\x21\x50\xb6\x37\xb0\x03\x8e"
+	"\xb8",
+	.key_len = 65,
+	.m =
+	"\x8f\x43\x43\x46\x64\x8f\x6b\x96\xdf\x89\xdd\xa9\x01\xc5\x17\x6b"
+	"\x10\xa6\xd8\x39\x61\xdd\x3c\x1a\xc8\x8b\x59\xb2\xdc\x32\x7a\xa4",
+	.m_size = 32,
+	.c =
+	"\x30\x45\x02\x20\x08\x31\xfa\x74\x0d\x1d\x21\x5d\x09\xdc\x29\x63"
+	"\xa8\x1a\xad\xfc\xac\x44\xc3\xe8\x24\x11\x2d\xa4\x91\xdc\x02\x67"
+	"\xdc\x0c\xd0\x82\x02\x21\x00\xbd\xff\xce\xee\x42\xc3\x97\xff\xf9"
+	"\xa9\x81\xac\x4a\x50\xd0\x91\x0a\x6e\x1b\xc4\xaf\xe1\x83\xc3\x4f"
+	"\x2a\x65\x35\x23\xe3\x1d\xfa",
+	.c_size = 71,
+	.public_key_vec = true,
+	}, {
+	.key = /* secp256r1(sha384) */
+	"\x04\xc5\xc6\xea\x60\xc9\xce\xad\x02\x8d\xf5\x3e\x24\xe3\x52\x1d"
+	"\x28\x47\x3b\xc3\x6b\xa4\x99\x35\x99\x11\x88\x88\xc8\xf4\xee\x7e"
+	"\x8c\x33\x8f\x41\x03\x24\x46\x2b\x1a\x82\xf9\x9f\xe1\x97\x1b\x00"
+	"\xda\x3b\x24\x41\xf7\x66\x33\x58\x3d\x3a\x81\xad\xcf\x16\xe9\xe2"
+	"\x7c",
+	.key_len = 65,
+	.m =
+	"\x3e\x78\x70\xfb\xcd\x66\xba\x91\xa1\x79\xff\x1e\x1c\x6b\x78\xe6"
+	"\xc0\x81\x3a\x65\x97\x14\x84\x36\x14\x1a\x9a\xb7\xc5\xab\x84\x94"
+	"\x5e\xbb\x1b\x34\x71\xcb\x41\xe1\xf6\xfc\x92\x7b\x34\xbb\x86\xbb",
+	.m_size = 48,
+	.c =
+	"\x30\x46\x02\x21\x00\x8e\xf3\x6f\xdc\xf8\x69\xa6\x2e\xd0\x2e\x95"
+	"\x54\xd1\x95\x64\x93\x08\xb2\x6b\x24\x94\x48\x46\x5e\xf2\xe4\x6c"
+	"\xc7\x94\xb1\xd5\xfe\x02\x21\x00\xeb\xa7\x80\x26\xdc\xf9\x3a\x44"
+	"\x19\xfb\x5f\x92\xf4\xc9\x23\x37\x69\xf4\x3b\x4f\x47\xcf\x9b\x16"
+	"\xc0\x60\x11\x92\xdc\x17\x89\x12",
+	.c_size = 72,
+	.public_key_vec = true,
+	}, {
+	.key = /* secp256r1(sha512) */
+	"\x04\xd7\x27\x46\x49\xf6\x26\x85\x12\x40\x76\x8e\xe2\xe6\x2a\x7a"
+	"\x83\xb1\x4e\x7a\xeb\x3b\x5c\x67\x4a\xb5\xa4\x92\x8c\x69\xff\x38"
+	"\xee\xd9\x4e\x13\x29\x59\xad\xde\x6b\xbb\x45\x31\xee\xfd\xd1\x1b"
+	"\x64\xd3\xb5\xfc\xaf\x9b\x4b\x88\x3b\x0e\xb7\xd6\xdf\xf1\xd5\x92"
+	"\xbf",
+	.key_len = 65,
+	.m =
+	"\x57\xb7\x9e\xe9\x05\x0a\x8c\x1b\xc9\x13\xe5\x4a\x24\xc7\xe2\xe9"
+	"\x43\xc3\xd1\x76\x62\xf4\x98\x1a\x9c\x13\xb0\x20\x1b\xe5\x39\xca"
+	"\x4f\xd9\x85\x34\x95\xa2\x31\xbc\xbb\xde\xdd\x76\xbb\x61\xe3\xcf"
+	"\x9d\xc0\x49\x7a\xf3\x7a\xc4\x7d\xa8\x04\x4b\x8d\xb4\x4d\x5b\xd6",
+	.m_size = 64,
+	.c =
+	"\x30\x45\x02\x21\x00\xb8\x6d\x87\x81\x43\xdf\xfb\x9f\x40\xea\x44"
+	"\x81\x00\x4e\x29\x08\xed\x8c\x73\x30\x6c\x22\xb3\x97\x76\xf6\x04"
+	"\x99\x09\x37\x4d\xfa\x02\x20\x1e\xb9\x75\x31\xf6\x04\xa5\x4d\xf8"
+	"\x00\xdd\xab\xd4\xc0\x2b\xe6\x5c\xad\xc3\x78\x1c\xc2\xc1\x19\x76"
+	"\x31\x79\x4a\xe9\x81\x6a\xee",
+	.c_size = 71,
+	.public_key_vec = true,
+	},
+};
+
+static const struct sig_testvec x962_ecdsa_nist_p384_tv_template[] = {
+	{
+	.key = /* secp384r1(sha1) */
+	"\x04\x89\x25\xf3\x97\x88\xcb\xb0\x78\xc5\x72\x9a\x14\x6e\x7a\xb1"
+	"\x5a\xa5\x24\xf1\x95\x06\x9e\x28\xfb\xc4\xb9\xbe\x5a\x0d\xd9\x9f"
+	"\xf3\xd1\x4d\x2d\x07\x99\xbd\xda\xa7\x66\xec\xbb\xea\xba\x79\x42"
+	"\xc9\x34\x89\x6a\xe7\x0b\xc3\xf2\xfe\x32\x30\xbe\xba\xf9\xdf\x7e"
+	"\x4b\x6a\x07\x8e\x26\x66\x3f\x1d\xec\xa2\x57\x91\x51\xdd\x17\x0e"
+	"\x0b\x25\xd6\x80\x5c\x3b\xe6\x1a\x98\x48\x91\x45\x7a\x73\xb0\xc3"
+	"\xf1",
+	.key_len = 97,
+	.m =
+	"\x12\x55\x28\xf0\x77\xd5\xb6\x21\x71\x32\x48\xcd\x28\xa8\x25\x22"
+	"\x3a\x69\xc1\x93",
+	.m_size = 20,
+	.c =
+	"\x30\x66\x02\x31\x00\xf5\x0f\x24\x4c\x07\x93\x6f\x21\x57\x55\x07"
+	"\x20\x43\x30\xde\xa0\x8d\x26\x8e\xae\x63\x3f\xbc\x20\x3a\xc6\xf1"
+	"\x32\x3c\xce\x70\x2b\x78\xf1\x4c\x26\xe6\x5b\x86\xcf\xec\x7c\x7e"
+	"\xd0\x87\xd7\xd7\x6e\x02\x31\x00\xcd\xbb\x7e\x81\x5d\x8f\x63\xc0"
+	"\x5f\x63\xb1\xbe\x5e\x4c\x0e\xa1\xdf\x28\x8c\x1b\xfa\xf9\x95\x88"
+	"\x74\xa0\x0f\xbf\xaf\xc3\x36\x76\x4a\xa1\x59\xf1\x1c\xa4\x58\x26"
+	"\x79\x12\x2a\xb7\xc5\x15\x92\xc5",
+	.c_size = 104,
+	.public_key_vec = true,
+	}, {
+	.key = /* secp384r1(sha224) */
+	"\x04\x69\x6c\xcf\x62\xee\xd0\x0d\xe5\xb5\x2f\x70\x54\xcf\x26\xa0"
+	"\xd9\x98\x8d\x92\x2a\xab\x9b\x11\xcb\x48\x18\xa1\xa9\x0d\xd5\x18"
+	"\x3e\xe8\x29\x6e\xf6\xe4\xb5\x8e\xc7\x4a\xc2\x5f\x37\x13\x99\x05"
+	"\xb6\xa4\x9d\xf9\xfb\x79\x41\xe7\xd7\x96\x9f\x73\x3b\x39\x43\xdc"
+	"\xda\xf4\x06\xb9\xa5\x29\x01\x9d\x3b\xe1\xd8\x68\x77\x2a\xf4\x50"
+	"\x6b\x93\x99\x6c\x66\x4c\x42\x3f\x65\x60\x6c\x1c\x0b\x93\x9b\x9d"
+	"\xe0",
+	.key_len = 97,
+	.m =
+	"\x12\x80\xb6\xeb\x25\xe2\x3d\xf0\x21\x32\x96\x17\x3a\x38\x39\xfd"
+	"\x1f\x05\x34\x7b\xb8\xf9\x71\x66\x03\x4f\xd5\xe5",
+	.m_size = 28,
+	.c =
+	"\x30\x66\x02\x31\x00\x8a\x51\x84\xce\x13\x1e\xd2\xdc\xec\xcb\xe4"
+	"\x89\x47\xb2\xf7\xbc\x97\xf1\xc8\x72\x26\xcf\x5a\x5e\xc5\xda\xb4"
+	"\xe3\x93\x07\xe0\x99\xc9\x9c\x11\xb8\x10\x01\xc5\x41\x3f\xdd\x15"
+	"\x1b\x68\x2b\x9d\x8b\x02\x31\x00\x8b\x03\x2c\xfc\x1f\xd1\xa9\xa4"
+	"\x4b\x00\x08\x31\x6c\xf5\xd5\xf6\xdf\xd8\x68\xa2\x64\x42\x65\xf3"
+	"\x4d\xd0\xc6\x6e\xb0\xe9\xfc\x14\x9f\x19\xd0\x42\x8b\x93\xc2\x11"
+	"\x88\x2b\x82\x26\x5e\x1c\xda\xfb",
+	.c_size = 104,
+	.public_key_vec = true,
+	}, {
+	.key = /* secp384r1(sha256) */
+	"\x04\xee\xd6\xda\x3e\x94\x90\x00\x27\xed\xf8\x64\x55\xd6\x51\x9a"
+	"\x1f\x52\x00\x63\x78\xf1\xa9\xfd\x75\x4c\x9e\xb2\x20\x1a\x91\x5a"
+	"\xba\x7a\xa3\xe5\x6c\xb6\x25\x68\x4b\xe8\x13\xa6\x54\x87\x2c\x0e"
+	"\xd0\x83\x95\xbc\xbf\xc5\x28\x4f\x77\x1c\x46\xa6\xf0\xbc\xd4\xa4"
+	"\x8d\xc2\x8f\xb3\x32\x37\x40\xd6\xca\xf8\xae\x07\x34\x52\x39\x52"
+	"\x17\xc3\x34\x29\xd6\x40\xea\x5c\xb9\x3f\xfb\x32\x2e\x12\x33\xbc"
+	"\xab",
+	.key_len = 97,
+	.m =
+	"\xaa\xe7\xfd\x03\x26\xcb\x94\x71\xe4\xce\x0f\xc5\xff\xa6\x29\xa3"
+	"\xe1\xcc\x4c\x35\x4e\xde\xca\x80\xab\x26\x0c\x25\xe6\x68\x11\xc2",
+	.m_size = 32,
+	.c =
+	"\x30\x64\x02\x30\x08\x09\x12\x9d\x6e\x96\x64\xa6\x8e\x3f\x7e\xce"
+	"\x0a\x9b\xaa\x59\xcc\x47\x53\x87\xbc\xbd\x83\x3f\xaf\x06\x3f\x84"
+	"\x04\xe2\xf9\x67\xb6\xc6\xfc\x70\x2e\x66\x3c\x77\xc8\x8d\x2c\x79"
+	"\x3a\x8e\x32\xc4\x02\x30\x40\x34\xb8\x90\xa9\x80\xab\x47\x26\xa2"
+	"\xb0\x89\x42\x0a\xda\xd9\xdd\xce\xbc\xb2\x97\xf4\x9c\xf3\x15\x68"
+	"\xc0\x75\x3e\x23\x5e\x36\x4f\x8d\xde\x1e\x93\x8d\x95\xbb\x10\x0e"
+	"\xf4\x1f\x39\xca\x4d\x43",
+	.c_size = 102,
+	.public_key_vec = true,
+	}, {
+	.key = /* secp384r1(sha384) */
+	"\x04\x3a\x2f\x62\xe7\x1a\xcf\x24\xd0\x0b\x7c\xe0\xed\x46\x0a\x4f"
+	"\x74\x16\x43\xe9\x1a\x25\x7c\x55\xff\xf0\x29\x68\x66\x20\x91\xf9"
+	"\xdb\x2b\xf6\xb3\x6c\x54\x01\xca\xc7\x6a\x5c\x0d\xeb\x68\xd9\x3c"
+	"\xf1\x01\x74\x1f\xf9\x6c\xe5\x5b\x60\xe9\x7f\x5d\xb3\x12\x80\x2a"
+	"\xd8\x67\x92\xc9\x0e\x4c\x4c\x6b\xa1\xb2\xa8\x1e\xac\x1c\x97\xd9"
+	"\x21\x67\xe5\x1b\x5a\x52\x31\x68\xd6\xee\xf0\x19\xb0\x55\xed\x89"
+	"\x9e",
+	.key_len = 97,
+	.m =
+	"\x8d\xf2\xc0\xe9\xa8\xf3\x8e\x44\xc4\x8c\x1a\xa0\xb8\xd7\x17\xdf"
+	"\xf2\x37\x1b\xc6\xe3\xf5\x62\xcc\x68\xf5\xd5\x0b\xbf\x73\x2b\xb1"
+	"\xb0\x4c\x04\x00\x31\xab\xfe\xc8\xd6\x09\xc8\xf2\xea\xd3\x28\xff",
+	.m_size = 48,
+	.c =
+	"\x30\x66\x02\x31\x00\x9b\x28\x68\xc0\xa1\xea\x8c\x50\xee\x2e\x62"
+	"\x35\x46\xfa\x00\xd8\x2d\x7a\x91\x5f\x49\x2d\x22\x08\x29\xe6\xfb"
+	"\xca\x8c\xd6\xb6\xb4\x3b\x1f\x07\x8f\x15\x02\xfe\x1d\xa2\xa4\xc8"
+	"\xf2\xea\x9d\x11\x1f\x02\x31\x00\xfc\x50\xf6\x43\xbd\x50\x82\x0e"
+	"\xbf\xe3\x75\x24\x49\xac\xfb\xc8\x71\xcd\x8f\x18\x99\xf0\x0f\x13"
+	"\x44\x92\x8c\x86\x99\x65\xb3\x97\x96\x17\x04\xc9\x05\x77\xf1\x8e"
+	"\xab\x8d\x4e\xde\xe6\x6d\x9b\x66",
+	.c_size = 104,
+	.public_key_vec = true,
+	}, {
+	.key = /* secp384r1(sha512) */
+	"\x04\xb4\xe7\xc1\xeb\x64\x25\x22\x46\xc3\x86\x61\x80\xbe\x1e\x46"
+	"\xcb\xf6\x05\xc2\xee\x73\x83\xbc\xea\x30\x61\x4d\x40\x05\x41\xf4"
+	"\x8c\xe3\x0e\x5c\xf0\x50\xf2\x07\x19\xe8\x4f\x25\xbe\xee\x0c\x95"
+	"\x54\x36\x86\xec\xc2\x20\x75\xf3\x89\xb5\x11\xa1\xb7\xf5\xaf\xbe"
+	"\x81\xe4\xc3\x39\x06\xbd\xe4\xfe\x68\x1c\x6d\x99\x2b\x1b\x63\xfa"
+	"\xdf\x42\x5c\xc2\x5a\xc7\x0c\xf4\x15\xf7\x1b\xa3\x2e\xd7\x00\xac"
+	"\xa3",
+	.key_len = 97,
+	.m =
+	"\xe8\xb7\x52\x7d\x1a\x44\x20\x05\x53\x6b\x3a\x68\xf2\xe7\x6c\xa1"
+	"\xae\x9d\x84\xbb\xba\x52\x43\x3e\x2c\x42\x78\x49\xbf\x78\xb2\x71"
+	"\xeb\xe1\xe0\xe8\x42\x7b\x11\xad\x2b\x99\x05\x1d\x36\xe6\xac\xfc"
+	"\x55\x73\xf0\x15\x63\x39\xb8\x6a\x6a\xc5\x91\x5b\xca\x6a\xa8\x0e",
+	.m_size = 64,
+	.c =
+	"\x30\x63\x02\x2f\x1d\x20\x94\x77\xfe\x31\xfa\x4d\xc6\xef\xda\x02"
+	"\xe7\x0f\x52\x9a\x02\xde\x93\xe8\x83\xe4\x84\x4c\xfc\x6f\x80\xe3"
+	"\xaf\xb3\xd9\xdc\x2b\x43\x0e\x6a\xb3\x53\x6f\x3e\xb3\xc7\xa8\xb3"
+	"\x17\x77\xd1\x02\x30\x63\xf6\xf0\x3d\x5f\x5f\x99\x3f\xde\x3a\x3d"
+	"\x16\xaf\xb4\x52\x6a\xec\x63\xe3\x0c\xec\x50\xdc\xcc\xc4\x6a\x03"
+	"\x5f\x8d\x7a\xf9\xfb\x34\xe4\x8b\x80\xa5\xb6\xda\x2c\x4e\x45\xcf"
+	"\x3c\x93\xff\x50\x5d",
+	.c_size = 101,
+	.public_key_vec = true,
+	},
+};
+
+static const struct sig_testvec x962_ecdsa_nist_p521_tv_template[] = {
+	{
+	.key = /* secp521r1(sha224) */
+	"\x04\x01\x4f\x43\x18\xb6\xa9\xc9\x5d\x68\xd3\xa9\x42\xf8\x98\xc0"
+	"\xd2\xd1\xa9\x50\x3b\xe8\xc4\x40\xe6\x11\x78\x88\x4b\xbd\x76\xa7"
+	"\x9a\xe0\xdd\x31\xa4\x67\x78\x45\x33\x9e\x8c\xd1\xc7\x44\xac\x61"
+	"\x68\xc8\x04\xe7\x5c\x79\xb1\xf1\x41\x0c\x71\xc0\x53\xa8\xbc\xfb"
+	"\xf5\xca\xd4\x01\x40\xfd\xa3\x45\xda\x08\xe0\xb4\xcb\x28\x3b\x0a"
+	"\x02\x35\x5f\x02\x9f\x3f\xcd\xef\x08\x22\x40\x97\x74\x65\xb7\x76"
+	"\x85\xc7\xc0\x5c\xfb\x81\xe1\xa5\xde\x0c\x4e\x8b\x12\x31\xb6\x47"
+	"\xed\x37\x0f\x99\x3f\x26\xba\xa3\x8e\xff\x79\x34\x7c\x3a\xfe\x1f"
+	"\x3b\x83\x82\x2f\x14",
+	.key_len = 133,
+	.m =
+	"\xa2\x3a\x6a\x8c\x7b\x3c\xf2\x51\xf8\xbe\x5f\x4f\x3b\x15\x05\xc4"
+	"\xb5\xbc\x19\xe7\x21\x85\xe9\x23\x06\x33\x62\xfb",
+	.m_size = 28,
+	.c =
+	"\x30\x81\x86\x02\x41\x01\xd6\x43\xe7\xff\x42\xb2\xba\x74\x35\xf6"
+	"\xdc\x6d\x02\x7b\x22\xac\xe2\xef\x07\x92\xee\x60\x94\x06\xf8\x3f"
+	"\x59\x0f\x74\xf0\x3f\xd8\x18\xc6\x37\x8a\xcb\xa7\xd8\x7d\x98\x85"
+	"\x29\x88\xff\x0b\x94\x94\x6c\xa6\x9b\x89\x8b\x1e\xfd\x09\x46\x6b"
+	"\xc7\xaf\x7a\xb9\x19\x0a\x02\x41\x3a\x26\x0d\x55\xcd\x23\x1e\x7d"
+	"\xa0\x5e\xf9\x88\xf3\xd2\x32\x90\x57\x0f\xf8\x65\x97\x6b\x09\x4d"
+	"\x22\x26\x0b\x5f\x49\x32\x6b\x91\x99\x30\x90\x0f\x1c\x8f\x78\xd3"
+	"\x9f\x0e\x64\xcc\xc4\xe8\x43\xd9\x0e\x1c\xad\x22\xda\x82\x00\x35"
+	"\xa3\x50\xb1\xa5\x98\x92\x2a\xa5\x52",
+	.c_size = 137,
+	.public_key_vec = true,
+	},
+	{
+	.key = /* secp521r1(sha256) */
+	"\x04\x01\x05\x3a\x6b\x3b\x5a\x0f\xa7\xb9\xb7\x32\x53\x4e\xe2\xae"
+	"\x0a\x52\xc5\xda\xdd\x5a\x79\x1c\x30\x2d\x33\x07\x79\xd5\x70\x14"
+	"\x61\x0c\xec\x26\x4d\xd8\x35\x57\x04\x1d\x88\x33\x4d\xce\x05\x36"
+	"\xa5\xaf\x56\x84\xfa\x0b\x9e\xff\x7b\x30\x4b\x92\x1d\x06\xf8\x81"
+	"\x24\x1e\x51\x00\x09\x21\x51\xf7\x46\x0a\x77\xdb\xb5\x0c\xe7\x9c"
+	"\xff\x27\x3c\x02\x71\xd7\x85\x36\xf1\xaa\x11\x59\xd8\xb8\xdc\x09"
+	"\xdc\x6d\x5a\x6f\x63\x07\x6c\xe1\xe5\x4d\x6e\x0f\x6e\xfb\x7c\x05"
+	"\x8a\xe9\x53\xa8\xcf\xce\x43\x0e\x82\x20\x86\xbc\x88\x9c\xb7\xe3"
+	"\xe6\x77\x1e\x1f\x8a",
+	.key_len = 133,
+	.m =
+	"\xcc\x97\x73\x0c\x73\xa2\x53\x2b\xfa\xd7\x83\x1d\x0c\x72\x1b\x39"
+	"\x80\x71\x8d\xdd\xc5\x9b\xff\x55\x32\x98\x25\xa2\x58\x2e\xb7\x73",
+	.m_size = 32,
+	.c =
+	"\x30\x81\x88\x02\x42\x00\xcd\xa5\x5f\x57\x52\x27\x78\x3a\xb5\x06"
+	"\x0f\xfd\x83\xfc\x0e\xd9\xce\x50\x9f\x7d\x1f\xca\x8b\xa8\x2d\x56"
+	"\x3c\xf6\xf0\xd8\xe1\xb7\x5d\x95\x35\x6f\x02\x0e\xaf\xe1\x4c\xae"
+	"\xce\x54\x76\x9a\xc2\x8f\xb8\x38\x1f\x46\x0b\x04\x64\x34\x79\xde"
+	"\x7e\xd7\x59\x10\xe9\xd9\xd5\x02\x42\x01\xcf\x50\x85\x38\xf9\x15"
+	"\x83\x18\x04\x6b\x35\xae\x65\xb5\x99\x12\x0a\xa9\x79\x24\xb9\x37"
+	"\x35\xdd\xa0\xe0\x87\x2c\x44\x4b\x5a\xee\xaf\xfa\x10\xdd\x9b\xfb"
+	"\x36\x1a\x31\x03\x42\x02\x5f\x50\xf0\xa2\x0d\x1c\x57\x56\x8f\x12"
+	"\xb7\x1d\x91\x55\x38\xb6\xf6\x34\x65\xc7\xbd",
+	.c_size = 139,
+	.public_key_vec = true,
+	},
+	{
+	.key = /* secp521r1(sha384) */
+	"\x04\x00\x2e\xd6\x21\x04\x75\xc3\xdc\x7d\xff\x0e\xf3\x70\x25\x2b"
+	"\xad\x72\xfc\x5a\x91\xf1\xd5\x9c\x64\xf3\x1f\x47\x11\x10\x62\x33"
+	"\xfd\x2e\xe8\x32\xca\x9e\x6f\x0a\x4c\x5b\x35\x9a\x46\xc5\xe7\xd4"
+	"\x38\xda\xb2\xf0\xf4\x87\xf3\x86\xf4\xea\x70\xad\x1e\xd4\x78\x8c"
+	"\x36\x18\x17\x00\xa2\xa0\x34\x1b\x2e\x6a\xdf\x06\xd6\x99\x2d\x47"
+	"\x50\x92\x1a\x8a\x72\x9c\x23\x44\xfa\xa7\xa9\xed\xa6\xef\x26\x14"
+	"\xb3\x9d\xfe\x5e\xa3\x8c\xd8\x29\xf8\xdf\xad\xa6\xab\xfc\xdd\x46"
+	"\x22\x6e\xd7\x35\xc7\x23\xb7\x13\xae\xb6\x34\xff\xd7\x80\xe5\x39"
+	"\xb3\x3b\x5b\x1b\x94",
+	.key_len = 133,
+	.m =
+	"\x36\x98\xd6\x82\xfa\xad\xed\x3c\xb9\x40\xb6\x4d\x9e\xb7\x04\x26"
+	"\xad\x72\x34\x44\xd2\x81\xb4\x9b\xbe\x01\x04\x7a\xd8\x50\xf8\x59"
+	"\xba\xad\x23\x85\x6b\x59\xbe\xfb\xf6\x86\xd4\x67\xa8\x43\x28\x76",
+	.m_size = 48,
+	.c =
+	"\x30\x81\x88\x02\x42\x00\x93\x96\x76\x3c\x27\xea\xaa\x9c\x26\xec"
+	"\x51\xdc\xe8\x35\x5e\xae\x16\xf2\x4b\x64\x98\xf7\xec\xda\xc7\x7e"
+	"\x42\x71\x86\x57\x2d\xf1\x7d\xe4\xdf\x9b\x7d\x9e\x47\xca\x33\x32"
+	"\x76\x06\xd0\xf9\xc0\xe4\xe6\x84\x59\xfd\x1a\xc4\x40\xdd\x43\xb8"
+	"\x6a\xdd\xfb\xe6\x63\x4e\x28\x02\x42\x00\xff\xc3\x6a\x87\x6e\xb5"
+	"\x13\x1f\x20\x55\xce\x37\x97\xc9\x05\x51\xe5\xe4\x3c\xbc\x93\x65"
+	"\x57\x1c\x30\xda\xa7\xcd\x26\x28\x76\x3b\x52\xdf\xc4\xc0\xdb\x54"
+	"\xdb\x8a\x0d\x6a\xc3\xf3\x7a\xd1\xfa\xe7\xa7\xe5\x5a\x94\x56\xcf"
+	"\x8f\xb4\x22\xc6\x4f\xab\x2b\x62\xc1\x42\xb1",
+	.c_size = 139,
+	.public_key_vec = true,
+	},
+	{
+	.key = /* secp521r1(sha512) */
+	"\x04\x00\xc7\x65\xee\x0b\x86\x7d\x8f\x02\xf1\x74\x5b\xb0\x4c\x3f"
+	"\xa6\x35\x60\x9f\x55\x23\x11\xcc\xdf\xb8\x42\x99\xee\x6c\x96\x6a"
+	"\x27\xa2\x56\xb2\x2b\x03\xad\x0f\xe7\x97\xde\x09\x5d\xb4\xc5\x5f"
+	"\xbd\x87\x37\xbf\x5a\x16\x35\x56\x08\xfd\x6f\x06\x1a\x1c\x84\xee"
+	"\xc3\x64\xb3\x00\x9e\xbd\x6e\x60\x76\xee\x69\xfd\x3a\xb8\xcd\x7e"
+	"\x91\x68\x53\x57\x44\x13\x2e\x77\x09\x2a\xbe\x48\xbd\x91\xd8\xf6"
+	"\x21\x16\x53\x99\xd5\xf0\x40\xad\xa6\xf8\x58\x26\xb6\x9a\xf8\x77"
+	"\xfe\x3a\x05\x1a\xdb\xa9\x0f\xc0\x6c\x76\x30\x8c\xd8\xde\x44\xae"
+	"\xd0\x17\xdf\x49\x6a",
+	.key_len = 133,
+	.m =
+	"\x5c\xa6\xbc\x79\xb8\xa0\x1e\x11\x83\xf7\xe9\x05\xdf\xba\xf7\x69"
+	"\x97\x22\x32\xe4\x94\x7c\x65\xbd\x74\xc6\x9a\x8b\xbd\x0d\xdc\xed"
+	"\xf5\x9c\xeb\xe1\xc5\x68\x40\xf2\xc7\x04\xde\x9e\x0d\x76\xc5\xa3"
+	"\xf9\x3c\x6c\x98\x08\x31\xbd\x39\xe8\x42\x7f\x80\x39\x6f\xfe\x68",
+	.m_size = 64,
 	.c =
 	"\x30\x81\x88\x02\x42\x01\x5c\x71\x86\x96\xac\x21\x33\x7e\x4e\xaa"
 	"\x86\xec\xa8\x05\x03\x52\x56\x63\x0e\x02\xcc\x94\xa9\x05\xb9\xfb"
@@ -1213,14 +1799,41 @@ static const struct akcipher_testvec ecdsa_nist_p521_tv_template[] = {
 	"\xa6\xe5\x25\x46\x1e\x77\x44\x78\xe0\xd1\x04",
 	.c_size = 139,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
+	},
+};
+
+/*
+ * ECDSA P1363 test vectors.
+ *
+ * Identical to ECDSA test vectors, except signature in "c" is P1363 encoded.
+ */
+static const struct sig_testvec p1363_ecdsa_nist_p256_tv_template[] = {
+	{
+	.key = /* secp256r1(sha256) */
+	"\x04\xf1\xea\xc4\x53\xf3\xb9\x0e\x9f\x7e\xad\xe3\xea\xd7\x0e\x0f"
+	"\xd6\x98\x9a\xca\x92\x4d\x0a\x80\xdb\x2d\x45\xc7\xec\x4b\x97\x00"
+	"\x2f\xe9\x42\x6c\x29\xdc\x55\x0e\x0b\x53\x12\x9b\x2b\xad\x2c\xe9"
+	"\x80\xe6\xc5\x43\xc2\x1d\x5e\xbb\x65\x21\x50\xb6\x37\xb0\x03\x8e"
+	"\xb8",
+	.key_len = 65,
+	.m =
+	"\x8f\x43\x43\x46\x64\x8f\x6b\x96\xdf\x89\xdd\xa9\x01\xc5\x17\x6b"
+	"\x10\xa6\xd8\x39\x61\xdd\x3c\x1a\xc8\x8b\x59\xb2\xdc\x32\x7a\xa4",
+	.m_size = 32,
+	.c =
+	"\x08\x31\xfa\x74\x0d\x1d\x21\x5d\x09\xdc\x29\x63\xa8\x1a\xad\xfc"
+	"\xac\x44\xc3\xe8\x24\x11\x2d\xa4\x91\xdc\x02\x67\xdc\x0c\xd0\x82"
+	"\xbd\xff\xce\xee\x42\xc3\x97\xff\xf9\xa9\x81\xac\x4a\x50\xd0\x91"
+	"\x0a\x6e\x1b\xc4\xaf\xe1\x83\xc3\x4f\x2a\x65\x35\x23\xe3\x1d\xfa",
+	.c_size = 64,
+	.public_key_vec = true,
 	},
 };
 
 /*
  * EC-RDSA test vectors are generated by gost-engine.
  */
-static const struct akcipher_testvec ecrdsa_tv_template[] = {
+static const struct sig_testvec ecrdsa_tv_template[] = {
 	{
 	.key =
 	"\x04\x40\xd5\xa7\x77\xf9\x26\x2f\x8c\xbd\xcc\xe3\x1f\x01\x94\x05"
@@ -1245,7 +1858,6 @@ static const struct akcipher_testvec ecrdsa_tv_template[] = {
 	"\x79\xd2\x76\x64\xa3\xbd\x66\x10\x79\x05\x5a\x06\x42\xec\xb9\xc9",
 	.m_size = 32,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	},
 	{
 	.key =
@@ -1271,7 +1883,6 @@ static const struct akcipher_testvec ecrdsa_tv_template[] = {
 	"\x11\x23\x4a\x70\x43\x52\x7a\x68\x11\x65\x45\x37\xbb\x25\xb7\x40",
 	.m_size = 32,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	},
 	{
 	.key =
@@ -1297,7 +1908,6 @@ static const struct akcipher_testvec ecrdsa_tv_template[] = {
 	"\x9f\x16\xc6\x1c\xb1\x3f\x84\x41\x69\xec\x34\xfd\xf1\xf9\xa3\x39",
 	.m_size = 32,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	},
 	{
 	.key =
@@ -1332,7 +1942,6 @@ static const struct akcipher_testvec ecrdsa_tv_template[] = {
 	"\xa8\xf6\x80\x01\xb9\x27\xac\xd8\x45\x96\x66\xa1\xee\x48\x08\x3f",
 	.m_size = 64,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
 	},
 	{
 	.key =
@@ -1367,14 +1976,68 @@ static const struct akcipher_testvec ecrdsa_tv_template[] = {
 	"\x6d\xf4\xd2\x45\xc2\x83\xa0\x42\x95\x05\x9d\x89\x8e\x0a\xca\xcc",
 	.m_size = 64,
 	.public_key_vec = true,
-	.siggen_sigver_test = true,
+	},
+};
+
+/*
+ * PKCS#1 RSA test vectors for hash algorithm "none"
+ * (i.e. the hash in "m" is not prepended by a Full Hash Prefix)
+ *
+ * Obtained from:
+ * https://vcsjones.dev/sometimes-valid-rsa-dotnet/
+ * https://gist.github.com/vcsjones/ab4c2327b53ed018eada76b75ef4fd99
+ */
+static const struct sig_testvec pkcs1_rsa_none_tv_template[] = {
+	{
+	.key =
+	"\x30\x82\x01\x0a\x02\x82\x01\x01\x00\xa2\x63\x0b\x39\x44\xb8\xbb"
+	"\x23\xa7\x44\x49\xbb\x0e\xff\xa1\xf0\x61\x0a\x53\x93\xb0\x98\xdb"
+	"\xad\x2c\x0f\x4a\xc5\x6e\xff\x86\x3c\x53\x55\x0f\x15\xce\x04\x3f"
+	"\x2b\xfd\xa9\x96\x96\xd9\xbe\x61\x79\x0b\x5b\xc9\x4c\x86\x76\xe5"
+	"\xe0\x43\x4b\x22\x95\xee\xc2\x2b\x43\xc1\x9f\xd8\x68\xb4\x8e\x40"
+	"\x4f\xee\x85\x38\xb9\x11\xc5\x23\xf2\x64\x58\xf0\x15\x32\x6f\x4e"
+	"\x57\xa1\xae\x88\xa4\x02\xd7\x2a\x1e\xcd\x4b\xe1\xdd\x63\xd5\x17"
+	"\x89\x32\x5b\xb0\x5e\x99\x5a\xa8\x9d\x28\x50\x0e\x17\xee\x96\xdb"
+	"\x61\x3b\x45\x51\x1d\xcf\x12\x56\x0b\x92\x47\xfc\xab\xae\xf6\x66"
+	"\x3d\x47\xac\x70\x72\xe7\x92\xe7\x5f\xcd\x10\xb9\xc4\x83\x64\x94"
+	"\x19\xbd\x25\x80\xe1\xe8\xd2\x22\xa5\xd0\xba\x02\x7a\xa1\x77\x93"
+	"\x5b\x65\xc3\xee\x17\x74\xbc\x41\x86\x2a\xdc\x08\x4c\x8c\x92\x8c"
+	"\x91\x2d\x9e\x77\x44\x1f\x68\xd6\xa8\x74\x77\xdb\x0e\x5b\x32\x8b"
+	"\x56\x8b\x33\xbd\xd9\x63\xc8\x49\x9d\x3a\xc5\xc5\xea\x33\x0b\xd2"
+	"\xf1\xa3\x1b\xf4\x8b\xbe\xd9\xb3\x57\x8b\x3b\xde\x04\xa7\x7a\x22"
+	"\xb2\x24\xae\x2e\xc7\x70\xc5\xbe\x4e\x83\x26\x08\xfb\x0b\xbd\xa9"
+	"\x4f\x99\x08\xe1\x10\x28\x72\xaa\xcd\x02\x03\x01\x00\x01",
+	.key_len = 270,
+	.m =
+	"\x68\xb4\xf9\x26\x34\x31\x25\xdd\x26\x50\x13\x68\xc1\x99\x26\x71"
+	"\x19\xa2\xde\x81",
+	.m_size = 20,
+	.c =
+	"\x6a\xdb\x39\xe5\x63\xb3\x25\xde\x58\xca\xc3\xf1\x36\x9c\x0b\x36"
+	"\xb7\xd6\x69\xf9\xba\xa6\x68\x14\x8c\x24\x52\xd3\x25\xa5\xf3\xad"
+	"\xc9\x47\x44\xde\x06\xd8\x0f\x56\xca\x2d\xfb\x0f\xe9\x99\xe2\x9d"
+	"\x8a\xe8\x7f\xfb\x9a\x99\x96\xf1\x2c\x4a\xe4\xc0\xae\x4d\x29\x47"
+	"\x38\x96\x51\x2f\x6d\x8e\xb8\x88\xbd\x1a\x0a\x70\xbc\x23\x38\x67"
+	"\x62\x22\x01\x23\x71\xe5\xbb\x95\xea\x6b\x8d\x31\x62\xbf\xf0\xc4"
+	"\xb9\x46\xd6\x67\xfc\x4c\xe6\x1f\xd6\x5d\xf7\xa9\xad\x3a\xf1\xbf"
+	"\xa2\xf9\x66\xde\xb6\x8e\xec\x8f\x81\x8d\x1e\x3a\x12\x27\x6a\xfc"
+	"\xae\x92\x9f\xc3\x87\xc3\xba\x8d\x04\xb8\x8f\x0f\x61\x68\x9a\x96"
+	"\x2c\x80\x2c\x32\x40\xde\x9d\xb9\x9b\xe2\xe4\x45\x2e\x91\x47\x5c"
+	"\x47\xa4\x9d\x02\x57\x59\xf7\x75\x5d\x5f\x32\x82\x75\x5d\xe5\x78"
+	"\xc9\x19\x61\x46\x06\x9d\xa5\x1d\xd6\x32\x48\x9a\xdb\x09\x29\x81"
+	"\x14\x2e\xf0\x27\xe9\x37\x13\x74\xec\xa5\xcd\x67\x6b\x19\xf6\x88"
+	"\xf0\xc2\x8b\xa8\x7f\x2f\x76\x5a\x3e\x0c\x47\x5d\xe8\x82\x50\x27"
+	"\x40\xce\x27\x41\x45\xa0\xcf\xaa\x2f\xd3\xad\x3c\xbf\x73\xff\x93"
+	"\xe3\x78\x49\xd9\xa9\x78\x22\x81\x9a\xe5\xe2\x94\xe9\x40\xab\xf1",
+	.c_size = 256,
+	.public_key_vec = true,
 	},
 };
 
 /*
  * PKCS#1 RSA test vectors. Obtained from CAVS testing.
  */
-static const struct akcipher_testvec pkcs1pad_rsa_tv_template[] = {
+static const struct sig_testvec pkcs1_rsa_tv_template[] = {
 	{
 	.key =
 	"\x30\x82\x04\xa5\x02\x01\x00\x02\x82\x01\x01\x00\xd7\x1e\x77\x82"
@@ -1486,7 +2149,6 @@ static const struct akcipher_testvec pkcs1pad_rsa_tv_template[] = {
 	"\xda\x62\x8d\xe1\x2a\x71\x91\x43\x40\x61\x3c\x5a\xbe\x86\xfc\x5b"
 	"\xe6\xf9\xa9\x16\x31\x1f\xaf\x25\x6d\xc2\x4a\x23\x6e\x63\x02\xa2",
 	.c_size = 256,
-	.siggen_sigver_test = true,
 	}
 };
 
@@ -3136,1231 +3798,6 @@ static const struct kpp_testvec ffdhe8192_dh_tv_template[] __maybe_unused = {
 	},
 };
 
-static const struct kpp_testvec curve25519_tv_template[] = {
-{
-	.secret = (u8[32]){ 0x77, 0x07, 0x6d, 0x0a, 0x73, 0x18, 0xa5, 0x7d,
-		     0x3c, 0x16, 0xc1, 0x72, 0x51, 0xb2, 0x66, 0x45,
-		     0xdf, 0x4c, 0x2f, 0x87, 0xeb, 0xc0, 0x99, 0x2a,
-		     0xb1, 0x77, 0xfb, 0xa5, 0x1d, 0xb9, 0x2c, 0x2a },
-	.b_public = (u8[32]){ 0xde, 0x9e, 0xdb, 0x7d, 0x7b, 0x7d, 0xc1, 0xb4,
-		    0xd3, 0x5b, 0x61, 0xc2, 0xec, 0xe4, 0x35, 0x37,
-		    0x3f, 0x83, 0x43, 0xc8, 0x5b, 0x78, 0x67, 0x4d,
-		    0xad, 0xfc, 0x7e, 0x14, 0x6f, 0x88, 0x2b, 0x4f },
-	.expected_ss = (u8[32]){ 0x4a, 0x5d, 0x9d, 0x5b, 0xa4, 0xce, 0x2d, 0xe1,
-		    0x72, 0x8e, 0x3b, 0xf4, 0x80, 0x35, 0x0f, 0x25,
-		    0xe0, 0x7e, 0x21, 0xc9, 0x47, 0xd1, 0x9e, 0x33,
-		    0x76, 0xf0, 0x9b, 0x3c, 0x1e, 0x16, 0x17, 0x42 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-{
-	.secret = (u8[32]){ 0x5d, 0xab, 0x08, 0x7e, 0x62, 0x4a, 0x8a, 0x4b,
-		     0x79, 0xe1, 0x7f, 0x8b, 0x83, 0x80, 0x0e, 0xe6,
-		     0x6f, 0x3b, 0xb1, 0x29, 0x26, 0x18, 0xb6, 0xfd,
-		     0x1c, 0x2f, 0x8b, 0x27, 0xff, 0x88, 0xe0, 0xeb },
-	.b_public = (u8[32]){ 0x85, 0x20, 0xf0, 0x09, 0x89, 0x30, 0xa7, 0x54,
-		    0x74, 0x8b, 0x7d, 0xdc, 0xb4, 0x3e, 0xf7, 0x5a,
-		    0x0d, 0xbf, 0x3a, 0x0d, 0x26, 0x38, 0x1a, 0xf4,
-		    0xeb, 0xa4, 0xa9, 0x8e, 0xaa, 0x9b, 0x4e, 0x6a },
-	.expected_ss = (u8[32]){ 0x4a, 0x5d, 0x9d, 0x5b, 0xa4, 0xce, 0x2d, 0xe1,
-		    0x72, 0x8e, 0x3b, 0xf4, 0x80, 0x35, 0x0f, 0x25,
-		    0xe0, 0x7e, 0x21, 0xc9, 0x47, 0xd1, 0x9e, 0x33,
-		    0x76, 0xf0, 0x9b, 0x3c, 0x1e, 0x16, 0x17, 0x42 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-{
-	.secret = (u8[32]){ 1 },
-	.b_public = (u8[32]){ 0x25, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-	.expected_ss = (u8[32]){ 0x3c, 0x77, 0x77, 0xca, 0xf9, 0x97, 0xb2, 0x64,
-		    0x41, 0x60, 0x77, 0x66, 0x5b, 0x4e, 0x22, 0x9d,
-		    0x0b, 0x95, 0x48, 0xdc, 0x0c, 0xd8, 0x19, 0x98,
-		    0xdd, 0xcd, 0xc5, 0xc8, 0x53, 0x3c, 0x79, 0x7f },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-{
-	.secret = (u8[32]){ 1 },
-	.b_public = (u8[32]){ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
-	.expected_ss = (u8[32]){ 0xb3, 0x2d, 0x13, 0x62, 0xc2, 0x48, 0xd6, 0x2f,
-		    0xe6, 0x26, 0x19, 0xcf, 0xf0, 0x4d, 0xd4, 0x3d,
-		    0xb7, 0x3f, 0xfc, 0x1b, 0x63, 0x08, 0xed, 0xe3,
-		    0x0b, 0x78, 0xd8, 0x73, 0x80, 0xf1, 0xe8, 0x34 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-{
-	.secret = (u8[32]){ 0xa5, 0x46, 0xe3, 0x6b, 0xf0, 0x52, 0x7c, 0x9d,
-		     0x3b, 0x16, 0x15, 0x4b, 0x82, 0x46, 0x5e, 0xdd,
-		     0x62, 0x14, 0x4c, 0x0a, 0xc1, 0xfc, 0x5a, 0x18,
-		     0x50, 0x6a, 0x22, 0x44, 0xba, 0x44, 0x9a, 0xc4 },
-	.b_public = (u8[32]){ 0xe6, 0xdb, 0x68, 0x67, 0x58, 0x30, 0x30, 0xdb,
-		    0x35, 0x94, 0xc1, 0xa4, 0x24, 0xb1, 0x5f, 0x7c,
-		    0x72, 0x66, 0x24, 0xec, 0x26, 0xb3, 0x35, 0x3b,
-		    0x10, 0xa9, 0x03, 0xa6, 0xd0, 0xab, 0x1c, 0x4c },
-	.expected_ss = (u8[32]){ 0xc3, 0xda, 0x55, 0x37, 0x9d, 0xe9, 0xc6, 0x90,
-		    0x8e, 0x94, 0xea, 0x4d, 0xf2, 0x8d, 0x08, 0x4f,
-		    0x32, 0xec, 0xcf, 0x03, 0x49, 0x1c, 0x71, 0xf7,
-		    0x54, 0xb4, 0x07, 0x55, 0x77, 0xa2, 0x85, 0x52 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-{
-	.secret = (u8[32]){ 0xff, 0xff, 0xff, 0xff, 0x0a, 0xff, 0xff, 0xff,
-		     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
-	.b_public = (u8[32]){ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0x0a, 0x00, 0xfb, 0x9f },
-	.expected_ss = (u8[32]){ 0x77, 0x52, 0xb6, 0x18, 0xc1, 0x2d, 0x48, 0xd2,
-		    0xc6, 0x93, 0x46, 0x83, 0x81, 0x7c, 0xc6, 0x57,
-		    0xf3, 0x31, 0x03, 0x19, 0x49, 0x48, 0x20, 0x05,
-		    0x42, 0x2b, 0x4e, 0xae, 0x8d, 0x1d, 0x43, 0x23 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-{
-	.secret = (u8[32]){ 0x8e, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-	.b_public = (u8[32]){ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x8e, 0x06 },
-	.expected_ss = (u8[32]){ 0x5a, 0xdf, 0xaa, 0x25, 0x86, 0x8e, 0x32, 0x3d,
-		    0xae, 0x49, 0x62, 0xc1, 0x01, 0x5c, 0xb3, 0x12,
-		    0xe1, 0xc5, 0xc7, 0x9e, 0x95, 0x3f, 0x03, 0x99,
-		    0xb0, 0xba, 0x16, 0x22, 0xf3, 0xb6, 0xf7, 0x0c },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - normal case */
-{
-	.secret = (u8[32]){ 0x48, 0x52, 0x83, 0x4d, 0x9d, 0x6b, 0x77, 0xda,
-		     0xde, 0xab, 0xaa, 0xf2, 0xe1, 0x1d, 0xca, 0x66,
-		     0xd1, 0x9f, 0xe7, 0x49, 0x93, 0xa7, 0xbe, 0xc3,
-		     0x6c, 0x6e, 0x16, 0xa0, 0x98, 0x3f, 0xea, 0xba },
-	.b_public = (u8[32]){ 0x9c, 0x64, 0x7d, 0x9a, 0xe5, 0x89, 0xb9, 0xf5,
-		    0x8f, 0xdc, 0x3c, 0xa4, 0x94, 0x7e, 0xfb, 0xc9,
-		    0x15, 0xc4, 0xb2, 0xe0, 0x8e, 0x74, 0x4a, 0x0e,
-		    0xdf, 0x46, 0x9d, 0xac, 0x59, 0xc8, 0xf8, 0x5a },
-	.expected_ss = (u8[32]){ 0x87, 0xb7, 0xf2, 0x12, 0xb6, 0x27, 0xf7, 0xa5,
-		    0x4c, 0xa5, 0xe0, 0xbc, 0xda, 0xdd, 0xd5, 0x38,
-		    0x9d, 0x9d, 0xe6, 0x15, 0x6c, 0xdb, 0xcf, 0x8e,
-		    0xbe, 0x14, 0xff, 0xbc, 0xfb, 0x43, 0x65, 0x51 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key on twist */
-{
-	.secret = (u8[32]){ 0x58, 0x8c, 0x06, 0x1a, 0x50, 0x80, 0x4a, 0xc4,
-		     0x88, 0xad, 0x77, 0x4a, 0xc7, 0x16, 0xc3, 0xf5,
-		     0xba, 0x71, 0x4b, 0x27, 0x12, 0xe0, 0x48, 0x49,
-		     0x13, 0x79, 0xa5, 0x00, 0x21, 0x19, 0x98, 0xa8 },
-	.b_public = (u8[32]){ 0x63, 0xaa, 0x40, 0xc6, 0xe3, 0x83, 0x46, 0xc5,
-		    0xca, 0xf2, 0x3a, 0x6d, 0xf0, 0xa5, 0xe6, 0xc8,
-		    0x08, 0x89, 0xa0, 0x86, 0x47, 0xe5, 0x51, 0xb3,
-		    0x56, 0x34, 0x49, 0xbe, 0xfc, 0xfc, 0x97, 0x33 },
-	.expected_ss = (u8[32]){ 0xb1, 0xa7, 0x07, 0x51, 0x94, 0x95, 0xff, 0xff,
-		    0xb2, 0x98, 0xff, 0x94, 0x17, 0x16, 0xb0, 0x6d,
-		    0xfa, 0xb8, 0x7c, 0xf8, 0xd9, 0x11, 0x23, 0xfe,
-		    0x2b, 0xe9, 0xa2, 0x33, 0xdd, 0xa2, 0x22, 0x12 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key on twist */
-{
-	.secret = (u8[32]){ 0xb0, 0x5b, 0xfd, 0x32, 0xe5, 0x53, 0x25, 0xd9,
-		     0xfd, 0x64, 0x8c, 0xb3, 0x02, 0x84, 0x80, 0x39,
-		     0x00, 0x0b, 0x39, 0x0e, 0x44, 0xd5, 0x21, 0xe5,
-		     0x8a, 0xab, 0x3b, 0x29, 0xa6, 0x96, 0x0b, 0xa8 },
-	.b_public = (u8[32]){ 0x0f, 0x83, 0xc3, 0x6f, 0xde, 0xd9, 0xd3, 0x2f,
-		    0xad, 0xf4, 0xef, 0xa3, 0xae, 0x93, 0xa9, 0x0b,
-		    0xb5, 0xcf, 0xa6, 0x68, 0x93, 0xbc, 0x41, 0x2c,
-		    0x43, 0xfa, 0x72, 0x87, 0xdb, 0xb9, 0x97, 0x79 },
-	.expected_ss = (u8[32]){ 0x67, 0xdd, 0x4a, 0x6e, 0x16, 0x55, 0x33, 0x53,
-		    0x4c, 0x0e, 0x3f, 0x17, 0x2e, 0x4a, 0xb8, 0x57,
-		    0x6b, 0xca, 0x92, 0x3a, 0x5f, 0x07, 0xb2, 0xc0,
-		    0x69, 0xb4, 0xc3, 0x10, 0xff, 0x2e, 0x93, 0x5b },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key on twist */
-{
-	.secret = (u8[32]){ 0x70, 0xe3, 0x4b, 0xcb, 0xe1, 0xf4, 0x7f, 0xbc,
-		     0x0f, 0xdd, 0xfd, 0x7c, 0x1e, 0x1a, 0xa5, 0x3d,
-		     0x57, 0xbf, 0xe0, 0xf6, 0x6d, 0x24, 0x30, 0x67,
-		     0xb4, 0x24, 0xbb, 0x62, 0x10, 0xbe, 0xd1, 0x9c },
-	.b_public = (u8[32]){ 0x0b, 0x82, 0x11, 0xa2, 0xb6, 0x04, 0x90, 0x97,
-		    0xf6, 0x87, 0x1c, 0x6c, 0x05, 0x2d, 0x3c, 0x5f,
-		    0xc1, 0xba, 0x17, 0xda, 0x9e, 0x32, 0xae, 0x45,
-		    0x84, 0x03, 0xb0, 0x5b, 0xb2, 0x83, 0x09, 0x2a },
-	.expected_ss = (u8[32]){ 0x4a, 0x06, 0x38, 0xcf, 0xaa, 0x9e, 0xf1, 0x93,
-		    0x3b, 0x47, 0xf8, 0x93, 0x92, 0x96, 0xa6, 0xb2,
-		    0x5b, 0xe5, 0x41, 0xef, 0x7f, 0x70, 0xe8, 0x44,
-		    0xc0, 0xbc, 0xc0, 0x0b, 0x13, 0x4d, 0xe6, 0x4a },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key on twist */
-{
-	.secret = (u8[32]){ 0x68, 0xc1, 0xf3, 0xa6, 0x53, 0xa4, 0xcd, 0xb1,
-		     0xd3, 0x7b, 0xba, 0x94, 0x73, 0x8f, 0x8b, 0x95,
-		     0x7a, 0x57, 0xbe, 0xb2, 0x4d, 0x64, 0x6e, 0x99,
-		     0x4d, 0xc2, 0x9a, 0x27, 0x6a, 0xad, 0x45, 0x8d },
-	.b_public = (u8[32]){ 0x34, 0x3a, 0xc2, 0x0a, 0x3b, 0x9c, 0x6a, 0x27,
-		    0xb1, 0x00, 0x81, 0x76, 0x50, 0x9a, 0xd3, 0x07,
-		    0x35, 0x85, 0x6e, 0xc1, 0xc8, 0xd8, 0xfc, 0xae,
-		    0x13, 0x91, 0x2d, 0x08, 0xd1, 0x52, 0xf4, 0x6c },
-	.expected_ss = (u8[32]){ 0x39, 0x94, 0x91, 0xfc, 0xe8, 0xdf, 0xab, 0x73,
-		    0xb4, 0xf9, 0xf6, 0x11, 0xde, 0x8e, 0xa0, 0xb2,
-		    0x7b, 0x28, 0xf8, 0x59, 0x94, 0x25, 0x0b, 0x0f,
-		    0x47, 0x5d, 0x58, 0x5d, 0x04, 0x2a, 0xc2, 0x07 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key on twist */
-{
-	.secret = (u8[32]){ 0xd8, 0x77, 0xb2, 0x6d, 0x06, 0xdf, 0xf9, 0xd9,
-		     0xf7, 0xfd, 0x4c, 0x5b, 0x37, 0x69, 0xf8, 0xcd,
-		     0xd5, 0xb3, 0x05, 0x16, 0xa5, 0xab, 0x80, 0x6b,
-		     0xe3, 0x24, 0xff, 0x3e, 0xb6, 0x9e, 0xa0, 0xb2 },
-	.b_public = (u8[32]){ 0xfa, 0x69, 0x5f, 0xc7, 0xbe, 0x8d, 0x1b, 0xe5,
-		    0xbf, 0x70, 0x48, 0x98, 0xf3, 0x88, 0xc4, 0x52,
-		    0xba, 0xfd, 0xd3, 0xb8, 0xea, 0xe8, 0x05, 0xf8,
-		    0x68, 0x1a, 0x8d, 0x15, 0xc2, 0xd4, 0xe1, 0x42 },
-	.expected_ss = (u8[32]){ 0x2c, 0x4f, 0xe1, 0x1d, 0x49, 0x0a, 0x53, 0x86,
-		    0x17, 0x76, 0xb1, 0x3b, 0x43, 0x54, 0xab, 0xd4,
-		    0xcf, 0x5a, 0x97, 0x69, 0x9d, 0xb6, 0xe6, 0xc6,
-		    0x8c, 0x16, 0x26, 0xd0, 0x76, 0x62, 0xf7, 0x58 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case on twist */
-{
-	.secret = (u8[32]){ 0x38, 0xdd, 0xe9, 0xf3, 0xe7, 0xb7, 0x99, 0x04,
-		     0x5f, 0x9a, 0xc3, 0x79, 0x3d, 0x4a, 0x92, 0x77,
-		     0xda, 0xde, 0xad, 0xc4, 0x1b, 0xec, 0x02, 0x90,
-		     0xf8, 0x1f, 0x74, 0x4f, 0x73, 0x77, 0x5f, 0x84 },
-	.b_public = (u8[32]){ 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-	.expected_ss = (u8[32]){ 0x9a, 0x2c, 0xfe, 0x84, 0xff, 0x9c, 0x4a, 0x97,
-		    0x39, 0x62, 0x5c, 0xae, 0x4a, 0x3b, 0x82, 0xa9,
-		    0x06, 0x87, 0x7a, 0x44, 0x19, 0x46, 0xf8, 0xd7,
-		    0xb3, 0xd7, 0x95, 0xfe, 0x8f, 0x5d, 0x16, 0x39 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case on twist */
-{
-	.secret = (u8[32]){ 0x98, 0x57, 0xa9, 0x14, 0xe3, 0xc2, 0x90, 0x36,
-		     0xfd, 0x9a, 0x44, 0x2b, 0xa5, 0x26, 0xb5, 0xcd,
-		     0xcd, 0xf2, 0x82, 0x16, 0x15, 0x3e, 0x63, 0x6c,
-		     0x10, 0x67, 0x7a, 0xca, 0xb6, 0xbd, 0x6a, 0xa5 },
-	.b_public = (u8[32]){ 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-	.expected_ss = (u8[32]){ 0x4d, 0xa4, 0xe0, 0xaa, 0x07, 0x2c, 0x23, 0x2e,
-		    0xe2, 0xf0, 0xfa, 0x4e, 0x51, 0x9a, 0xe5, 0x0b,
-		    0x52, 0xc1, 0xed, 0xd0, 0x8a, 0x53, 0x4d, 0x4e,
-		    0xf3, 0x46, 0xc2, 0xe1, 0x06, 0xd2, 0x1d, 0x60 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case on twist */
-{
-	.secret = (u8[32]){ 0x48, 0xe2, 0x13, 0x0d, 0x72, 0x33, 0x05, 0xed,
-		     0x05, 0xe6, 0xe5, 0x89, 0x4d, 0x39, 0x8a, 0x5e,
-		     0x33, 0x36, 0x7a, 0x8c, 0x6a, 0xac, 0x8f, 0xcd,
-		     0xf0, 0xa8, 0x8e, 0x4b, 0x42, 0x82, 0x0d, 0xb7 },
-	.b_public = (u8[32]){ 0xff, 0xff, 0xff, 0x03, 0x00, 0x00, 0xf8, 0xff,
-		    0xff, 0x1f, 0x00, 0x00, 0xc0, 0xff, 0xff, 0xff,
-		    0x00, 0x00, 0x00, 0xfe, 0xff, 0xff, 0x07, 0x00,
-		    0x00, 0xf0, 0xff, 0xff, 0x3f, 0x00, 0x00, 0x00 },
-	.expected_ss = (u8[32]){ 0x9e, 0xd1, 0x0c, 0x53, 0x74, 0x7f, 0x64, 0x7f,
-		    0x82, 0xf4, 0x51, 0x25, 0xd3, 0xde, 0x15, 0xa1,
-		    0xe6, 0xb8, 0x24, 0x49, 0x6a, 0xb4, 0x04, 0x10,
-		    0xff, 0xcc, 0x3c, 0xfe, 0x95, 0x76, 0x0f, 0x3b },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case on twist */
-{
-	.secret = (u8[32]){ 0x28, 0xf4, 0x10, 0x11, 0x69, 0x18, 0x51, 0xb3,
-		     0xa6, 0x2b, 0x64, 0x15, 0x53, 0xb3, 0x0d, 0x0d,
-		     0xfd, 0xdc, 0xb8, 0xff, 0xfc, 0xf5, 0x37, 0x00,
-		     0xa7, 0xbe, 0x2f, 0x6a, 0x87, 0x2e, 0x9f, 0xb0 },
-	.b_public = (u8[32]){ 0x00, 0x00, 0x00, 0xfc, 0xff, 0xff, 0x07, 0x00,
-		    0x00, 0xe0, 0xff, 0xff, 0x3f, 0x00, 0x00, 0x00,
-		    0xff, 0xff, 0xff, 0x01, 0x00, 0x00, 0xf8, 0xff,
-		    0xff, 0x0f, 0x00, 0x00, 0xc0, 0xff, 0xff, 0x7f },
-	.expected_ss = (u8[32]){ 0xcf, 0x72, 0xb4, 0xaa, 0x6a, 0xa1, 0xc9, 0xf8,
-		    0x94, 0xf4, 0x16, 0x5b, 0x86, 0x10, 0x9a, 0xa4,
-		    0x68, 0x51, 0x76, 0x48, 0xe1, 0xf0, 0xcc, 0x70,
-		    0xe1, 0xab, 0x08, 0x46, 0x01, 0x76, 0x50, 0x6b },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case on twist */
-{
-	.secret = (u8[32]){ 0x18, 0xa9, 0x3b, 0x64, 0x99, 0xb9, 0xf6, 0xb3,
-		     0x22, 0x5c, 0xa0, 0x2f, 0xef, 0x41, 0x0e, 0x0a,
-		     0xde, 0xc2, 0x35, 0x32, 0x32, 0x1d, 0x2d, 0x8e,
-		     0xf1, 0xa6, 0xd6, 0x02, 0xa8, 0xc6, 0x5b, 0x83 },
-	.b_public = (u8[32]){ 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
-		    0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
-		    0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
-		    0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0x7f },
-	.expected_ss = (u8[32]){ 0x5d, 0x50, 0xb6, 0x28, 0x36, 0xbb, 0x69, 0x57,
-		    0x94, 0x10, 0x38, 0x6c, 0xf7, 0xbb, 0x81, 0x1c,
-		    0x14, 0xbf, 0x85, 0xb1, 0xc7, 0xb1, 0x7e, 0x59,
-		    0x24, 0xc7, 0xff, 0xea, 0x91, 0xef, 0x9e, 0x12 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case on twist */
-{
-	.secret = (u8[32]){ 0xc0, 0x1d, 0x13, 0x05, 0xa1, 0x33, 0x8a, 0x1f,
-		     0xca, 0xc2, 0xba, 0x7e, 0x2e, 0x03, 0x2b, 0x42,
-		     0x7e, 0x0b, 0x04, 0x90, 0x31, 0x65, 0xac, 0xa9,
-		     0x57, 0xd8, 0xd0, 0x55, 0x3d, 0x87, 0x17, 0xb0 },
-	.b_public = (u8[32]){ 0xea, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
-	.expected_ss = (u8[32]){ 0x19, 0x23, 0x0e, 0xb1, 0x48, 0xd5, 0xd6, 0x7c,
-		    0x3c, 0x22, 0xab, 0x1d, 0xae, 0xff, 0x80, 0xa5,
-		    0x7e, 0xae, 0x42, 0x65, 0xce, 0x28, 0x72, 0x65,
-		    0x7b, 0x2c, 0x80, 0x99, 0xfc, 0x69, 0x8e, 0x50 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for public key */
-{
-	.secret = (u8[32]){ 0x38, 0x6f, 0x7f, 0x16, 0xc5, 0x07, 0x31, 0xd6,
-		     0x4f, 0x82, 0xe6, 0xa1, 0x70, 0xb1, 0x42, 0xa4,
-		     0xe3, 0x4f, 0x31, 0xfd, 0x77, 0x68, 0xfc, 0xb8,
-		     0x90, 0x29, 0x25, 0xe7, 0xd1, 0xe2, 0x1a, 0xbe },
-	.b_public = (u8[32]){ 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-	.expected_ss = (u8[32]){ 0x0f, 0xca, 0xb5, 0xd8, 0x42, 0xa0, 0x78, 0xd7,
-		    0xa7, 0x1f, 0xc5, 0x9b, 0x57, 0xbf, 0xb4, 0xca,
-		    0x0b, 0xe6, 0x87, 0x3b, 0x49, 0xdc, 0xdb, 0x9f,
-		    0x44, 0xe1, 0x4a, 0xe8, 0xfb, 0xdf, 0xa5, 0x42 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for public key */
-{
-	.secret = (u8[32]){ 0xe0, 0x23, 0xa2, 0x89, 0xbd, 0x5e, 0x90, 0xfa,
-		     0x28, 0x04, 0xdd, 0xc0, 0x19, 0xa0, 0x5e, 0xf3,
-		     0xe7, 0x9d, 0x43, 0x4b, 0xb6, 0xea, 0x2f, 0x52,
-		     0x2e, 0xcb, 0x64, 0x3a, 0x75, 0x29, 0x6e, 0x95 },
-	.b_public = (u8[32]){ 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
-		    0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
-		    0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
-		    0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00 },
-	.expected_ss = (u8[32]){ 0x54, 0xce, 0x8f, 0x22, 0x75, 0xc0, 0x77, 0xe3,
-		    0xb1, 0x30, 0x6a, 0x39, 0x39, 0xc5, 0xe0, 0x3e,
-		    0xef, 0x6b, 0xbb, 0x88, 0x06, 0x05, 0x44, 0x75,
-		    0x8d, 0x9f, 0xef, 0x59, 0xb0, 0xbc, 0x3e, 0x4f },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for public key */
-{
-	.secret = (u8[32]){ 0x68, 0xf0, 0x10, 0xd6, 0x2e, 0xe8, 0xd9, 0x26,
-		     0x05, 0x3a, 0x36, 0x1c, 0x3a, 0x75, 0xc6, 0xea,
-		     0x4e, 0xbd, 0xc8, 0x60, 0x6a, 0xb2, 0x85, 0x00,
-		     0x3a, 0x6f, 0x8f, 0x40, 0x76, 0xb0, 0x1e, 0x83 },
-	.b_public = (u8[32]){ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x03 },
-	.expected_ss = (u8[32]){ 0xf1, 0x36, 0x77, 0x5c, 0x5b, 0xeb, 0x0a, 0xf8,
-		    0x11, 0x0a, 0xf1, 0x0b, 0x20, 0x37, 0x23, 0x32,
-		    0x04, 0x3c, 0xab, 0x75, 0x24, 0x19, 0x67, 0x87,
-		    0x75, 0xa2, 0x23, 0xdf, 0x57, 0xc9, 0xd3, 0x0d },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for public key */
-{
-	.secret = (u8[32]){ 0x58, 0xeb, 0xcb, 0x35, 0xb0, 0xf8, 0x84, 0x5c,
-		     0xaf, 0x1e, 0xc6, 0x30, 0xf9, 0x65, 0x76, 0xb6,
-		     0x2c, 0x4b, 0x7b, 0x6c, 0x36, 0xb2, 0x9d, 0xeb,
-		     0x2c, 0xb0, 0x08, 0x46, 0x51, 0x75, 0x5c, 0x96 },
-	.b_public = (u8[32]){ 0xff, 0xff, 0xff, 0xfb, 0xff, 0xff, 0xfb, 0xff,
-		    0xff, 0xdf, 0xff, 0xff, 0xdf, 0xff, 0xff, 0xff,
-		    0xfe, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xf7, 0xff,
-		    0xff, 0xf7, 0xff, 0xff, 0xbf, 0xff, 0xff, 0x3f },
-	.expected_ss = (u8[32]){ 0xbf, 0x9a, 0xff, 0xd0, 0x6b, 0x84, 0x40, 0x85,
-		    0x58, 0x64, 0x60, 0x96, 0x2e, 0xf2, 0x14, 0x6f,
-		    0xf3, 0xd4, 0x53, 0x3d, 0x94, 0x44, 0xaa, 0xb0,
-		    0x06, 0xeb, 0x88, 0xcc, 0x30, 0x54, 0x40, 0x7d },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for public key */
-{
-	.secret = (u8[32]){ 0x18, 0x8c, 0x4b, 0xc5, 0xb9, 0xc4, 0x4b, 0x38,
-		     0xbb, 0x65, 0x8b, 0x9b, 0x2a, 0xe8, 0x2d, 0x5b,
-		     0x01, 0x01, 0x5e, 0x09, 0x31, 0x84, 0xb1, 0x7c,
-		     0xb7, 0x86, 0x35, 0x03, 0xa7, 0x83, 0xe1, 0xbb },
-	.b_public = (u8[32]){ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x3f },
-	.expected_ss = (u8[32]){ 0xd4, 0x80, 0xde, 0x04, 0xf6, 0x99, 0xcb, 0x3b,
-		    0xe0, 0x68, 0x4a, 0x9c, 0xc2, 0xe3, 0x12, 0x81,
-		    0xea, 0x0b, 0xc5, 0xa9, 0xdc, 0xc1, 0x57, 0xd3,
-		    0xd2, 0x01, 0x58, 0xd4, 0x6c, 0xa5, 0x24, 0x6d },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for public key */
-{
-	.secret = (u8[32]){ 0xe0, 0x6c, 0x11, 0xbb, 0x2e, 0x13, 0xce, 0x3d,
-		     0xc7, 0x67, 0x3f, 0x67, 0xf5, 0x48, 0x22, 0x42,
-		     0x90, 0x94, 0x23, 0xa9, 0xae, 0x95, 0xee, 0x98,
-		     0x6a, 0x98, 0x8d, 0x98, 0xfa, 0xee, 0x23, 0xa2 },
-	.b_public = (u8[32]){ 0xff, 0xff, 0xff, 0xff, 0xfe, 0xff, 0xff, 0x7f,
-		    0xff, 0xff, 0xff, 0xff, 0xfe, 0xff, 0xff, 0x7f,
-		    0xff, 0xff, 0xff, 0xff, 0xfe, 0xff, 0xff, 0x7f,
-		    0xff, 0xff, 0xff, 0xff, 0xfe, 0xff, 0xff, 0x7f },
-	.expected_ss = (u8[32]){ 0x4c, 0x44, 0x01, 0xcc, 0xe6, 0xb5, 0x1e, 0x4c,
-		    0xb1, 0x8f, 0x27, 0x90, 0x24, 0x6c, 0x9b, 0xf9,
-		    0x14, 0xdb, 0x66, 0x77, 0x50, 0xa1, 0xcb, 0x89,
-		    0x06, 0x90, 0x92, 0xaf, 0x07, 0x29, 0x22, 0x76 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for public key */
-{
-	.secret = (u8[32]){ 0xc0, 0x65, 0x8c, 0x46, 0xdd, 0xe1, 0x81, 0x29,
-		     0x29, 0x38, 0x77, 0x53, 0x5b, 0x11, 0x62, 0xb6,
-		     0xf9, 0xf5, 0x41, 0x4a, 0x23, 0xcf, 0x4d, 0x2c,
-		     0xbc, 0x14, 0x0a, 0x4d, 0x99, 0xda, 0x2b, 0x8f },
-	.b_public = (u8[32]){ 0xeb, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
-	.expected_ss = (u8[32]){ 0x57, 0x8b, 0xa8, 0xcc, 0x2d, 0xbd, 0xc5, 0x75,
-		    0xaf, 0xcf, 0x9d, 0xf2, 0xb3, 0xee, 0x61, 0x89,
-		    0xf5, 0x33, 0x7d, 0x68, 0x54, 0xc7, 0x9b, 0x4c,
-		    0xe1, 0x65, 0xea, 0x12, 0x29, 0x3b, 0x3a, 0x0f },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0xf0, 0x1e, 0x48, 0xda, 0xfa, 0xc9, 0xd7, 0xbc,
-		     0xf5, 0x89, 0xcb, 0xc3, 0x82, 0xc8, 0x78, 0xd1,
-		     0x8b, 0xda, 0x35, 0x50, 0x58, 0x9f, 0xfb, 0x5d,
-		     0x50, 0xb5, 0x23, 0xbe, 0xbe, 0x32, 0x9d, 0xae },
-	.b_public = (u8[32]){ 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
-	.expected_ss = (u8[32]){ 0xbd, 0x36, 0xa0, 0x79, 0x0e, 0xb8, 0x83, 0x09,
-		    0x8c, 0x98, 0x8b, 0x21, 0x78, 0x67, 0x73, 0xde,
-		    0x0b, 0x3a, 0x4d, 0xf1, 0x62, 0x28, 0x2c, 0xf1,
-		    0x10, 0xde, 0x18, 0xdd, 0x48, 0x4c, 0xe7, 0x4b },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0x28, 0x87, 0x96, 0xbc, 0x5a, 0xff, 0x4b, 0x81,
-		     0xa3, 0x75, 0x01, 0x75, 0x7b, 0xc0, 0x75, 0x3a,
-		     0x3c, 0x21, 0x96, 0x47, 0x90, 0xd3, 0x86, 0x99,
-		     0x30, 0x8d, 0xeb, 0xc1, 0x7a, 0x6e, 0xaf, 0x8d },
-	.b_public = (u8[32]){ 0xf0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
-	.expected_ss = (u8[32]){ 0xb4, 0xe0, 0xdd, 0x76, 0xda, 0x7b, 0x07, 0x17,
-		    0x28, 0xb6, 0x1f, 0x85, 0x67, 0x71, 0xaa, 0x35,
-		    0x6e, 0x57, 0xed, 0xa7, 0x8a, 0x5b, 0x16, 0x55,
-		    0xcc, 0x38, 0x20, 0xfb, 0x5f, 0x85, 0x4c, 0x5c },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0x98, 0xdf, 0x84, 0x5f, 0x66, 0x51, 0xbf, 0x11,
-		     0x38, 0x22, 0x1f, 0x11, 0x90, 0x41, 0xf7, 0x2b,
-		     0x6d, 0xbc, 0x3c, 0x4a, 0xce, 0x71, 0x43, 0xd9,
-		     0x9f, 0xd5, 0x5a, 0xd8, 0x67, 0x48, 0x0d, 0xa8 },
-	.b_public = (u8[32]){ 0xf1, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
-	.expected_ss = (u8[32]){ 0x6f, 0xdf, 0x6c, 0x37, 0x61, 0x1d, 0xbd, 0x53,
-		    0x04, 0xdc, 0x0f, 0x2e, 0xb7, 0xc9, 0x51, 0x7e,
-		    0xb3, 0xc5, 0x0e, 0x12, 0xfd, 0x05, 0x0a, 0xc6,
-		    0xde, 0xc2, 0x70, 0x71, 0xd4, 0xbf, 0xc0, 0x34 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0xf0, 0x94, 0x98, 0xe4, 0x6f, 0x02, 0xf8, 0x78,
-		     0x82, 0x9e, 0x78, 0xb8, 0x03, 0xd3, 0x16, 0xa2,
-		     0xed, 0x69, 0x5d, 0x04, 0x98, 0xa0, 0x8a, 0xbd,
-		     0xf8, 0x27, 0x69, 0x30, 0xe2, 0x4e, 0xdc, 0xb0 },
-	.b_public = (u8[32]){ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
-	.expected_ss = (u8[32]){ 0x4c, 0x8f, 0xc4, 0xb1, 0xc6, 0xab, 0x88, 0xfb,
-		    0x21, 0xf1, 0x8f, 0x6d, 0x4c, 0x81, 0x02, 0x40,
-		    0xd4, 0xe9, 0x46, 0x51, 0xba, 0x44, 0xf7, 0xa2,
-		    0xc8, 0x63, 0xce, 0xc7, 0xdc, 0x56, 0x60, 0x2d },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0x18, 0x13, 0xc1, 0x0a, 0x5c, 0x7f, 0x21, 0xf9,
-		     0x6e, 0x17, 0xf2, 0x88, 0xc0, 0xcc, 0x37, 0x60,
-		     0x7c, 0x04, 0xc5, 0xf5, 0xae, 0xa2, 0xdb, 0x13,
-		     0x4f, 0x9e, 0x2f, 0xfc, 0x66, 0xbd, 0x9d, 0xb8 },
-	.b_public = (u8[32]){ 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80 },
-	.expected_ss = (u8[32]){ 0x1c, 0xd0, 0xb2, 0x82, 0x67, 0xdc, 0x54, 0x1c,
-		    0x64, 0x2d, 0x6d, 0x7d, 0xca, 0x44, 0xa8, 0xb3,
-		    0x8a, 0x63, 0x73, 0x6e, 0xef, 0x5c, 0x4e, 0x65,
-		    0x01, 0xff, 0xbb, 0xb1, 0x78, 0x0c, 0x03, 0x3c },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0x78, 0x57, 0xfb, 0x80, 0x86, 0x53, 0x64, 0x5a,
-		     0x0b, 0xeb, 0x13, 0x8a, 0x64, 0xf5, 0xf4, 0xd7,
-		     0x33, 0xa4, 0x5e, 0xa8, 0x4c, 0x3c, 0xda, 0x11,
-		     0xa9, 0xc0, 0x6f, 0x7e, 0x71, 0x39, 0x14, 0x9e },
-	.b_public = (u8[32]){ 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80 },
-	.expected_ss = (u8[32]){ 0x87, 0x55, 0xbe, 0x01, 0xc6, 0x0a, 0x7e, 0x82,
-		    0x5c, 0xff, 0x3e, 0x0e, 0x78, 0xcb, 0x3a, 0xa4,
-		    0x33, 0x38, 0x61, 0x51, 0x6a, 0xa5, 0x9b, 0x1c,
-		    0x51, 0xa8, 0xb2, 0xa5, 0x43, 0xdf, 0xa8, 0x22 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0xe0, 0x3a, 0xa8, 0x42, 0xe2, 0xab, 0xc5, 0x6e,
-		     0x81, 0xe8, 0x7b, 0x8b, 0x9f, 0x41, 0x7b, 0x2a,
-		     0x1e, 0x59, 0x13, 0xc7, 0x23, 0xee, 0xd2, 0x8d,
-		     0x75, 0x2f, 0x8d, 0x47, 0xa5, 0x9f, 0x49, 0x8f },
-	.b_public = (u8[32]){ 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80 },
-	.expected_ss = (u8[32]){ 0x54, 0xc9, 0xa1, 0xed, 0x95, 0xe5, 0x46, 0xd2,
-		    0x78, 0x22, 0xa3, 0x60, 0x93, 0x1d, 0xda, 0x60,
-		    0xa1, 0xdf, 0x04, 0x9d, 0xa6, 0xf9, 0x04, 0x25,
-		    0x3c, 0x06, 0x12, 0xbb, 0xdc, 0x08, 0x74, 0x76 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0xf8, 0xf7, 0x07, 0xb7, 0x99, 0x9b, 0x18, 0xcb,
-		     0x0d, 0x6b, 0x96, 0x12, 0x4f, 0x20, 0x45, 0x97,
-		     0x2c, 0xa2, 0x74, 0xbf, 0xc1, 0x54, 0xad, 0x0c,
-		     0x87, 0x03, 0x8c, 0x24, 0xc6, 0xd0, 0xd4, 0xb2 },
-	.b_public = (u8[32]){ 0xda, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
-	.expected_ss = (u8[32]){ 0xcc, 0x1f, 0x40, 0xd7, 0x43, 0xcd, 0xc2, 0x23,
-		    0x0e, 0x10, 0x43, 0xda, 0xba, 0x8b, 0x75, 0xe8,
-		    0x10, 0xf1, 0xfb, 0xab, 0x7f, 0x25, 0x52, 0x69,
-		    0xbd, 0x9e, 0xbb, 0x29, 0xe6, 0xbf, 0x49, 0x4f },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0xa0, 0x34, 0xf6, 0x84, 0xfa, 0x63, 0x1e, 0x1a,
-		     0x34, 0x81, 0x18, 0xc1, 0xce, 0x4c, 0x98, 0x23,
-		     0x1f, 0x2d, 0x9e, 0xec, 0x9b, 0xa5, 0x36, 0x5b,
-		     0x4a, 0x05, 0xd6, 0x9a, 0x78, 0x5b, 0x07, 0x96 },
-	.b_public = (u8[32]){ 0xdb, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
-	.expected_ss = (u8[32]){ 0x54, 0x99, 0x8e, 0xe4, 0x3a, 0x5b, 0x00, 0x7b,
-		    0xf4, 0x99, 0xf0, 0x78, 0xe7, 0x36, 0x52, 0x44,
-		    0x00, 0xa8, 0xb5, 0xc7, 0xe9, 0xb9, 0xb4, 0x37,
-		    0x71, 0x74, 0x8c, 0x7c, 0xdf, 0x88, 0x04, 0x12 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0x30, 0xb6, 0xc6, 0xa0, 0xf2, 0xff, 0xa6, 0x80,
-		     0x76, 0x8f, 0x99, 0x2b, 0xa8, 0x9e, 0x15, 0x2d,
-		     0x5b, 0xc9, 0x89, 0x3d, 0x38, 0xc9, 0x11, 0x9b,
-		     0xe4, 0xf7, 0x67, 0xbf, 0xab, 0x6e, 0x0c, 0xa5 },
-	.b_public = (u8[32]){ 0xdc, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
-	.expected_ss = (u8[32]){ 0xea, 0xd9, 0xb3, 0x8e, 0xfd, 0xd7, 0x23, 0x63,
-		    0x79, 0x34, 0xe5, 0x5a, 0xb7, 0x17, 0xa7, 0xae,
-		    0x09, 0xeb, 0x86, 0xa2, 0x1d, 0xc3, 0x6a, 0x3f,
-		    0xee, 0xb8, 0x8b, 0x75, 0x9e, 0x39, 0x1e, 0x09 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0x90, 0x1b, 0x9d, 0xcf, 0x88, 0x1e, 0x01, 0xe0,
-		     0x27, 0x57, 0x50, 0x35, 0xd4, 0x0b, 0x43, 0xbd,
-		     0xc1, 0xc5, 0x24, 0x2e, 0x03, 0x08, 0x47, 0x49,
-		     0x5b, 0x0c, 0x72, 0x86, 0x46, 0x9b, 0x65, 0x91 },
-	.b_public = (u8[32]){ 0xea, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
-	.expected_ss = (u8[32]){ 0x60, 0x2f, 0xf4, 0x07, 0x89, 0xb5, 0x4b, 0x41,
-		    0x80, 0x59, 0x15, 0xfe, 0x2a, 0x62, 0x21, 0xf0,
-		    0x7a, 0x50, 0xff, 0xc2, 0xc3, 0xfc, 0x94, 0xcf,
-		    0x61, 0xf1, 0x3d, 0x79, 0x04, 0xe8, 0x8e, 0x0e },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0x80, 0x46, 0x67, 0x7c, 0x28, 0xfd, 0x82, 0xc9,
-		     0xa1, 0xbd, 0xb7, 0x1a, 0x1a, 0x1a, 0x34, 0xfa,
-		     0xba, 0x12, 0x25, 0xe2, 0x50, 0x7f, 0xe3, 0xf5,
-		     0x4d, 0x10, 0xbd, 0x5b, 0x0d, 0x86, 0x5f, 0x8e },
-	.b_public = (u8[32]){ 0xeb, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
-	.expected_ss = (u8[32]){ 0xe0, 0x0a, 0xe8, 0xb1, 0x43, 0x47, 0x12, 0x47,
-		    0xba, 0x24, 0xf1, 0x2c, 0x88, 0x55, 0x36, 0xc3,
-		    0xcb, 0x98, 0x1b, 0x58, 0xe1, 0xe5, 0x6b, 0x2b,
-		    0xaf, 0x35, 0xc1, 0x2a, 0xe1, 0xf7, 0x9c, 0x26 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0x60, 0x2f, 0x7e, 0x2f, 0x68, 0xa8, 0x46, 0xb8,
-		     0x2c, 0xc2, 0x69, 0xb1, 0xd4, 0x8e, 0x93, 0x98,
-		     0x86, 0xae, 0x54, 0xfd, 0x63, 0x6c, 0x1f, 0xe0,
-		     0x74, 0xd7, 0x10, 0x12, 0x7d, 0x47, 0x24, 0x91 },
-	.b_public = (u8[32]){ 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
-	.expected_ss = (u8[32]){ 0x98, 0xcb, 0x9b, 0x50, 0xdd, 0x3f, 0xc2, 0xb0,
-		    0xd4, 0xf2, 0xd2, 0xbf, 0x7c, 0x5c, 0xfd, 0xd1,
-		    0x0c, 0x8f, 0xcd, 0x31, 0xfc, 0x40, 0xaf, 0x1a,
-		    0xd4, 0x4f, 0x47, 0xc1, 0x31, 0x37, 0x63, 0x62 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0x60, 0x88, 0x7b, 0x3d, 0xc7, 0x24, 0x43, 0x02,
-		     0x6e, 0xbe, 0xdb, 0xbb, 0xb7, 0x06, 0x65, 0xf4,
-		     0x2b, 0x87, 0xad, 0xd1, 0x44, 0x0e, 0x77, 0x68,
-		     0xfb, 0xd7, 0xe8, 0xe2, 0xce, 0x5f, 0x63, 0x9d },
-	.b_public = (u8[32]){ 0xf0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
-	.expected_ss = (u8[32]){ 0x38, 0xd6, 0x30, 0x4c, 0x4a, 0x7e, 0x6d, 0x9f,
-		    0x79, 0x59, 0x33, 0x4f, 0xb5, 0x24, 0x5b, 0xd2,
-		    0xc7, 0x54, 0x52, 0x5d, 0x4c, 0x91, 0xdb, 0x95,
-		    0x02, 0x06, 0x92, 0x62, 0x34, 0xc1, 0xf6, 0x33 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0x78, 0xd3, 0x1d, 0xfa, 0x85, 0x44, 0x97, 0xd7,
-		     0x2d, 0x8d, 0xef, 0x8a, 0x1b, 0x7f, 0xb0, 0x06,
-		     0xce, 0xc2, 0xd8, 0xc4, 0x92, 0x46, 0x47, 0xc9,
-		     0x38, 0x14, 0xae, 0x56, 0xfa, 0xed, 0xa4, 0x95 },
-	.b_public = (u8[32]){ 0xf1, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
-	.expected_ss = (u8[32]){ 0x78, 0x6c, 0xd5, 0x49, 0x96, 0xf0, 0x14, 0xa5,
-		    0xa0, 0x31, 0xec, 0x14, 0xdb, 0x81, 0x2e, 0xd0,
-		    0x83, 0x55, 0x06, 0x1f, 0xdb, 0x5d, 0xe6, 0x80,
-		    0xa8, 0x00, 0xac, 0x52, 0x1f, 0x31, 0x8e, 0x23 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - public key >= p */
-{
-	.secret = (u8[32]){ 0xc0, 0x4c, 0x5b, 0xae, 0xfa, 0x83, 0x02, 0xdd,
-		     0xde, 0xd6, 0xa4, 0xbb, 0x95, 0x77, 0x61, 0xb4,
-		     0xeb, 0x97, 0xae, 0xfa, 0x4f, 0xc3, 0xb8, 0x04,
-		     0x30, 0x85, 0xf9, 0x6a, 0x56, 0x59, 0xb3, 0xa5 },
-	.b_public = (u8[32]){ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
-	.expected_ss = (u8[32]){ 0x29, 0xae, 0x8b, 0xc7, 0x3e, 0x9b, 0x10, 0xa0,
-		    0x8b, 0x4f, 0x68, 0x1c, 0x43, 0xc3, 0xe0, 0xac,
-		    0x1a, 0x17, 0x1d, 0x31, 0xb3, 0x8f, 0x1a, 0x48,
-		    0xef, 0xba, 0x29, 0xae, 0x63, 0x9e, 0xa1, 0x34 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - RFC 7748 */
-{
-	.secret = (u8[32]){ 0xa0, 0x46, 0xe3, 0x6b, 0xf0, 0x52, 0x7c, 0x9d,
-		     0x3b, 0x16, 0x15, 0x4b, 0x82, 0x46, 0x5e, 0xdd,
-		     0x62, 0x14, 0x4c, 0x0a, 0xc1, 0xfc, 0x5a, 0x18,
-		     0x50, 0x6a, 0x22, 0x44, 0xba, 0x44, 0x9a, 0x44 },
-	.b_public = (u8[32]){ 0xe6, 0xdb, 0x68, 0x67, 0x58, 0x30, 0x30, 0xdb,
-		    0x35, 0x94, 0xc1, 0xa4, 0x24, 0xb1, 0x5f, 0x7c,
-		    0x72, 0x66, 0x24, 0xec, 0x26, 0xb3, 0x35, 0x3b,
-		    0x10, 0xa9, 0x03, 0xa6, 0xd0, 0xab, 0x1c, 0x4c },
-	.expected_ss = (u8[32]){ 0xc3, 0xda, 0x55, 0x37, 0x9d, 0xe9, 0xc6, 0x90,
-		    0x8e, 0x94, 0xea, 0x4d, 0xf2, 0x8d, 0x08, 0x4f,
-		    0x32, 0xec, 0xcf, 0x03, 0x49, 0x1c, 0x71, 0xf7,
-		    0x54, 0xb4, 0x07, 0x55, 0x77, 0xa2, 0x85, 0x52 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - RFC 7748 */
-{
-	.secret = (u8[32]){ 0x48, 0x66, 0xe9, 0xd4, 0xd1, 0xb4, 0x67, 0x3c,
-		     0x5a, 0xd2, 0x26, 0x91, 0x95, 0x7d, 0x6a, 0xf5,
-		     0xc1, 0x1b, 0x64, 0x21, 0xe0, 0xea, 0x01, 0xd4,
-		     0x2c, 0xa4, 0x16, 0x9e, 0x79, 0x18, 0xba, 0x4d },
-	.b_public = (u8[32]){ 0xe5, 0x21, 0x0f, 0x12, 0x78, 0x68, 0x11, 0xd3,
-		    0xf4, 0xb7, 0x95, 0x9d, 0x05, 0x38, 0xae, 0x2c,
-		    0x31, 0xdb, 0xe7, 0x10, 0x6f, 0xc0, 0x3c, 0x3e,
-		    0xfc, 0x4c, 0xd5, 0x49, 0xc7, 0x15, 0xa4, 0x13 },
-	.expected_ss = (u8[32]){ 0x95, 0xcb, 0xde, 0x94, 0x76, 0xe8, 0x90, 0x7d,
-		    0x7a, 0xad, 0xe4, 0x5c, 0xb4, 0xb8, 0x73, 0xf8,
-		    0x8b, 0x59, 0x5a, 0x68, 0x79, 0x9f, 0xa1, 0x52,
-		    0xe6, 0xf8, 0xf7, 0x64, 0x7a, 0xac, 0x79, 0x57 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for shared secret */
-{
-	.secret = (u8[32]){ 0xa0, 0xa4, 0xf1, 0x30, 0xb9, 0x8a, 0x5b, 0xe4,
-		     0xb1, 0xce, 0xdb, 0x7c, 0xb8, 0x55, 0x84, 0xa3,
-		     0x52, 0x0e, 0x14, 0x2d, 0x47, 0x4d, 0xc9, 0xcc,
-		     0xb9, 0x09, 0xa0, 0x73, 0xa9, 0x76, 0xbf, 0x63 },
-	.b_public = (u8[32]){ 0x0a, 0xb4, 0xe7, 0x63, 0x80, 0xd8, 0x4d, 0xde,
-		    0x4f, 0x68, 0x33, 0xc5, 0x8f, 0x2a, 0x9f, 0xb8,
-		    0xf8, 0x3b, 0xb0, 0x16, 0x9b, 0x17, 0x2b, 0xe4,
-		    0xb6, 0xe0, 0x59, 0x28, 0x87, 0x74, 0x1a, 0x36 },
-	.expected_ss = (u8[32]){ 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for shared secret */
-{
-	.secret = (u8[32]){ 0xa0, 0xa4, 0xf1, 0x30, 0xb9, 0x8a, 0x5b, 0xe4,
-		     0xb1, 0xce, 0xdb, 0x7c, 0xb8, 0x55, 0x84, 0xa3,
-		     0x52, 0x0e, 0x14, 0x2d, 0x47, 0x4d, 0xc9, 0xcc,
-		     0xb9, 0x09, 0xa0, 0x73, 0xa9, 0x76, 0xbf, 0x63 },
-	.b_public = (u8[32]){ 0x89, 0xe1, 0x0d, 0x57, 0x01, 0xb4, 0x33, 0x7d,
-		    0x2d, 0x03, 0x21, 0x81, 0x53, 0x8b, 0x10, 0x64,
-		    0xbd, 0x40, 0x84, 0x40, 0x1c, 0xec, 0xa1, 0xfd,
-		    0x12, 0x66, 0x3a, 0x19, 0x59, 0x38, 0x80, 0x00 },
-	.expected_ss = (u8[32]){ 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for shared secret */
-{
-	.secret = (u8[32]){ 0xa0, 0xa4, 0xf1, 0x30, 0xb9, 0x8a, 0x5b, 0xe4,
-		     0xb1, 0xce, 0xdb, 0x7c, 0xb8, 0x55, 0x84, 0xa3,
-		     0x52, 0x0e, 0x14, 0x2d, 0x47, 0x4d, 0xc9, 0xcc,
-		     0xb9, 0x09, 0xa0, 0x73, 0xa9, 0x76, 0xbf, 0x63 },
-	.b_public = (u8[32]){ 0x2b, 0x55, 0xd3, 0xaa, 0x4a, 0x8f, 0x80, 0xc8,
-		    0xc0, 0xb2, 0xae, 0x5f, 0x93, 0x3e, 0x85, 0xaf,
-		    0x49, 0xbe, 0xac, 0x36, 0xc2, 0xfa, 0x73, 0x94,
-		    0xba, 0xb7, 0x6c, 0x89, 0x33, 0xf8, 0xf8, 0x1d },
-	.expected_ss = (u8[32]){ 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for shared secret */
-{
-	.secret = (u8[32]){ 0xa0, 0xa4, 0xf1, 0x30, 0xb9, 0x8a, 0x5b, 0xe4,
-		     0xb1, 0xce, 0xdb, 0x7c, 0xb8, 0x55, 0x84, 0xa3,
-		     0x52, 0x0e, 0x14, 0x2d, 0x47, 0x4d, 0xc9, 0xcc,
-		     0xb9, 0x09, 0xa0, 0x73, 0xa9, 0x76, 0xbf, 0x63 },
-	.b_public = (u8[32]){ 0x63, 0xe5, 0xb1, 0xfe, 0x96, 0x01, 0xfe, 0x84,
-		    0x38, 0x5d, 0x88, 0x66, 0xb0, 0x42, 0x12, 0x62,
-		    0xf7, 0x8f, 0xbf, 0xa5, 0xaf, 0xf9, 0x58, 0x5e,
-		    0x62, 0x66, 0x79, 0xb1, 0x85, 0x47, 0xd9, 0x59 },
-	.expected_ss = (u8[32]){ 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x3f },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for shared secret */
-{
-	.secret = (u8[32]){ 0xa0, 0xa4, 0xf1, 0x30, 0xb9, 0x8a, 0x5b, 0xe4,
-		     0xb1, 0xce, 0xdb, 0x7c, 0xb8, 0x55, 0x84, 0xa3,
-		     0x52, 0x0e, 0x14, 0x2d, 0x47, 0x4d, 0xc9, 0xcc,
-		     0xb9, 0x09, 0xa0, 0x73, 0xa9, 0x76, 0xbf, 0x63 },
-	.b_public = (u8[32]){ 0xe4, 0x28, 0xf3, 0xda, 0xc1, 0x78, 0x09, 0xf8,
-		    0x27, 0xa5, 0x22, 0xce, 0x32, 0x35, 0x50, 0x58,
-		    0xd0, 0x73, 0x69, 0x36, 0x4a, 0xa7, 0x89, 0x02,
-		    0xee, 0x10, 0x13, 0x9b, 0x9f, 0x9d, 0xd6, 0x53 },
-	.expected_ss = (u8[32]){ 0xfc, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x3f },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for shared secret */
-{
-	.secret = (u8[32]){ 0xa0, 0xa4, 0xf1, 0x30, 0xb9, 0x8a, 0x5b, 0xe4,
-		     0xb1, 0xce, 0xdb, 0x7c, 0xb8, 0x55, 0x84, 0xa3,
-		     0x52, 0x0e, 0x14, 0x2d, 0x47, 0x4d, 0xc9, 0xcc,
-		     0xb9, 0x09, 0xa0, 0x73, 0xa9, 0x76, 0xbf, 0x63 },
-	.b_public = (u8[32]){ 0xb3, 0xb5, 0x0e, 0x3e, 0xd3, 0xa4, 0x07, 0xb9,
-		    0x5d, 0xe9, 0x42, 0xef, 0x74, 0x57, 0x5b, 0x5a,
-		    0xb8, 0xa1, 0x0c, 0x09, 0xee, 0x10, 0x35, 0x44,
-		    0xd6, 0x0b, 0xdf, 0xed, 0x81, 0x38, 0xab, 0x2b },
-	.expected_ss = (u8[32]){ 0xf9, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x3f },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for shared secret */
-{
-	.secret = (u8[32]){ 0xa0, 0xa4, 0xf1, 0x30, 0xb9, 0x8a, 0x5b, 0xe4,
-		     0xb1, 0xce, 0xdb, 0x7c, 0xb8, 0x55, 0x84, 0xa3,
-		     0x52, 0x0e, 0x14, 0x2d, 0x47, 0x4d, 0xc9, 0xcc,
-		     0xb9, 0x09, 0xa0, 0x73, 0xa9, 0x76, 0xbf, 0x63 },
-	.b_public = (u8[32]){ 0x21, 0x3f, 0xff, 0xe9, 0x3d, 0x5e, 0xa8, 0xcd,
-		    0x24, 0x2e, 0x46, 0x28, 0x44, 0x02, 0x99, 0x22,
-		    0xc4, 0x3c, 0x77, 0xc9, 0xe3, 0xe4, 0x2f, 0x56,
-		    0x2f, 0x48, 0x5d, 0x24, 0xc5, 0x01, 0xa2, 0x0b },
-	.expected_ss = (u8[32]){ 0xf3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x3f },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for shared secret */
-{
-	.secret = (u8[32]){ 0xa0, 0xa4, 0xf1, 0x30, 0xb9, 0x8a, 0x5b, 0xe4,
-		     0xb1, 0xce, 0xdb, 0x7c, 0xb8, 0x55, 0x84, 0xa3,
-		     0x52, 0x0e, 0x14, 0x2d, 0x47, 0x4d, 0xc9, 0xcc,
-		     0xb9, 0x09, 0xa0, 0x73, 0xa9, 0x76, 0xbf, 0x63 },
-	.b_public = (u8[32]){ 0x91, 0xb2, 0x32, 0xa1, 0x78, 0xb3, 0xcd, 0x53,
-		    0x09, 0x32, 0x44, 0x1e, 0x61, 0x39, 0x41, 0x8f,
-		    0x72, 0x17, 0x22, 0x92, 0xf1, 0xda, 0x4c, 0x18,
-		    0x34, 0xfc, 0x5e, 0xbf, 0xef, 0xb5, 0x1e, 0x3f },
-	.expected_ss = (u8[32]){ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x03 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for shared secret */
-{
-	.secret = (u8[32]){ 0xa0, 0xa4, 0xf1, 0x30, 0xb9, 0x8a, 0x5b, 0xe4,
-		     0xb1, 0xce, 0xdb, 0x7c, 0xb8, 0x55, 0x84, 0xa3,
-		     0x52, 0x0e, 0x14, 0x2d, 0x47, 0x4d, 0xc9, 0xcc,
-		     0xb9, 0x09, 0xa0, 0x73, 0xa9, 0x76, 0xbf, 0x63 },
-	.b_public = (u8[32]){ 0x04, 0x5c, 0x6e, 0x11, 0xc5, 0xd3, 0x32, 0x55,
-		    0x6c, 0x78, 0x22, 0xfe, 0x94, 0xeb, 0xf8, 0x9b,
-		    0x56, 0xa3, 0x87, 0x8d, 0xc2, 0x7c, 0xa0, 0x79,
-		    0x10, 0x30, 0x58, 0x84, 0x9f, 0xab, 0xcb, 0x4f },
-	.expected_ss = (u8[32]){ 0xe5, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for shared secret */
-{
-	.secret = (u8[32]){ 0xa0, 0xa4, 0xf1, 0x30, 0xb9, 0x8a, 0x5b, 0xe4,
-		     0xb1, 0xce, 0xdb, 0x7c, 0xb8, 0x55, 0x84, 0xa3,
-		     0x52, 0x0e, 0x14, 0x2d, 0x47, 0x4d, 0xc9, 0xcc,
-		     0xb9, 0x09, 0xa0, 0x73, 0xa9, 0x76, 0xbf, 0x63 },
-	.b_public = (u8[32]){ 0x1c, 0xa2, 0x19, 0x0b, 0x71, 0x16, 0x35, 0x39,
-		    0x06, 0x3c, 0x35, 0x77, 0x3b, 0xda, 0x0c, 0x9c,
-		    0x92, 0x8e, 0x91, 0x36, 0xf0, 0x62, 0x0a, 0xeb,
-		    0x09, 0x3f, 0x09, 0x91, 0x97, 0xb7, 0xf7, 0x4e },
-	.expected_ss = (u8[32]){ 0xe3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for shared secret */
-{
-	.secret = (u8[32]){ 0xa0, 0xa4, 0xf1, 0x30, 0xb9, 0x8a, 0x5b, 0xe4,
-		     0xb1, 0xce, 0xdb, 0x7c, 0xb8, 0x55, 0x84, 0xa3,
-		     0x52, 0x0e, 0x14, 0x2d, 0x47, 0x4d, 0xc9, 0xcc,
-		     0xb9, 0x09, 0xa0, 0x73, 0xa9, 0x76, 0xbf, 0x63 },
-	.b_public = (u8[32]){ 0xf7, 0x6e, 0x90, 0x10, 0xac, 0x33, 0xc5, 0x04,
-		    0x3b, 0x2d, 0x3b, 0x76, 0xa8, 0x42, 0x17, 0x10,
-		    0x00, 0xc4, 0x91, 0x62, 0x22, 0xe9, 0xe8, 0x58,
-		    0x97, 0xa0, 0xae, 0xc7, 0xf6, 0x35, 0x0b, 0x3c },
-	.expected_ss = (u8[32]){ 0xdd, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for shared secret */
-{
-	.secret = (u8[32]){ 0xa0, 0xa4, 0xf1, 0x30, 0xb9, 0x8a, 0x5b, 0xe4,
-		     0xb1, 0xce, 0xdb, 0x7c, 0xb8, 0x55, 0x84, 0xa3,
-		     0x52, 0x0e, 0x14, 0x2d, 0x47, 0x4d, 0xc9, 0xcc,
-		     0xb9, 0x09, 0xa0, 0x73, 0xa9, 0x76, 0xbf, 0x63 },
-	.b_public = (u8[32]){ 0xbb, 0x72, 0x68, 0x8d, 0x8f, 0x8a, 0xa7, 0xa3,
-		    0x9c, 0xd6, 0x06, 0x0c, 0xd5, 0xc8, 0x09, 0x3c,
-		    0xde, 0xc6, 0xfe, 0x34, 0x19, 0x37, 0xc3, 0x88,
-		    0x6a, 0x99, 0x34, 0x6c, 0xd0, 0x7f, 0xaa, 0x55 },
-	.expected_ss = (u8[32]){ 0xdb, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for shared secret */
-{
-	.secret = (u8[32]){ 0xa0, 0xa4, 0xf1, 0x30, 0xb9, 0x8a, 0x5b, 0xe4,
-		     0xb1, 0xce, 0xdb, 0x7c, 0xb8, 0x55, 0x84, 0xa3,
-		     0x52, 0x0e, 0x14, 0x2d, 0x47, 0x4d, 0xc9, 0xcc,
-		     0xb9, 0x09, 0xa0, 0x73, 0xa9, 0x76, 0xbf, 0x63 },
-	.b_public = (u8[32]){ 0x88, 0xfd, 0xde, 0xa1, 0x93, 0x39, 0x1c, 0x6a,
-		    0x59, 0x33, 0xef, 0x9b, 0x71, 0x90, 0x15, 0x49,
-		    0x44, 0x72, 0x05, 0xaa, 0xe9, 0xda, 0x92, 0x8a,
-		    0x6b, 0x91, 0xa3, 0x52, 0xba, 0x10, 0xf4, 0x1f },
-	.expected_ss = (u8[32]){ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - edge case for shared secret */
-{
-	.secret = (u8[32]){ 0xa0, 0xa4, 0xf1, 0x30, 0xb9, 0x8a, 0x5b, 0xe4,
-		     0xb1, 0xce, 0xdb, 0x7c, 0xb8, 0x55, 0x84, 0xa3,
-		     0x52, 0x0e, 0x14, 0x2d, 0x47, 0x4d, 0xc9, 0xcc,
-		     0xb9, 0x09, 0xa0, 0x73, 0xa9, 0x76, 0xbf, 0x63 },
-	.b_public = (u8[32]){ 0x30, 0x3b, 0x39, 0x2f, 0x15, 0x31, 0x16, 0xca,
-		    0xd9, 0xcc, 0x68, 0x2a, 0x00, 0xcc, 0xc4, 0x4c,
-		    0x95, 0xff, 0x0d, 0x3b, 0xbe, 0x56, 0x8b, 0xeb,
-		    0x6c, 0x4e, 0x73, 0x9b, 0xaf, 0xdc, 0x2c, 0x68 },
-	.expected_ss = (u8[32]){ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - checking for overflow */
-{
-	.secret = (u8[32]){ 0xc8, 0x17, 0x24, 0x70, 0x40, 0x00, 0xb2, 0x6d,
-		     0x31, 0x70, 0x3c, 0xc9, 0x7e, 0x3a, 0x37, 0x8d,
-		     0x56, 0xfa, 0xd8, 0x21, 0x93, 0x61, 0xc8, 0x8c,
-		     0xca, 0x8b, 0xd7, 0xc5, 0x71, 0x9b, 0x12, 0xb2 },
-	.b_public = (u8[32]){ 0xfd, 0x30, 0x0a, 0xeb, 0x40, 0xe1, 0xfa, 0x58,
-		    0x25, 0x18, 0x41, 0x2b, 0x49, 0xb2, 0x08, 0xa7,
-		    0x84, 0x2b, 0x1e, 0x1f, 0x05, 0x6a, 0x04, 0x01,
-		    0x78, 0xea, 0x41, 0x41, 0x53, 0x4f, 0x65, 0x2d },
-	.expected_ss = (u8[32]){ 0xb7, 0x34, 0x10, 0x5d, 0xc2, 0x57, 0x58, 0x5d,
-		    0x73, 0xb5, 0x66, 0xcc, 0xb7, 0x6f, 0x06, 0x27,
-		    0x95, 0xcc, 0xbe, 0xc8, 0x91, 0x28, 0xe5, 0x2b,
-		    0x02, 0xf3, 0xe5, 0x96, 0x39, 0xf1, 0x3c, 0x46 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - checking for overflow */
-{
-	.secret = (u8[32]){ 0xc8, 0x17, 0x24, 0x70, 0x40, 0x00, 0xb2, 0x6d,
-		     0x31, 0x70, 0x3c, 0xc9, 0x7e, 0x3a, 0x37, 0x8d,
-		     0x56, 0xfa, 0xd8, 0x21, 0x93, 0x61, 0xc8, 0x8c,
-		     0xca, 0x8b, 0xd7, 0xc5, 0x71, 0x9b, 0x12, 0xb2 },
-	.b_public = (u8[32]){ 0xc8, 0xef, 0x79, 0xb5, 0x14, 0xd7, 0x68, 0x26,
-		    0x77, 0xbc, 0x79, 0x31, 0xe0, 0x6e, 0xe5, 0xc2,
-		    0x7c, 0x9b, 0x39, 0x2b, 0x4a, 0xe9, 0x48, 0x44,
-		    0x73, 0xf5, 0x54, 0xe6, 0x67, 0x8e, 0xcc, 0x2e },
-	.expected_ss = (u8[32]){ 0x64, 0x7a, 0x46, 0xb6, 0xfc, 0x3f, 0x40, 0xd6,
-		    0x21, 0x41, 0xee, 0x3c, 0xee, 0x70, 0x6b, 0x4d,
-		    0x7a, 0x92, 0x71, 0x59, 0x3a, 0x7b, 0x14, 0x3e,
-		    0x8e, 0x2e, 0x22, 0x79, 0x88, 0x3e, 0x45, 0x50 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - checking for overflow */
-{
-	.secret = (u8[32]){ 0xc8, 0x17, 0x24, 0x70, 0x40, 0x00, 0xb2, 0x6d,
-		     0x31, 0x70, 0x3c, 0xc9, 0x7e, 0x3a, 0x37, 0x8d,
-		     0x56, 0xfa, 0xd8, 0x21, 0x93, 0x61, 0xc8, 0x8c,
-		     0xca, 0x8b, 0xd7, 0xc5, 0x71, 0x9b, 0x12, 0xb2 },
-	.b_public = (u8[32]){ 0x64, 0xae, 0xac, 0x25, 0x04, 0x14, 0x48, 0x61,
-		    0x53, 0x2b, 0x7b, 0xbc, 0xb6, 0xc8, 0x7d, 0x67,
-		    0xdd, 0x4c, 0x1f, 0x07, 0xeb, 0xc2, 0xe0, 0x6e,
-		    0xff, 0xb9, 0x5a, 0xec, 0xc6, 0x17, 0x0b, 0x2c },
-	.expected_ss = (u8[32]){ 0x4f, 0xf0, 0x3d, 0x5f, 0xb4, 0x3c, 0xd8, 0x65,
-		    0x7a, 0x3c, 0xf3, 0x7c, 0x13, 0x8c, 0xad, 0xce,
-		    0xcc, 0xe5, 0x09, 0xe4, 0xeb, 0xa0, 0x89, 0xd0,
-		    0xef, 0x40, 0xb4, 0xe4, 0xfb, 0x94, 0x61, 0x55 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - checking for overflow */
-{
-	.secret = (u8[32]){ 0xc8, 0x17, 0x24, 0x70, 0x40, 0x00, 0xb2, 0x6d,
-		     0x31, 0x70, 0x3c, 0xc9, 0x7e, 0x3a, 0x37, 0x8d,
-		     0x56, 0xfa, 0xd8, 0x21, 0x93, 0x61, 0xc8, 0x8c,
-		     0xca, 0x8b, 0xd7, 0xc5, 0x71, 0x9b, 0x12, 0xb2 },
-	.b_public = (u8[32]){ 0xbf, 0x68, 0xe3, 0x5e, 0x9b, 0xdb, 0x7e, 0xee,
-		    0x1b, 0x50, 0x57, 0x02, 0x21, 0x86, 0x0f, 0x5d,
-		    0xcd, 0xad, 0x8a, 0xcb, 0xab, 0x03, 0x1b, 0x14,
-		    0x97, 0x4c, 0xc4, 0x90, 0x13, 0xc4, 0x98, 0x31 },
-	.expected_ss = (u8[32]){ 0x21, 0xce, 0xe5, 0x2e, 0xfd, 0xbc, 0x81, 0x2e,
-		    0x1d, 0x02, 0x1a, 0x4a, 0xf1, 0xe1, 0xd8, 0xbc,
-		    0x4d, 0xb3, 0xc4, 0x00, 0xe4, 0xd2, 0xa2, 0xc5,
-		    0x6a, 0x39, 0x26, 0xdb, 0x4d, 0x99, 0xc6, 0x5b },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - checking for overflow */
-{
-	.secret = (u8[32]){ 0xc8, 0x17, 0x24, 0x70, 0x40, 0x00, 0xb2, 0x6d,
-		     0x31, 0x70, 0x3c, 0xc9, 0x7e, 0x3a, 0x37, 0x8d,
-		     0x56, 0xfa, 0xd8, 0x21, 0x93, 0x61, 0xc8, 0x8c,
-		     0xca, 0x8b, 0xd7, 0xc5, 0x71, 0x9b, 0x12, 0xb2 },
-	.b_public = (u8[32]){ 0x53, 0x47, 0xc4, 0x91, 0x33, 0x1a, 0x64, 0xb4,
-		    0x3d, 0xdc, 0x68, 0x30, 0x34, 0xe6, 0x77, 0xf5,
-		    0x3d, 0xc3, 0x2b, 0x52, 0xa5, 0x2a, 0x57, 0x7c,
-		    0x15, 0xa8, 0x3b, 0xf2, 0x98, 0xe9, 0x9f, 0x19 },
-	.expected_ss = (u8[32]){ 0x18, 0xcb, 0x89, 0xe4, 0xe2, 0x0c, 0x0c, 0x2b,
-		    0xd3, 0x24, 0x30, 0x52, 0x45, 0x26, 0x6c, 0x93,
-		    0x27, 0x69, 0x0b, 0xbe, 0x79, 0xac, 0xb8, 0x8f,
-		    0x5b, 0x8f, 0xb3, 0xf7, 0x4e, 0xca, 0x3e, 0x52 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - private key == -1 (mod order) */
-{
-	.secret = (u8[32]){ 0xa0, 0x23, 0xcd, 0xd0, 0x83, 0xef, 0x5b, 0xb8,
-		     0x2f, 0x10, 0xd6, 0x2e, 0x59, 0xe1, 0x5a, 0x68,
-		     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50 },
-	.b_public = (u8[32]){ 0x25, 0x8e, 0x04, 0x52, 0x3b, 0x8d, 0x25, 0x3e,
-		    0xe6, 0x57, 0x19, 0xfc, 0x69, 0x06, 0xc6, 0x57,
-		    0x19, 0x2d, 0x80, 0x71, 0x7e, 0xdc, 0x82, 0x8f,
-		    0xa0, 0xaf, 0x21, 0x68, 0x6e, 0x2f, 0xaa, 0x75 },
-	.expected_ss = (u8[32]){ 0x25, 0x8e, 0x04, 0x52, 0x3b, 0x8d, 0x25, 0x3e,
-		    0xe6, 0x57, 0x19, 0xfc, 0x69, 0x06, 0xc6, 0x57,
-		    0x19, 0x2d, 0x80, 0x71, 0x7e, 0xdc, 0x82, 0x8f,
-		    0xa0, 0xaf, 0x21, 0x68, 0x6e, 0x2f, 0xaa, 0x75 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-},
-/* wycheproof - private key == 1 (mod order) on twist */
-{
-	.secret = (u8[32]){ 0x58, 0x08, 0x3d, 0xd2, 0x61, 0xad, 0x91, 0xef,
-		     0xf9, 0x52, 0x32, 0x2e, 0xc8, 0x24, 0xc6, 0x82,
-		     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x5f },
-	.b_public = (u8[32]){ 0x2e, 0xae, 0x5e, 0xc3, 0xdd, 0x49, 0x4e, 0x9f,
-		    0x2d, 0x37, 0xd2, 0x58, 0xf8, 0x73, 0xa8, 0xe6,
-		    0xe9, 0xd0, 0xdb, 0xd1, 0xe3, 0x83, 0xef, 0x64,
-		    0xd9, 0x8b, 0xb9, 0x1b, 0x3e, 0x0b, 0xe0, 0x35 },
-	.expected_ss = (u8[32]){ 0x2e, 0xae, 0x5e, 0xc3, 0xdd, 0x49, 0x4e, 0x9f,
-		    0x2d, 0x37, 0xd2, 0x58, 0xf8, 0x73, 0xa8, 0xe6,
-		    0xe9, 0xd0, 0xdb, 0xd1, 0xe3, 0x83, 0xef, 0x64,
-		    0xd9, 0x8b, 0xb9, 0x1b, 0x3e, 0x0b, 0xe0, 0x35 },
-	.secret_size = 32,
-	.b_public_size = 32,
-	.expected_ss_size = 32,
-
-}
-};
-
 static const struct kpp_testvec ecdh_p192_tv_template[] = {
 	{
 	.secret =
@@ -5352,309 +4789,6 @@ static const struct hash_testvec rmd160_tv_template[] = {
 		.psize	= 32,
 		.digest	= "\x94\xc2\x64\x11\x54\x04\xe6\x33\x79\x0d"
 			  "\xfc\xc8\x7b\x58\x7d\x36\x77\x06\x7d\x9f",
-	}
-};
-
-static const u8 zeroes[4096] = { [0 ... 4095] = 0 };
-static const u8 ones[4096] = { [0 ... 4095] = 0xff };
-
-static const struct hash_testvec crc64_rocksoft_tv_template[] = {
-	{
-		.plaintext	= zeroes,
-		.psize		= 4096,
-		.digest         = "\x4e\xb6\x22\xeb\x67\xd3\x82\x64",
-	}, {
-		.plaintext	= ones,
-		.psize		= 4096,
-		.digest         = "\xac\xa3\xec\x02\x73\xba\xdd\xc0",
-	}
-};
-
-static const struct hash_testvec crct10dif_tv_template[] = {
-	{
-		.plaintext	= "abc",
-		.psize		= 3,
-		.digest		= (u8 *)(u16 []){ 0x443b },
-	}, {
-		.plaintext 	= "1234567890123456789012345678901234567890"
-				  "123456789012345678901234567890123456789",
-		.psize		= 79,
-		.digest 	= (u8 *)(u16 []){ 0x4b70 },
-	}, {
-		.plaintext	= "abcdddddddddddddddddddddddddddddddddddddddd"
-				  "ddddddddddddd",
-		.psize		= 56,
-		.digest		= (u8 *)(u16 []){ 0x9ce3 },
-	}, {
-		.plaintext 	= "1234567890123456789012345678901234567890"
-				  "1234567890123456789012345678901234567890"
-				  "1234567890123456789012345678901234567890"
-				  "1234567890123456789012345678901234567890"
-				  "1234567890123456789012345678901234567890"
-				  "1234567890123456789012345678901234567890"
-				  "1234567890123456789012345678901234567890"
-				  "123456789012345678901234567890123456789",
-		.psize		= 319,
-		.digest		= (u8 *)(u16 []){ 0x44c6 },
-	}, {
-		.plaintext =	"\x6e\x05\x79\x10\xa7\x1b\xb2\x49"
-				"\xe0\x54\xeb\x82\x19\x8d\x24\xbb"
-				"\x2f\xc6\x5d\xf4\x68\xff\x96\x0a"
-				"\xa1\x38\xcf\x43\xda\x71\x08\x7c"
-				"\x13\xaa\x1e\xb5\x4c\xe3\x57\xee"
-				"\x85\x1c\x90\x27\xbe\x32\xc9\x60"
-				"\xf7\x6b\x02\x99\x0d\xa4\x3b\xd2"
-				"\x46\xdd\x74\x0b\x7f\x16\xad\x21"
-				"\xb8\x4f\xe6\x5a\xf1\x88\x1f\x93"
-				"\x2a\xc1\x35\xcc\x63\xfa\x6e\x05"
-				"\x9c\x10\xa7\x3e\xd5\x49\xe0\x77"
-				"\x0e\x82\x19\xb0\x24\xbb\x52\xe9"
-				"\x5d\xf4\x8b\x22\x96\x2d\xc4\x38"
-				"\xcf\x66\xfd\x71\x08\x9f\x13\xaa"
-				"\x41\xd8\x4c\xe3\x7a\x11\x85\x1c"
-				"\xb3\x27\xbe\x55\xec\x60\xf7\x8e"
-				"\x02\x99\x30\xc7\x3b\xd2\x69\x00"
-				"\x74\x0b\xa2\x16\xad\x44\xdb\x4f"
-				"\xe6\x7d\x14\x88\x1f\xb6\x2a\xc1"
-				"\x58\xef\x63\xfa\x91\x05\x9c\x33"
-				"\xca\x3e\xd5\x6c\x03\x77\x0e\xa5"
-				"\x19\xb0\x47\xde\x52\xe9\x80\x17"
-				"\x8b\x22\xb9\x2d\xc4\x5b\xf2\x66"
-				"\xfd\x94\x08\x9f\x36\xcd\x41\xd8"
-				"\x6f\x06\x7a\x11\xa8\x1c\xb3\x4a"
-				"\xe1\x55\xec\x83\x1a\x8e\x25\xbc"
-				"\x30\xc7\x5e\xf5\x69\x00\x97\x0b"
-				"\xa2\x39\xd0\x44\xdb\x72\x09\x7d"
-				"\x14\xab\x1f\xb6\x4d\xe4\x58\xef"
-				"\x86\x1d\x91\x28\xbf\x33\xca\x61"
-				"\xf8\x6c\x03\x9a\x0e\xa5\x3c\xd3"
-				"\x47\xde\x75\x0c\x80\x17\xae\x22"
-				"\xb9\x50\xe7\x5b\xf2\x89\x20\x94"
-				"\x2b\xc2\x36\xcd\x64\xfb\x6f\x06"
-				"\x9d\x11\xa8\x3f\xd6\x4a\xe1\x78"
-				"\x0f\x83\x1a\xb1\x25\xbc\x53\xea"
-				"\x5e\xf5\x8c\x00\x97\x2e\xc5\x39"
-				"\xd0\x67\xfe\x72\x09\xa0\x14\xab"
-				"\x42\xd9\x4d\xe4\x7b\x12\x86\x1d"
-				"\xb4\x28\xbf\x56\xed\x61\xf8\x8f"
-				"\x03\x9a\x31\xc8\x3c\xd3\x6a\x01"
-				"\x75\x0c\xa3\x17\xae\x45\xdc\x50"
-				"\xe7\x7e\x15\x89\x20\xb7\x2b\xc2"
-				"\x59\xf0\x64\xfb\x92\x06\x9d\x34"
-				"\xcb\x3f\xd6\x6d\x04\x78\x0f\xa6"
-				"\x1a\xb1\x48\xdf\x53\xea\x81\x18"
-				"\x8c\x23\xba\x2e\xc5\x5c\xf3\x67"
-				"\xfe\x95\x09\xa0\x37\xce\x42\xd9"
-				"\x70\x07\x7b\x12\xa9\x1d\xb4\x4b"
-				"\xe2\x56\xed\x84\x1b\x8f\x26\xbd"
-				"\x31\xc8\x5f\xf6\x6a\x01\x98\x0c"
-				"\xa3\x3a\xd1\x45\xdc\x73\x0a\x7e"
-				"\x15\xac\x20\xb7\x4e\xe5\x59\xf0"
-				"\x87\x1e\x92\x29\xc0\x34\xcb\x62"
-				"\xf9\x6d\x04\x9b\x0f\xa6\x3d\xd4"
-				"\x48\xdf\x76\x0d\x81\x18\xaf\x23"
-				"\xba\x51\xe8\x5c\xf3\x8a\x21\x95"
-				"\x2c\xc3\x37\xce\x65\xfc\x70\x07"
-				"\x9e\x12\xa9\x40\xd7\x4b\xe2\x79"
-				"\x10\x84\x1b\xb2\x26\xbd\x54\xeb"
-				"\x5f\xf6\x8d\x01\x98\x2f\xc6\x3a"
-				"\xd1\x68\xff\x73\x0a\xa1\x15\xac"
-				"\x43\xda\x4e\xe5\x7c\x13\x87\x1e"
-				"\xb5\x29\xc0\x57\xee\x62\xf9\x90"
-				"\x04\x9b\x32\xc9\x3d\xd4\x6b\x02"
-				"\x76\x0d\xa4\x18\xaf\x46\xdd\x51"
-				"\xe8\x7f\x16\x8a\x21\xb8\x2c\xc3"
-				"\x5a\xf1\x65\xfc\x93\x07\x9e\x35"
-				"\xcc\x40\xd7\x6e\x05\x79\x10\xa7"
-				"\x1b\xb2\x49\xe0\x54\xeb\x82\x19"
-				"\x8d\x24\xbb\x2f\xc6\x5d\xf4\x68"
-				"\xff\x96\x0a\xa1\x38\xcf\x43\xda"
-				"\x71\x08\x7c\x13\xaa\x1e\xb5\x4c"
-				"\xe3\x57\xee\x85\x1c\x90\x27\xbe"
-				"\x32\xc9\x60\xf7\x6b\x02\x99\x0d"
-				"\xa4\x3b\xd2\x46\xdd\x74\x0b\x7f"
-				"\x16\xad\x21\xb8\x4f\xe6\x5a\xf1"
-				"\x88\x1f\x93\x2a\xc1\x35\xcc\x63"
-				"\xfa\x6e\x05\x9c\x10\xa7\x3e\xd5"
-				"\x49\xe0\x77\x0e\x82\x19\xb0\x24"
-				"\xbb\x52\xe9\x5d\xf4\x8b\x22\x96"
-				"\x2d\xc4\x38\xcf\x66\xfd\x71\x08"
-				"\x9f\x13\xaa\x41\xd8\x4c\xe3\x7a"
-				"\x11\x85\x1c\xb3\x27\xbe\x55\xec"
-				"\x60\xf7\x8e\x02\x99\x30\xc7\x3b"
-				"\xd2\x69\x00\x74\x0b\xa2\x16\xad"
-				"\x44\xdb\x4f\xe6\x7d\x14\x88\x1f"
-				"\xb6\x2a\xc1\x58\xef\x63\xfa\x91"
-				"\x05\x9c\x33\xca\x3e\xd5\x6c\x03"
-				"\x77\x0e\xa5\x19\xb0\x47\xde\x52"
-				"\xe9\x80\x17\x8b\x22\xb9\x2d\xc4"
-				"\x5b\xf2\x66\xfd\x94\x08\x9f\x36"
-				"\xcd\x41\xd8\x6f\x06\x7a\x11\xa8"
-				"\x1c\xb3\x4a\xe1\x55\xec\x83\x1a"
-				"\x8e\x25\xbc\x30\xc7\x5e\xf5\x69"
-				"\x00\x97\x0b\xa2\x39\xd0\x44\xdb"
-				"\x72\x09\x7d\x14\xab\x1f\xb6\x4d"
-				"\xe4\x58\xef\x86\x1d\x91\x28\xbf"
-				"\x33\xca\x61\xf8\x6c\x03\x9a\x0e"
-				"\xa5\x3c\xd3\x47\xde\x75\x0c\x80"
-				"\x17\xae\x22\xb9\x50\xe7\x5b\xf2"
-				"\x89\x20\x94\x2b\xc2\x36\xcd\x64"
-				"\xfb\x6f\x06\x9d\x11\xa8\x3f\xd6"
-				"\x4a\xe1\x78\x0f\x83\x1a\xb1\x25"
-				"\xbc\x53\xea\x5e\xf5\x8c\x00\x97"
-				"\x2e\xc5\x39\xd0\x67\xfe\x72\x09"
-				"\xa0\x14\xab\x42\xd9\x4d\xe4\x7b"
-				"\x12\x86\x1d\xb4\x28\xbf\x56\xed"
-				"\x61\xf8\x8f\x03\x9a\x31\xc8\x3c"
-				"\xd3\x6a\x01\x75\x0c\xa3\x17\xae"
-				"\x45\xdc\x50\xe7\x7e\x15\x89\x20"
-				"\xb7\x2b\xc2\x59\xf0\x64\xfb\x92"
-				"\x06\x9d\x34\xcb\x3f\xd6\x6d\x04"
-				"\x78\x0f\xa6\x1a\xb1\x48\xdf\x53"
-				"\xea\x81\x18\x8c\x23\xba\x2e\xc5"
-				"\x5c\xf3\x67\xfe\x95\x09\xa0\x37"
-				"\xce\x42\xd9\x70\x07\x7b\x12\xa9"
-				"\x1d\xb4\x4b\xe2\x56\xed\x84\x1b"
-				"\x8f\x26\xbd\x31\xc8\x5f\xf6\x6a"
-				"\x01\x98\x0c\xa3\x3a\xd1\x45\xdc"
-				"\x73\x0a\x7e\x15\xac\x20\xb7\x4e"
-				"\xe5\x59\xf0\x87\x1e\x92\x29\xc0"
-				"\x34\xcb\x62\xf9\x6d\x04\x9b\x0f"
-				"\xa6\x3d\xd4\x48\xdf\x76\x0d\x81"
-				"\x18\xaf\x23\xba\x51\xe8\x5c\xf3"
-				"\x8a\x21\x95\x2c\xc3\x37\xce\x65"
-				"\xfc\x70\x07\x9e\x12\xa9\x40\xd7"
-				"\x4b\xe2\x79\x10\x84\x1b\xb2\x26"
-				"\xbd\x54\xeb\x5f\xf6\x8d\x01\x98"
-				"\x2f\xc6\x3a\xd1\x68\xff\x73\x0a"
-				"\xa1\x15\xac\x43\xda\x4e\xe5\x7c"
-				"\x13\x87\x1e\xb5\x29\xc0\x57\xee"
-				"\x62\xf9\x90\x04\x9b\x32\xc9\x3d"
-				"\xd4\x6b\x02\x76\x0d\xa4\x18\xaf"
-				"\x46\xdd\x51\xe8\x7f\x16\x8a\x21"
-				"\xb8\x2c\xc3\x5a\xf1\x65\xfc\x93"
-				"\x07\x9e\x35\xcc\x40\xd7\x6e\x05"
-				"\x79\x10\xa7\x1b\xb2\x49\xe0\x54"
-				"\xeb\x82\x19\x8d\x24\xbb\x2f\xc6"
-				"\x5d\xf4\x68\xff\x96\x0a\xa1\x38"
-				"\xcf\x43\xda\x71\x08\x7c\x13\xaa"
-				"\x1e\xb5\x4c\xe3\x57\xee\x85\x1c"
-				"\x90\x27\xbe\x32\xc9\x60\xf7\x6b"
-				"\x02\x99\x0d\xa4\x3b\xd2\x46\xdd"
-				"\x74\x0b\x7f\x16\xad\x21\xb8\x4f"
-				"\xe6\x5a\xf1\x88\x1f\x93\x2a\xc1"
-				"\x35\xcc\x63\xfa\x6e\x05\x9c\x10"
-				"\xa7\x3e\xd5\x49\xe0\x77\x0e\x82"
-				"\x19\xb0\x24\xbb\x52\xe9\x5d\xf4"
-				"\x8b\x22\x96\x2d\xc4\x38\xcf\x66"
-				"\xfd\x71\x08\x9f\x13\xaa\x41\xd8"
-				"\x4c\xe3\x7a\x11\x85\x1c\xb3\x27"
-				"\xbe\x55\xec\x60\xf7\x8e\x02\x99"
-				"\x30\xc7\x3b\xd2\x69\x00\x74\x0b"
-				"\xa2\x16\xad\x44\xdb\x4f\xe6\x7d"
-				"\x14\x88\x1f\xb6\x2a\xc1\x58\xef"
-				"\x63\xfa\x91\x05\x9c\x33\xca\x3e"
-				"\xd5\x6c\x03\x77\x0e\xa5\x19\xb0"
-				"\x47\xde\x52\xe9\x80\x17\x8b\x22"
-				"\xb9\x2d\xc4\x5b\xf2\x66\xfd\x94"
-				"\x08\x9f\x36\xcd\x41\xd8\x6f\x06"
-				"\x7a\x11\xa8\x1c\xb3\x4a\xe1\x55"
-				"\xec\x83\x1a\x8e\x25\xbc\x30\xc7"
-				"\x5e\xf5\x69\x00\x97\x0b\xa2\x39"
-				"\xd0\x44\xdb\x72\x09\x7d\x14\xab"
-				"\x1f\xb6\x4d\xe4\x58\xef\x86\x1d"
-				"\x91\x28\xbf\x33\xca\x61\xf8\x6c"
-				"\x03\x9a\x0e\xa5\x3c\xd3\x47\xde"
-				"\x75\x0c\x80\x17\xae\x22\xb9\x50"
-				"\xe7\x5b\xf2\x89\x20\x94\x2b\xc2"
-				"\x36\xcd\x64\xfb\x6f\x06\x9d\x11"
-				"\xa8\x3f\xd6\x4a\xe1\x78\x0f\x83"
-				"\x1a\xb1\x25\xbc\x53\xea\x5e\xf5"
-				"\x8c\x00\x97\x2e\xc5\x39\xd0\x67"
-				"\xfe\x72\x09\xa0\x14\xab\x42\xd9"
-				"\x4d\xe4\x7b\x12\x86\x1d\xb4\x28"
-				"\xbf\x56\xed\x61\xf8\x8f\x03\x9a"
-				"\x31\xc8\x3c\xd3\x6a\x01\x75\x0c"
-				"\xa3\x17\xae\x45\xdc\x50\xe7\x7e"
-				"\x15\x89\x20\xb7\x2b\xc2\x59\xf0"
-				"\x64\xfb\x92\x06\x9d\x34\xcb\x3f"
-				"\xd6\x6d\x04\x78\x0f\xa6\x1a\xb1"
-				"\x48\xdf\x53\xea\x81\x18\x8c\x23"
-				"\xba\x2e\xc5\x5c\xf3\x67\xfe\x95"
-				"\x09\xa0\x37\xce\x42\xd9\x70\x07"
-				"\x7b\x12\xa9\x1d\xb4\x4b\xe2\x56"
-				"\xed\x84\x1b\x8f\x26\xbd\x31\xc8"
-				"\x5f\xf6\x6a\x01\x98\x0c\xa3\x3a"
-				"\xd1\x45\xdc\x73\x0a\x7e\x15\xac"
-				"\x20\xb7\x4e\xe5\x59\xf0\x87\x1e"
-				"\x92\x29\xc0\x34\xcb\x62\xf9\x6d"
-				"\x04\x9b\x0f\xa6\x3d\xd4\x48\xdf"
-				"\x76\x0d\x81\x18\xaf\x23\xba\x51"
-				"\xe8\x5c\xf3\x8a\x21\x95\x2c\xc3"
-				"\x37\xce\x65\xfc\x70\x07\x9e\x12"
-				"\xa9\x40\xd7\x4b\xe2\x79\x10\x84"
-				"\x1b\xb2\x26\xbd\x54\xeb\x5f\xf6"
-				"\x8d\x01\x98\x2f\xc6\x3a\xd1\x68"
-				"\xff\x73\x0a\xa1\x15\xac\x43\xda"
-				"\x4e\xe5\x7c\x13\x87\x1e\xb5\x29"
-				"\xc0\x57\xee\x62\xf9\x90\x04\x9b"
-				"\x32\xc9\x3d\xd4\x6b\x02\x76\x0d"
-				"\xa4\x18\xaf\x46\xdd\x51\xe8\x7f"
-				"\x16\x8a\x21\xb8\x2c\xc3\x5a\xf1"
-				"\x65\xfc\x93\x07\x9e\x35\xcc\x40"
-				"\xd7\x6e\x05\x79\x10\xa7\x1b\xb2"
-				"\x49\xe0\x54\xeb\x82\x19\x8d\x24"
-				"\xbb\x2f\xc6\x5d\xf4\x68\xff\x96"
-				"\x0a\xa1\x38\xcf\x43\xda\x71\x08"
-				"\x7c\x13\xaa\x1e\xb5\x4c\xe3\x57"
-				"\xee\x85\x1c\x90\x27\xbe\x32\xc9"
-				"\x60\xf7\x6b\x02\x99\x0d\xa4\x3b"
-				"\xd2\x46\xdd\x74\x0b\x7f\x16\xad"
-				"\x21\xb8\x4f\xe6\x5a\xf1\x88\x1f"
-				"\x93\x2a\xc1\x35\xcc\x63\xfa\x6e"
-				"\x05\x9c\x10\xa7\x3e\xd5\x49\xe0"
-				"\x77\x0e\x82\x19\xb0\x24\xbb\x52"
-				"\xe9\x5d\xf4\x8b\x22\x96\x2d\xc4"
-				"\x38\xcf\x66\xfd\x71\x08\x9f\x13"
-				"\xaa\x41\xd8\x4c\xe3\x7a\x11\x85"
-				"\x1c\xb3\x27\xbe\x55\xec\x60\xf7"
-				"\x8e\x02\x99\x30\xc7\x3b\xd2\x69"
-				"\x00\x74\x0b\xa2\x16\xad\x44\xdb"
-				"\x4f\xe6\x7d\x14\x88\x1f\xb6\x2a"
-				"\xc1\x58\xef\x63\xfa\x91\x05\x9c"
-				"\x33\xca\x3e\xd5\x6c\x03\x77\x0e"
-				"\xa5\x19\xb0\x47\xde\x52\xe9\x80"
-				"\x17\x8b\x22\xb9\x2d\xc4\x5b\xf2"
-				"\x66\xfd\x94\x08\x9f\x36\xcd\x41"
-				"\xd8\x6f\x06\x7a\x11\xa8\x1c\xb3"
-				"\x4a\xe1\x55\xec\x83\x1a\x8e\x25"
-				"\xbc\x30\xc7\x5e\xf5\x69\x00\x97"
-				"\x0b\xa2\x39\xd0\x44\xdb\x72\x09"
-				"\x7d\x14\xab\x1f\xb6\x4d\xe4\x58"
-				"\xef\x86\x1d\x91\x28\xbf\x33\xca"
-				"\x61\xf8\x6c\x03\x9a\x0e\xa5\x3c"
-				"\xd3\x47\xde\x75\x0c\x80\x17\xae"
-				"\x22\xb9\x50\xe7\x5b\xf2\x89\x20"
-				"\x94\x2b\xc2\x36\xcd\x64\xfb\x6f"
-				"\x06\x9d\x11\xa8\x3f\xd6\x4a\xe1"
-				"\x78\x0f\x83\x1a\xb1\x25\xbc\x53"
-				"\xea\x5e\xf5\x8c\x00\x97\x2e\xc5"
-				"\x39\xd0\x67\xfe\x72\x09\xa0\x14"
-				"\xab\x42\xd9\x4d\xe4\x7b\x12\x86"
-				"\x1d\xb4\x28\xbf\x56\xed\x61\xf8"
-				"\x8f\x03\x9a\x31\xc8\x3c\xd3\x6a"
-				"\x01\x75\x0c\xa3\x17\xae\x45\xdc"
-				"\x50\xe7\x7e\x15\x89\x20\xb7\x2b"
-				"\xc2\x59\xf0\x64\xfb\x92\x06\x9d"
-				"\x34\xcb\x3f\xd6\x6d\x04\x78\x0f"
-				"\xa6\x1a\xb1\x48\xdf\x53\xea\x81"
-				"\x18\x8c\x23\xba\x2e\xc5\x5c\xf3"
-				"\x67\xfe\x95\x09\xa0\x37\xce\x42"
-				"\xd9\x70\x07\x7b\x12\xa9\x1d\xb4"
-				"\x4b\xe2\x56\xed\x84\x1b\x8f\x26"
-				"\xbd\x31\xc8\x5f\xf6\x6a\x01\x98",
-		.psize = 2048,
-		.digest		= (u8 *)(u16 []){ 0x23ca },
 	}
 };
 
@@ -7896,159 +7030,6 @@ static const struct hash_testvec aes_xcbc128_tv_template[] = {
 	}
 };
 
-static const char vmac64_string1[144] = {
-	'\0',     '\0',   '\0',   '\0',   '\0',   '\0',   '\0',   '\0',
-	'\0',     '\0',   '\0',   '\0',   '\0',   '\0',   '\0',   '\0',
-	'\x01', '\x01', '\x01', '\x01', '\x02', '\x03', '\x02', '\x02',
-	'\x02', '\x04', '\x01', '\x07', '\x04', '\x01', '\x04', '\x03',
-};
-
-static const char vmac64_string2[144] = {
-	'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
-	'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
-	 'a',  'b',  'c',
-};
-
-static const char vmac64_string3[144] = {
-	'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
-	'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
-	 'a',  'b',  'c',  'a',  'b',  'c',  'a',  'b',
-	 'c',  'a',  'b',  'c',  'a',  'b',  'c',  'a',
-	 'b',  'c',  'a',  'b',  'c',  'a',  'b',  'c',
-	 'a',  'b',  'c',  'a',  'b',  'c',  'a',  'b',
-	 'c',  'a',  'b',  'c',  'a',  'b',  'c',  'a',
-	 'b',  'c',  'a',  'b',  'c',  'a',  'b',  'c',
-};
-
-static const char vmac64_string4[33] = {
-	'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
-	'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
-	'b',   'c',  'e',  'f',  'i',  'j',  'l',  'm',
-	'o',   'p',  'r',  's',  't',  'u',  'w',  'x',
-	'z',
-};
-
-static const char vmac64_string5[143] = {
-	'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
-	'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
-	 'r',  'm',  'b',  't',  'c',  'o',  'l',  'k',
-	 ']',  '%',  '9',  '2',  '7',  '!',  'A',
-};
-
-static const char vmac64_string6[145] = {
-	'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
-	'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
-	 'p',  't',  '*',  '7',  'l',  'i',  '!',  '#',
-	 'w',  '0',  'z',  '/',  '4',  'A',  'n',
-};
-
-static const struct hash_testvec vmac64_aes_tv_template[] = {
-	{ /* draft-krovetz-vmac-01 test vector 1 */
-		.key	= "abcdefghijklmnop",
-		.ksize	= 16,
-		.plaintext = "\0\0\0\0\0\0\0\0bcdefghi",
-		.psize	= 16,
-		.digest	= "\x25\x76\xbe\x1c\x56\xd8\xb8\x1b",
-	}, { /* draft-krovetz-vmac-01 test vector 2 */
-		.key	= "abcdefghijklmnop",
-		.ksize	= 16,
-		.plaintext = "\0\0\0\0\0\0\0\0bcdefghiabc",
-		.psize	= 19,
-		.digest	= "\x2d\x37\x6c\xf5\xb1\x81\x3c\xe5",
-	}, { /* draft-krovetz-vmac-01 test vector 3 */
-		.key	= "abcdefghijklmnop",
-		.ksize	= 16,
-		.plaintext = "\0\0\0\0\0\0\0\0bcdefghi"
-			  "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc",
-		.psize	= 64,
-		.digest	= "\xe8\x42\x1f\x61\xd5\x73\xd2\x98",
-	}, { /* draft-krovetz-vmac-01 test vector 4 */
-		.key	= "abcdefghijklmnop",
-		.ksize	= 16,
-		.plaintext = "\0\0\0\0\0\0\0\0bcdefghi"
-			  "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
-			  "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
-			  "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
-			  "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
-			  "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc"
-			  "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabc",
-		.psize	= 316,
-		.digest	= "\x44\x92\xdf\x6c\x5c\xac\x1b\xbe",
-	}, {
-		.key	= "\x00\x01\x02\x03\x04\x05\x06\x07"
-			  "\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",
-		.ksize	= 16,
-		.plaintext = "\x00\x00\x00\x00\x00\x00\x00\x00"
-			  "\x00\x00\x00\x00\x00\x00\x00\x00",
-		.psize	= 16,
-		.digest	= "\x54\x7b\xa4\x77\x35\x80\x58\x07",
-	}, {
-		.key	= "\x00\x01\x02\x03\x04\x05\x06\x07"
-			  "\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",
-		.ksize	= 16,
-		.plaintext = vmac64_string1,
-		.psize	= sizeof(vmac64_string1),
-		.digest	= "\xa1\x8c\x68\xae\xd3\x3c\xf5\xce",
-	}, {
-		.key	= "\x00\x01\x02\x03\x04\x05\x06\x07"
-			  "\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",
-		.ksize	= 16,
-		.plaintext = vmac64_string2,
-		.psize	= sizeof(vmac64_string2),
-		.digest	= "\x2d\x14\xbd\x81\x73\xb0\x27\xc9",
-	}, {
-		.key	= "\x00\x01\x02\x03\x04\x05\x06\x07"
-			  "\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",
-		.ksize	= 16,
-		.plaintext = vmac64_string3,
-		.psize	= sizeof(vmac64_string3),
-		.digest	= "\x19\x0b\x47\x98\x8c\x95\x1a\x8d",
-	}, {
-		.key	= "abcdefghijklmnop",
-		.ksize	= 16,
-		.plaintext = "\x00\x00\x00\x00\x00\x00\x00\x00"
-			  "\x00\x00\x00\x00\x00\x00\x00\x00",
-		.psize	= 16,
-		.digest	= "\x84\x8f\x55\x9e\x26\xa1\x89\x3b",
-	}, {
-		.key	= "abcdefghijklmnop",
-		.ksize	= 16,
-		.plaintext = vmac64_string1,
-		.psize	= sizeof(vmac64_string1),
-		.digest	= "\xc2\x74\x8d\xf6\xb0\xab\x5e\xab",
-	}, {
-		.key	= "abcdefghijklmnop",
-		.ksize	= 16,
-		.plaintext = vmac64_string2,
-		.psize	= sizeof(vmac64_string2),
-		.digest	= "\xdf\x09\x7b\x3d\x42\x68\x15\x11",
-	}, {
-		.key	= "abcdefghijklmnop",
-		.ksize	= 16,
-		.plaintext = vmac64_string3,
-		.psize	= sizeof(vmac64_string3),
-		.digest	= "\xd4\xfa\x8f\xed\xe1\x8f\x32\x8b",
-	}, {
-		.key	= "a09b5cd!f#07K\x00\x00\x00",
-		.ksize	= 16,
-		.plaintext = vmac64_string4,
-		.psize	= sizeof(vmac64_string4),
-		.digest	= "\x5f\xa1\x4e\x42\xea\x0f\xa5\xab",
-	}, {
-		.key	= "a09b5cd!f#07K\x00\x00\x00",
-		.ksize	= 16,
-		.plaintext = vmac64_string5,
-		.psize	= sizeof(vmac64_string5),
-		.digest	= "\x60\x67\xe8\x1d\xbc\x98\x31\x25",
-	}, {
-		.key	= "a09b5cd!f#07K\x00\x00\x00",
-		.ksize	= 16,
-		.plaintext = vmac64_string6,
-		.psize	= sizeof(vmac64_string6),
-		.digest	= "\x41\xeb\x65\x95\x47\x9b\xae\xc4",
-	},
-};
-
 /*
  * SHA384 HMAC test vectors from RFC4231
  */
@@ -8628,294 +7609,6 @@ static const struct hash_testvec hmac_sha3_512_tv_template[] = {
 			  "\xd1\xb9\x78\x9f\x97\xae\x5b\x83"
 			  "\xc6\xf4\x4d\xfc\xf1\xd6\x7e\xba",
 	},
-};
-
-/*
- * Poly1305 test vectors from RFC7539 A.3.
- */
-
-static const struct hash_testvec poly1305_tv_template[] = {
-	{ /* Test Vector #1 */
-		.plaintext	= "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00",
-		.psize		= 96,
-		.digest		= "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00",
-	}, { /* Test Vector #2 */
-		.plaintext	= "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x36\xe5\xf6\xb5\xc5\xe0\x60\x70"
-				  "\xf0\xef\xca\x96\x22\x7a\x86\x3e"
-				  "\x41\x6e\x79\x20\x73\x75\x62\x6d"
-				  "\x69\x73\x73\x69\x6f\x6e\x20\x74"
-				  "\x6f\x20\x74\x68\x65\x20\x49\x45"
-				  "\x54\x46\x20\x69\x6e\x74\x65\x6e"
-				  "\x64\x65\x64\x20\x62\x79\x20\x74"
-				  "\x68\x65\x20\x43\x6f\x6e\x74\x72"
-				  "\x69\x62\x75\x74\x6f\x72\x20\x66"
-				  "\x6f\x72\x20\x70\x75\x62\x6c\x69"
-				  "\x63\x61\x74\x69\x6f\x6e\x20\x61"
-				  "\x73\x20\x61\x6c\x6c\x20\x6f\x72"
-				  "\x20\x70\x61\x72\x74\x20\x6f\x66"
-				  "\x20\x61\x6e\x20\x49\x45\x54\x46"
-				  "\x20\x49\x6e\x74\x65\x72\x6e\x65"
-				  "\x74\x2d\x44\x72\x61\x66\x74\x20"
-				  "\x6f\x72\x20\x52\x46\x43\x20\x61"
-				  "\x6e\x64\x20\x61\x6e\x79\x20\x73"
-				  "\x74\x61\x74\x65\x6d\x65\x6e\x74"
-				  "\x20\x6d\x61\x64\x65\x20\x77\x69"
-				  "\x74\x68\x69\x6e\x20\x74\x68\x65"
-				  "\x20\x63\x6f\x6e\x74\x65\x78\x74"
-				  "\x20\x6f\x66\x20\x61\x6e\x20\x49"
-				  "\x45\x54\x46\x20\x61\x63\x74\x69"
-				  "\x76\x69\x74\x79\x20\x69\x73\x20"
-				  "\x63\x6f\x6e\x73\x69\x64\x65\x72"
-				  "\x65\x64\x20\x61\x6e\x20\x22\x49"
-				  "\x45\x54\x46\x20\x43\x6f\x6e\x74"
-				  "\x72\x69\x62\x75\x74\x69\x6f\x6e"
-				  "\x22\x2e\x20\x53\x75\x63\x68\x20"
-				  "\x73\x74\x61\x74\x65\x6d\x65\x6e"
-				  "\x74\x73\x20\x69\x6e\x63\x6c\x75"
-				  "\x64\x65\x20\x6f\x72\x61\x6c\x20"
-				  "\x73\x74\x61\x74\x65\x6d\x65\x6e"
-				  "\x74\x73\x20\x69\x6e\x20\x49\x45"
-				  "\x54\x46\x20\x73\x65\x73\x73\x69"
-				  "\x6f\x6e\x73\x2c\x20\x61\x73\x20"
-				  "\x77\x65\x6c\x6c\x20\x61\x73\x20"
-				  "\x77\x72\x69\x74\x74\x65\x6e\x20"
-				  "\x61\x6e\x64\x20\x65\x6c\x65\x63"
-				  "\x74\x72\x6f\x6e\x69\x63\x20\x63"
-				  "\x6f\x6d\x6d\x75\x6e\x69\x63\x61"
-				  "\x74\x69\x6f\x6e\x73\x20\x6d\x61"
-				  "\x64\x65\x20\x61\x74\x20\x61\x6e"
-				  "\x79\x20\x74\x69\x6d\x65\x20\x6f"
-				  "\x72\x20\x70\x6c\x61\x63\x65\x2c"
-				  "\x20\x77\x68\x69\x63\x68\x20\x61"
-				  "\x72\x65\x20\x61\x64\x64\x72\x65"
-				  "\x73\x73\x65\x64\x20\x74\x6f",
-		.psize		= 407,
-		.digest		= "\x36\xe5\xf6\xb5\xc5\xe0\x60\x70"
-				  "\xf0\xef\xca\x96\x22\x7a\x86\x3e",
-	}, { /* Test Vector #3 */
-		.plaintext	= "\x36\xe5\xf6\xb5\xc5\xe0\x60\x70"
-				  "\xf0\xef\xca\x96\x22\x7a\x86\x3e"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x41\x6e\x79\x20\x73\x75\x62\x6d"
-				  "\x69\x73\x73\x69\x6f\x6e\x20\x74"
-				  "\x6f\x20\x74\x68\x65\x20\x49\x45"
-				  "\x54\x46\x20\x69\x6e\x74\x65\x6e"
-				  "\x64\x65\x64\x20\x62\x79\x20\x74"
-				  "\x68\x65\x20\x43\x6f\x6e\x74\x72"
-				  "\x69\x62\x75\x74\x6f\x72\x20\x66"
-				  "\x6f\x72\x20\x70\x75\x62\x6c\x69"
-				  "\x63\x61\x74\x69\x6f\x6e\x20\x61"
-				  "\x73\x20\x61\x6c\x6c\x20\x6f\x72"
-				  "\x20\x70\x61\x72\x74\x20\x6f\x66"
-				  "\x20\x61\x6e\x20\x49\x45\x54\x46"
-				  "\x20\x49\x6e\x74\x65\x72\x6e\x65"
-				  "\x74\x2d\x44\x72\x61\x66\x74\x20"
-				  "\x6f\x72\x20\x52\x46\x43\x20\x61"
-				  "\x6e\x64\x20\x61\x6e\x79\x20\x73"
-				  "\x74\x61\x74\x65\x6d\x65\x6e\x74"
-				  "\x20\x6d\x61\x64\x65\x20\x77\x69"
-				  "\x74\x68\x69\x6e\x20\x74\x68\x65"
-				  "\x20\x63\x6f\x6e\x74\x65\x78\x74"
-				  "\x20\x6f\x66\x20\x61\x6e\x20\x49"
-				  "\x45\x54\x46\x20\x61\x63\x74\x69"
-				  "\x76\x69\x74\x79\x20\x69\x73\x20"
-				  "\x63\x6f\x6e\x73\x69\x64\x65\x72"
-				  "\x65\x64\x20\x61\x6e\x20\x22\x49"
-				  "\x45\x54\x46\x20\x43\x6f\x6e\x74"
-				  "\x72\x69\x62\x75\x74\x69\x6f\x6e"
-				  "\x22\x2e\x20\x53\x75\x63\x68\x20"
-				  "\x73\x74\x61\x74\x65\x6d\x65\x6e"
-				  "\x74\x73\x20\x69\x6e\x63\x6c\x75"
-				  "\x64\x65\x20\x6f\x72\x61\x6c\x20"
-				  "\x73\x74\x61\x74\x65\x6d\x65\x6e"
-				  "\x74\x73\x20\x69\x6e\x20\x49\x45"
-				  "\x54\x46\x20\x73\x65\x73\x73\x69"
-				  "\x6f\x6e\x73\x2c\x20\x61\x73\x20"
-				  "\x77\x65\x6c\x6c\x20\x61\x73\x20"
-				  "\x77\x72\x69\x74\x74\x65\x6e\x20"
-				  "\x61\x6e\x64\x20\x65\x6c\x65\x63"
-				  "\x74\x72\x6f\x6e\x69\x63\x20\x63"
-				  "\x6f\x6d\x6d\x75\x6e\x69\x63\x61"
-				  "\x74\x69\x6f\x6e\x73\x20\x6d\x61"
-				  "\x64\x65\x20\x61\x74\x20\x61\x6e"
-				  "\x79\x20\x74\x69\x6d\x65\x20\x6f"
-				  "\x72\x20\x70\x6c\x61\x63\x65\x2c"
-				  "\x20\x77\x68\x69\x63\x68\x20\x61"
-				  "\x72\x65\x20\x61\x64\x64\x72\x65"
-				  "\x73\x73\x65\x64\x20\x74\x6f",
-		.psize		= 407,
-		.digest		= "\xf3\x47\x7e\x7c\xd9\x54\x17\xaf"
-				  "\x89\xa6\xb8\x79\x4c\x31\x0c\xf0",
-	}, { /* Test Vector #4 */
-		.plaintext	= "\x1c\x92\x40\xa5\xeb\x55\xd3\x8a"
-				  "\xf3\x33\x88\x86\x04\xf6\xb5\xf0"
-				  "\x47\x39\x17\xc1\x40\x2b\x80\x09"
-				  "\x9d\xca\x5c\xbc\x20\x70\x75\xc0"
-				  "\x27\x54\x77\x61\x73\x20\x62\x72"
-				  "\x69\x6c\x6c\x69\x67\x2c\x20\x61"
-				  "\x6e\x64\x20\x74\x68\x65\x20\x73"
-				  "\x6c\x69\x74\x68\x79\x20\x74\x6f"
-				  "\x76\x65\x73\x0a\x44\x69\x64\x20"
-				  "\x67\x79\x72\x65\x20\x61\x6e\x64"
-				  "\x20\x67\x69\x6d\x62\x6c\x65\x20"
-				  "\x69\x6e\x20\x74\x68\x65\x20\x77"
-				  "\x61\x62\x65\x3a\x0a\x41\x6c\x6c"
-				  "\x20\x6d\x69\x6d\x73\x79\x20\x77"
-				  "\x65\x72\x65\x20\x74\x68\x65\x20"
-				  "\x62\x6f\x72\x6f\x67\x6f\x76\x65"
-				  "\x73\x2c\x0a\x41\x6e\x64\x20\x74"
-				  "\x68\x65\x20\x6d\x6f\x6d\x65\x20"
-				  "\x72\x61\x74\x68\x73\x20\x6f\x75"
-				  "\x74\x67\x72\x61\x62\x65\x2e",
-		.psize		= 159,
-		.digest		= "\x45\x41\x66\x9a\x7e\xaa\xee\x61"
-				  "\xe7\x08\xdc\x7c\xbc\xc5\xeb\x62",
-	}, { /* Test Vector #5 */
-		.plaintext	= "\x02\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff",
-		.psize		= 48,
-		.digest		= "\x03\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00",
-	}, { /* Test Vector #6 */
-		.plaintext	= "\x02\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\x02\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00",
-		.psize		= 48,
-		.digest		= "\x03\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00",
-	}, { /* Test Vector #7 */
-		.plaintext	= "\x01\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xf0\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\x11\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00",
-		.psize		= 80,
-		.digest		= "\x05\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00",
-	}, { /* Test Vector #8 */
-		.plaintext	= "\x01\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xfb\xfe\xfe\xfe\xfe\xfe\xfe\xfe"
-				  "\xfe\xfe\xfe\xfe\xfe\xfe\xfe\xfe"
-				  "\x01\x01\x01\x01\x01\x01\x01\x01"
-				  "\x01\x01\x01\x01\x01\x01\x01\x01",
-		.psize		= 80,
-		.digest		= "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00",
-	}, { /* Test Vector #9 */
-		.plaintext	= "\x02\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\xfd\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff",
-		.psize		= 48,
-		.digest		= "\xfa\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff",
-	}, { /* Test Vector #10 */
-		.plaintext	= "\x01\x00\x00\x00\x00\x00\x00\x00"
-				  "\x04\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\xe3\x35\x94\xd7\x50\x5e\x43\xb9"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x33\x94\xd7\x50\x5e\x43\x79\xcd"
-				  "\x01\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x01\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00",
-		.psize		= 96,
-		.digest		= "\x14\x00\x00\x00\x00\x00\x00\x00"
-				  "\x55\x00\x00\x00\x00\x00\x00\x00",
-	}, { /* Test Vector #11 */
-		.plaintext	= "\x01\x00\x00\x00\x00\x00\x00\x00"
-				  "\x04\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\xe3\x35\x94\xd7\x50\x5e\x43\xb9"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x33\x94\xd7\x50\x5e\x43\x79\xcd"
-				  "\x01\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00",
-		.psize		= 80,
-		.digest		= "\x13\x00\x00\x00\x00\x00\x00\x00"
-				  "\x00\x00\x00\x00\x00\x00\x00\x00",
-	}, { /* Regression test for overflow in AVX2 implementation */
-		.plaintext	= "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff\xff\xff\xff\xff"
-				  "\xff\xff\xff\xff",
-		.psize		= 300,
-		.digest		= "\xfb\x5e\x96\xd8\x61\xd5\xc7\xc8"
-				  "\x78\xe5\x87\xcc\x2d\x5a\x22\xe1",
-	}
 };
 
 /* NHPoly1305 test vectors from https://github.com/google/adiantum */
@@ -23684,42 +22377,6 @@ static const struct aead_testvec aegis128_tv_template[] = {
 };
 
 /*
- * All key wrapping test vectors taken from
- * http://csrc.nist.gov/groups/STM/cavp/documents/mac/kwtestvectors.zip
- *
- * Note: as documented in keywrap.c, the ivout for encryption is the first
- * semiblock of the ciphertext from the test vector. For decryption, iv is
- * the first semiblock of the ciphertext.
- */
-static const struct cipher_testvec aes_kw_tv_template[] = {
-	{
-		.key	= "\x75\x75\xda\x3a\x93\x60\x7c\xc2"
-			  "\xbf\xd8\xce\xc7\xaa\xdf\xd9\xa6",
-		.klen	= 16,
-		.ptext	= "\x42\x13\x6d\x3c\x38\x4a\x3e\xea"
-			  "\xc9\x5a\x06\x6f\xd2\x8f\xed\x3f",
-		.ctext	= "\xf6\x85\x94\x81\x6f\x64\xca\xa3"
-			  "\xf5\x6f\xab\xea\x25\x48\xf5\xfb",
-		.len	= 16,
-		.iv_out	= "\x03\x1f\x6b\xd7\xe6\x1e\x64\x3d",
-		.generates_iv = true,
-	}, {
-		.key	= "\x80\xaa\x99\x73\x27\xa4\x80\x6b"
-			  "\x6a\x7a\x41\xa5\x2b\x86\xc3\x71"
-			  "\x03\x86\xf9\x32\x78\x6e\xf7\x96"
-			  "\x76\xfa\xfb\x90\xb8\x26\x3c\x5f",
-		.klen	= 32,
-		.ptext	= "\x0a\x25\x6b\xa7\x5c\xfa\x03\xaa"
-			  "\xa0\x2b\xa9\x42\x03\xf1\x5b\xaa",
-		.ctext	= "\xd3\x3d\x3d\x97\x7b\xf0\xa9\x15"
-			  "\x59\xf9\x9c\x8a\xcd\x29\x3d\x43",
-		.len	= 16,
-		.iv_out	= "\x42\x3c\x96\x0d\x8a\x2a\xc4\xc1",
-		.generates_iv = true,
-	},
-};
-
-/*
  * ANSI X9.31 Continuous Pseudo-Random Number Generator (AES mode)
  * test vectors, taken from Appendix B.2.9 and B.2.10:
  *     http://csrc.nist.gov/groups/STM/cavp/documents/rng/RNGVS.pdf
@@ -38419,6 +37076,357 @@ static const struct cipher_testvec aes_hctr2_tv_template[] = {
 		.len	= 512,
 	},
 
+};
+
+#ifdef __LITTLE_ENDIAN
+#define AUTHENC_KEY_HEADER(enckeylen) \
+	"\x08\x00\x01\x00"	/* LE rtattr */ \
+	enckeylen		/* crypto_authenc_key_param */
+#else
+#define AUTHENC_KEY_HEADER(enckeylen) \
+	"\x00\x08\x00\x01"	/* BE rtattr */ \
+	enckeylen		/* crypto_authenc_key_param */
+#endif
+
+static const struct aead_testvec krb5_test_aes128_cts_hmac_sha256_128[] = {
+	/* rfc8009 Appendix A */
+	{
+		/* "enc no plain" */
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x10")
+		"\x9F\xDA\x0E\x56\xAB\x2D\x85\xE1\x56\x9A\x68\x86\x96\xC2\x6A\x6C" // Ki
+		"\x9B\x19\x7D\xD1\xE8\xC5\x60\x9D\x6E\x67\xC3\xE3\x7C\x62\xC7\x2E", // Ke
+		.klen	= 4 + 4 + 16 + 16,
+		.ptext	=
+		"\x7E\x58\x95\xEA\xF2\x67\x24\x35\xBA\xD8\x17\xF5\x45\xA3\x71\x48" // Confounder
+		"", // Plain
+		.plen	= 16 + 0,
+		.ctext	=
+		"\xEF\x85\xFB\x89\x0B\xB8\x47\x2F\x4D\xAB\x20\x39\x4D\xCA\x78\x1D"
+		"\xAD\x87\x7E\xDA\x39\xD5\x0C\x87\x0C\x0D\x5A\x0A\x8E\x48\xC7\x18",
+		.clen	= 16 + 0 + 16,
+		.assoc	= "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", // IV
+		.alen	= 16,
+	}, {
+		/* "enc plain<block" */
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x10")
+		"\x9F\xDA\x0E\x56\xAB\x2D\x85\xE1\x56\x9A\x68\x86\x96\xC2\x6A\x6C" // Ki
+		"\x9B\x19\x7D\xD1\xE8\xC5\x60\x9D\x6E\x67\xC3\xE3\x7C\x62\xC7\x2E", // Ke
+		.klen	= 4 + 4 + 16 + 16,
+		.ptext	=
+		"\x7B\xCA\x28\x5E\x2F\xD4\x13\x0F\xB5\x5B\x1A\x5C\x83\xBC\x5B\x24" // Confounder
+		"\x00\x01\x02\x03\x04\x05", // Plain
+		.plen	= 16 + 6,
+		.ctext	=
+		"\x84\xD7\xF3\x07\x54\xED\x98\x7B\xAB\x0B\xF3\x50\x6B\xEB\x09\xCF"
+		"\xB5\x54\x02\xCE\xF7\xE6\x87\x7C\xE9\x9E\x24\x7E\x52\xD1\x6E\xD4"
+		"\x42\x1D\xFD\xF8\x97\x6C",
+		.clen	= 16 + 6 + 16,
+		.assoc	= "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", // IV
+		.alen	= 16,
+	}, {
+		/* "enc plain==block" */
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x10")
+		"\x9F\xDA\x0E\x56\xAB\x2D\x85\xE1\x56\x9A\x68\x86\x96\xC2\x6A\x6C" // Ki
+		"\x9B\x19\x7D\xD1\xE8\xC5\x60\x9D\x6E\x67\xC3\xE3\x7C\x62\xC7\x2E", // Ke
+		.klen	= 4 + 4 + 16 + 16,
+		.ptext	=
+		"\x56\xAB\x21\x71\x3F\xF6\x2C\x0A\x14\x57\x20\x0F\x6F\xA9\x94\x8F" // Confounder
+		"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F", // Plain
+		.plen	= 16 + 16,
+		.ctext	=
+		"\x35\x17\xD6\x40\xF5\x0D\xDC\x8A\xD3\x62\x87\x22\xB3\x56\x9D\x2A"
+		"\xE0\x74\x93\xFA\x82\x63\x25\x40\x80\xEA\x65\xC1\x00\x8E\x8F\xC2"
+		"\x95\xFB\x48\x52\xE7\xD8\x3E\x1E\x7C\x48\xC3\x7E\xEB\xE6\xB0\xD3",
+		.clen	= 16 + 16 + 16,
+		.assoc	= "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", // IV
+		.alen	= 16,
+	}, {
+		/* "enc plain>block" */
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x10")
+		"\x9F\xDA\x0E\x56\xAB\x2D\x85\xE1\x56\x9A\x68\x86\x96\xC2\x6A\x6C" // Ki
+		"\x9B\x19\x7D\xD1\xE8\xC5\x60\x9D\x6E\x67\xC3\xE3\x7C\x62\xC7\x2E", // Ke
+		.klen	= 4 + 4 + 16 + 16,
+		.ptext	=
+		"\xA7\xA4\xE2\x9A\x47\x28\xCE\x10\x66\x4F\xB6\x4E\x49\xAD\x3F\xAC" // Confounder
+		"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F"
+		"\x10\x11\x12\x13\x14", // Plain
+		.plen	= 16 + 21,
+		.ctext	=
+		"\x72\x0F\x73\xB1\x8D\x98\x59\xCD\x6C\xCB\x43\x46\x11\x5C\xD3\x36"
+		"\xC7\x0F\x58\xED\xC0\xC4\x43\x7C\x55\x73\x54\x4C\x31\xC8\x13\xBC"
+		"\xE1\xE6\xD0\x72\xC1\x86\xB3\x9A\x41\x3C\x2F\x92\xCA\x9B\x83\x34"
+		"\xA2\x87\xFF\xCB\xFC",
+		.clen	= 16 + 21 + 16,
+		.assoc	= "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", // IV
+		.alen	= 16,
+	},
+};
+
+static const struct aead_testvec krb5_test_aes256_cts_hmac_sha384_192[] = {
+	/* rfc8009 Appendix A */
+	{
+		/* "enc no plain" */
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x20")
+		"\x69\xB1\x65\x14\xE3\xCD\x8E\x56\xB8\x20\x10\xD5\xC7\x30\x12\xB6"
+		"\x22\xC4\xD0\x0F\xFC\x23\xED\x1F" // Ki
+		"\x56\xAB\x22\xBE\xE6\x3D\x82\xD7\xBC\x52\x27\xF6\x77\x3F\x8E\xA7"
+		"\xA5\xEB\x1C\x82\x51\x60\xC3\x83\x12\x98\x0C\x44\x2E\x5C\x7E\x49", // Ke
+		.klen	= 4 + 4 + 32 + 24,
+		.ptext	=
+		"\xF7\x64\xE9\xFA\x15\xC2\x76\x47\x8B\x2C\x7D\x0C\x4E\x5F\x58\xE4" // Confounder
+		"", // Plain
+		.plen	= 16 + 0,
+		.ctext	=
+		"\x41\xF5\x3F\xA5\xBF\xE7\x02\x6D\x91\xFA\xF9\xBE\x95\x91\x95\xA0"
+		"\x58\x70\x72\x73\xA9\x6A\x40\xF0\xA0\x19\x60\x62\x1A\xC6\x12\x74"
+		"\x8B\x9B\xBF\xBE\x7E\xB4\xCE\x3C",
+		.clen	= 16 + 0 + 24,
+		.assoc	= "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", // IV
+		.alen	= 16,
+	}, {
+		/* "enc plain<block" */
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x20")
+		"\x69\xB1\x65\x14\xE3\xCD\x8E\x56\xB8\x20\x10\xD5\xC7\x30\x12\xB6"
+		"\x22\xC4\xD0\x0F\xFC\x23\xED\x1F" // Ki
+		"\x56\xAB\x22\xBE\xE6\x3D\x82\xD7\xBC\x52\x27\xF6\x77\x3F\x8E\xA7"
+		"\xA5\xEB\x1C\x82\x51\x60\xC3\x83\x12\x98\x0C\x44\x2E\x5C\x7E\x49", // Ke
+		.klen	= 4 + 4 + 32 + 24,
+		.ptext	=
+		"\xB8\x0D\x32\x51\xC1\xF6\x47\x14\x94\x25\x6F\xFE\x71\x2D\x0B\x9A" // Confounder
+		"\x00\x01\x02\x03\x04\x05", // Plain
+		.plen	= 16 + 6,
+		.ctext	=
+		"\x4E\xD7\xB3\x7C\x2B\xCA\xC8\xF7\x4F\x23\xC1\xCF\x07\xE6\x2B\xC7"
+		"\xB7\x5F\xB3\xF6\x37\xB9\xF5\x59\xC7\xF6\x64\xF6\x9E\xAB\x7B\x60"
+		"\x92\x23\x75\x26\xEA\x0D\x1F\x61\xCB\x20\xD6\x9D\x10\xF2",
+		.clen	= 16 + 6 + 24,
+		.assoc	= "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", // IV
+		.alen	= 16,
+	}, {
+		/* "enc plain==block" */
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x20")
+		"\x69\xB1\x65\x14\xE3\xCD\x8E\x56\xB8\x20\x10\xD5\xC7\x30\x12\xB6"
+		"\x22\xC4\xD0\x0F\xFC\x23\xED\x1F" // Ki
+		"\x56\xAB\x22\xBE\xE6\x3D\x82\xD7\xBC\x52\x27\xF6\x77\x3F\x8E\xA7"
+		"\xA5\xEB\x1C\x82\x51\x60\xC3\x83\x12\x98\x0C\x44\x2E\x5C\x7E\x49", // Ke
+		.klen	= 4 + 4 + 32 + 24,
+		.ptext	=
+		"\x53\xBF\x8A\x0D\x10\x52\x65\xD4\xE2\x76\x42\x86\x24\xCE\x5E\x63" // Confounder
+		"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F", // Plain
+		.plen	= 16 + 16,
+		.ctext	=
+		"\xBC\x47\xFF\xEC\x79\x98\xEB\x91\xE8\x11\x5C\xF8\xD1\x9D\xAC\x4B"
+		"\xBB\xE2\xE1\x63\xE8\x7D\xD3\x7F\x49\xBE\xCA\x92\x02\x77\x64\xF6"
+		"\x8C\xF5\x1F\x14\xD7\x98\xC2\x27\x3F\x35\xDF\x57\x4D\x1F\x93\x2E"
+		"\x40\xC4\xFF\x25\x5B\x36\xA2\x66",
+		.clen	= 16 + 16 + 24,
+		.assoc	= "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", // IV
+		.alen	= 16,
+	}, {
+		/* "enc plain>block" */
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x20")
+		"\x69\xB1\x65\x14\xE3\xCD\x8E\x56\xB8\x20\x10\xD5\xC7\x30\x12\xB6"
+		"\x22\xC4\xD0\x0F\xFC\x23\xED\x1F" // Ki
+		"\x56\xAB\x22\xBE\xE6\x3D\x82\xD7\xBC\x52\x27\xF6\x77\x3F\x8E\xA7"
+		"\xA5\xEB\x1C\x82\x51\x60\xC3\x83\x12\x98\x0C\x44\x2E\x5C\x7E\x49", // Ke
+		.klen	= 4 + 4 + 32 + 24,
+		.ptext	=
+		"\x76\x3E\x65\x36\x7E\x86\x4F\x02\xF5\x51\x53\xC7\xE3\xB5\x8A\xF1" // Confounder
+		"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F"
+		"\x10\x11\x12\x13\x14", // Plain
+		.plen	= 16 + 21,
+		.ctext	=
+		"\x40\x01\x3E\x2D\xF5\x8E\x87\x51\x95\x7D\x28\x78\xBC\xD2\xD6\xFE"
+		"\x10\x1C\xCF\xD5\x56\xCB\x1E\xAE\x79\xDB\x3C\x3E\xE8\x64\x29\xF2"
+		"\xB2\xA6\x02\xAC\x86\xFE\xF6\xEC\xB6\x47\xD6\x29\x5F\xAE\x07\x7A"
+		"\x1F\xEB\x51\x75\x08\xD2\xC1\x6B\x41\x92\xE0\x1F\x62",
+		.clen	= 16 + 21 + 24,
+		.assoc	= "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", // IV
+		.alen	= 16,
+	},
+};
+
+static const struct aead_testvec krb5_test_camellia_cts_cmac[] = {
+	/* rfc6803 sec 10 */
+	{
+		// "enc no plain"
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x10")
+		"\x45\xeb\x66\xe2\xef\xa8\x77\x8f\x7d\xf1\x46\x54\x53\x05\x98\x06" // Ki
+		"\xe9\x9b\x82\xb3\x6c\x4a\xe8\xea\x19\xe9\x5d\xfa\x9e\xde\x88\x2c", // Ke
+		.klen	= 4 + 4 + 16 * 2,
+		.ptext	=
+		"\xB6\x98\x22\xA1\x9A\x6B\x09\xC0\xEB\xC8\x55\x7D\x1F\x1B\x6C\x0A" // Confounder
+		"", // Plain
+		.plen	= 16 + 0,
+		.ctext	=
+		"\xC4\x66\xF1\x87\x10\x69\x92\x1E\xDB\x7C\x6F\xDE\x24\x4A\x52\xDB"
+		"\x0B\xA1\x0E\xDC\x19\x7B\xDB\x80\x06\x65\x8C\xA3\xCC\xCE\x6E\xB8",
+		.clen	= 16 + 0 + 16,
+	}, {
+		// "enc 1 plain",
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x10")
+		"\x13\x5f\xe7\x11\x6f\x53\xc2\xaa\x36\x12\xb7\xea\xe0\xf2\x84\xaa" // Ki
+		"\xa7\xed\xcd\x53\x97\xea\x6d\x12\xb0\xaf\xf4\xcb\x8d\xaa\x57\xad", // Ke
+		.klen	= 4 + 4 + 16 * 2,
+		.ptext	=
+		"\x6F\x2F\xC3\xC2\xA1\x66\xFD\x88\x98\x96\x7A\x83\xDE\x95\x96\xD9" // Confounder
+		"1", // Plain
+		.plen	= 16 + 1,
+		.ctext	=
+		"\x84\x2D\x21\xFD\x95\x03\x11\xC0\xDD\x46\x4A\x3F\x4B\xE8\xD6\xDA"
+		"\x88\xA5\x6D\x55\x9C\x9B\x47\xD3\xF9\xA8\x50\x67\xAF\x66\x15\x59"
+		"\xB8",
+		.clen	= 16 + 1 + 16,
+	}, {
+		// "enc 9 plain",
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x10")
+		"\x10\x2c\x34\xd0\x75\x74\x9f\x77\x8a\x15\xca\xd1\xe9\x7d\xa9\x86" // Ki
+		"\xdd\xe4\x2e\xca\x7c\xd9\x86\x3f\xc3\xce\x89\xcb\xc9\x43\x62\xd7", // Ke
+		.klen	= 4 + 4 + 16 * 2,
+		.ptext	=
+		"\xA5\xB4\xA7\x1E\x07\x7A\xEE\xF9\x3C\x87\x63\xC1\x8F\xDB\x1F\x10" // Confounder
+		"9 bytesss", // Plain
+		.plen	= 16 + 9,
+		.ctext	=
+		"\x61\x9F\xF0\x72\xE3\x62\x86\xFF\x0A\x28\xDE\xB3\xA3\x52\xEC\x0D"
+		"\x0E\xDF\x5C\x51\x60\xD6\x63\xC9\x01\x75\x8C\xCF\x9D\x1E\xD3\x3D"
+		"\x71\xDB\x8F\x23\xAA\xBF\x83\x48\xA0",
+		.clen	= 16 + 9 + 16,
+	}, {
+		// "enc 13 plain",
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x10")
+		"\xb8\xc4\x38\xcc\x1a\x00\x60\xfc\x91\x3a\x8e\x07\x16\x96\xbd\x08" // Ki
+		"\xc3\x11\x3a\x25\x85\x90\xb9\xae\xbf\x72\x1b\x1a\xf6\xb0\xcb\xf8", // Ke
+		.klen	= 4 + 4 + 16 * 2,
+		.ptext	=
+		"\x19\xFE\xE4\x0D\x81\x0C\x52\x4B\x5B\x22\xF0\x18\x74\xC6\x93\xDA" // Confounder
+		"13 bytes byte", // Plain
+		.plen	= 16 + 13,
+		.ctext	=
+		"\xB8\xEC\xA3\x16\x7A\xE6\x31\x55\x12\xE5\x9F\x98\xA7\xC5\x00\x20"
+		"\x5E\x5F\x63\xFF\x3B\xB3\x89\xAF\x1C\x41\xA2\x1D\x64\x0D\x86\x15"
+		"\xC9\xED\x3F\xBE\xB0\x5A\xB6\xAC\xB6\x76\x89\xB5\xEA",
+		.clen	= 16 + 13 + 16,
+	}, {
+		// "enc 30 plain",
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x10")
+		"\x18\xaf\x19\xb0\x23\x74\x44\xfd\x75\x04\xad\x7d\xbd\x48\xad\xd3" // Ki
+		"\x8b\x07\xee\xd3\x01\x49\x91\x6a\xa2\x0d\xb3\xf5\xce\xd8\xaf\xad", // Ke
+		.klen	= 4 + 4 + 16 * 2,
+		.ptext	=
+		"\xCA\x7A\x7A\xB4\xBE\x19\x2D\xAB\xD6\x03\x50\x6D\xB1\x9C\x39\xE2" // Confounder
+		"30 bytes bytes bytes bytes byt", // Plain
+		.plen	= 16 + 30,
+		.ctext	=
+		"\xA2\x6A\x39\x05\xA4\xFF\xD5\x81\x6B\x7B\x1E\x27\x38\x0D\x08\x09"
+		"\x0C\x8E\xC1\xF3\x04\x49\x6E\x1A\xBD\xCD\x2B\xDC\xD1\xDF\xFC\x66"
+		"\x09\x89\xE1\x17\xA7\x13\xDD\xBB\x57\xA4\x14\x6C\x15\x87\xCB\xA4"
+		"\x35\x66\x65\x59\x1D\x22\x40\x28\x2F\x58\x42\xB1\x05\xA5",
+		.clen	= 16 + 30 + 16,
+	}, {
+		// "enc no plain",
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x20")
+		"\xa2\xb8\x33\xe9\x43\xbb\x10\xee\x53\xb4\xa1\x9b\xc2\xbb\xc7\xe1"
+		"\x9b\x87\xad\x5d\xe9\x21\x22\xa4\x33\x8b\xe6\xf7\x32\xfd\x8a\x0e" // Ki
+		"\x6c\xcb\x3f\x25\xd8\xae\x57\xf4\xe8\xf6\xca\x47\x4b\xdd\xef\xf1"
+		"\x16\xce\x13\x1b\x3f\x71\x01\x2e\x75\x6d\x6b\x1e\x3f\x70\xa7\xf1", // Ke
+		.klen	= 4 + 4 + 32 * 2,
+		.ptext	=
+		"\x3C\xBB\xD2\xB4\x59\x17\x94\x10\x67\xF9\x65\x99\xBB\x98\x92\x6C" // Confounder
+		"", // Plain
+		.plen	= 16 + 0,
+		.ctext	=
+		"\x03\x88\x6D\x03\x31\x0B\x47\xA6\xD8\xF0\x6D\x7B\x94\xD1\xDD\x83"
+		"\x7E\xCC\xE3\x15\xEF\x65\x2A\xFF\x62\x08\x59\xD9\x4A\x25\x92\x66",
+		.clen	= 16 + 0 + 16,
+	}, {
+		// "enc 1 plain",
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x20")
+		"\x84\x61\x4b\xfa\x98\xf1\x74\x8a\xa4\xaf\x99\x2b\x8c\x26\x28\x0d"
+		"\xc8\x98\x73\x29\xdf\x77\x5c\x1d\xb0\x4a\x43\xf1\x21\xaa\x86\x65" // Ki
+		"\xe9\x31\x73\xaa\x01\xeb\x3c\x24\x62\x31\xda\xfc\x78\x02\xee\x32"
+		"\xaf\x24\x85\x1d\x8c\x73\x87\xd1\x8c\xb9\xb2\xc5\xb7\xf5\x70\xb8", // Ke
+		.klen	= 4 + 4 + 32 * 2,
+		.ptext	=
+		"\xDE\xF4\x87\xFC\xEB\xE6\xDE\x63\x46\xD4\xDA\x45\x21\xBB\xA2\xD2" // Confounder
+		"1", // Plain
+		.plen	= 16 + 1,
+		.ctext	=
+		"\x2C\x9C\x15\x70\x13\x3C\x99\xBF\x6A\x34\xBC\x1B\x02\x12\x00\x2F"
+		"\xD1\x94\x33\x87\x49\xDB\x41\x35\x49\x7A\x34\x7C\xFC\xD9\xD1\x8A"
+		"\x12",
+		.clen	= 16 + 1 + 16,
+	}, {
+		// "enc 9 plain",
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x20")
+		"\x47\xb9\xf5\xba\xd7\x63\x00\x58\x2a\x54\x45\xfa\x0c\x1b\x29\xc3"
+		"\xaa\x83\xec\x63\xb9\x0b\x4a\xb0\x08\x48\xc1\x85\x67\x4f\x44\xa7" // Ki
+		"\xcd\xa2\xd3\x9a\x9b\x24\x3f\xfe\xb5\x6e\x8d\x5f\x4b\xd5\x28\x74"
+		"\x1e\xcb\x52\x0c\x62\x12\x3f\xb0\x40\xb8\x41\x8b\x15\xc7\xd7\x0c", // Ke
+		.klen	= 4 + 4 + 32 * 2,
+		.ptext	=
+		"\xAD\x4F\xF9\x04\xD3\x4E\x55\x53\x84\xB1\x41\x00\xFC\x46\x5F\x88" // Confounder
+		"9 bytesss", // Plain
+		.plen	= 16 + 9,
+		.ctext	=
+		"\x9C\x6D\xE7\x5F\x81\x2D\xE7\xED\x0D\x28\xB2\x96\x35\x57\xA1\x15"
+		"\x64\x09\x98\x27\x5B\x0A\xF5\x15\x27\x09\x91\x3F\xF5\x2A\x2A\x9C"
+		"\x8E\x63\xB8\x72\xF9\x2E\x64\xC8\x39",
+		.clen	= 16 + 9 + 16,
+	}, {
+		// "enc 13 plain",
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x20")
+		"\x15\x2f\x8c\x9d\xc9\x85\x79\x6e\xb1\x94\xed\x14\xc5\x9e\xac\xdd"
+		"\x41\x8a\x33\x32\x36\xb7\x8f\xaf\xa7\xc7\x9b\x04\xe0\xac\xe7\xbf" // Ki
+		"\xcd\x8a\x10\xe2\x79\xda\xdd\xb6\x90\x1e\xc3\x0b\xdf\x98\x73\x25"
+		"\x0f\x6e\xfc\x6a\x77\x36\x7d\x74\xdc\x3e\xe7\xf7\x4b\xc7\x77\x4e", // Ke
+		.klen	= 4 + 4 + 32 * 2,
+		.ptext	=
+		"\xCF\x9B\xCA\x6D\xF1\x14\x4E\x0C\x0A\xF9\xB8\xF3\x4C\x90\xD5\x14" // Confounder
+		"13 bytes byte",
+		.plen	= 16 + 13,
+		.ctext	=
+		"\xEE\xEC\x85\xA9\x81\x3C\xDC\x53\x67\x72\xAB\x9B\x42\xDE\xFC\x57"
+		"\x06\xF7\x26\xE9\x75\xDD\xE0\x5A\x87\xEB\x54\x06\xEA\x32\x4C\xA1"
+		"\x85\xC9\x98\x6B\x42\xAA\xBE\x79\x4B\x84\x82\x1B\xEE",
+		.clen	= 16 + 13 + 16,
+	}, {
+		// "enc 30 plain",
+		.key	=
+		AUTHENC_KEY_HEADER("\x00\x00\x00\x20")
+		"\x04\x8d\xeb\xf7\xb1\x2c\x09\x32\xe8\xb2\x96\x99\x6c\x23\xf8\xb7"
+		"\x9d\x59\xb9\x7e\xa1\x19\xfc\x0c\x15\x6b\xf7\x88\xdc\x8c\x85\xe8" // Ki
+		"\x1d\x51\x47\xf3\x4b\xb0\x01\xa0\x4a\x68\xa7\x13\x46\xe7\x65\x4e"
+		"\x02\x23\xa6\x0d\x90\xbc\x2b\x79\xb4\xd8\x79\x56\xd4\x7c\xd4\x2a", // Ke
+		.klen	= 4 + 4 + 32 * 2,
+		.ptext	=
+		"\x64\x4D\xEF\x38\xDA\x35\x00\x72\x75\x87\x8D\x21\x68\x55\xE2\x28" // Confounder
+		"30 bytes bytes bytes bytes byt", // Plain
+		.plen	= 16 + 30,
+		.ctext	=
+		"\x0E\x44\x68\x09\x85\x85\x5F\x2D\x1F\x18\x12\x52\x9C\xA8\x3B\xFD"
+		"\x8E\x34\x9D\xE6\xFD\x9A\xDA\x0B\xAA\xA0\x48\xD6\x8E\x26\x5F\xEB"
+		"\xF3\x4A\xD1\x25\x5A\x34\x49\x99\xAD\x37\x14\x68\x87\xA6\xC6\x84"
+		"\x57\x31\xAC\x7F\x46\x37\x6A\x05\x04\xCD\x06\x57\x14\x74",
+		.clen	= 16 + 30 + 16,
+	},
 };
 
 #endif	/* _CRYPTO_TESTMGR_H */

@@ -26,24 +26,28 @@ struct opts {
 	bool uaccess;
 	int prefix;
 	bool cfi;
+	bool noabs;
 
 	/* options: */
 	bool backtrace;
-	bool backup;
 	bool dryrun;
 	bool link;
 	bool mnop;
 	bool module;
 	bool no_unreachable;
+	const char *output;
 	bool sec_address;
 	bool stats;
 	bool verbose;
+	bool werror;
 };
 
 extern struct opts opts;
 
-extern int cmd_parse_options(int argc, const char **argv, const char * const usage[]);
+int cmd_parse_options(int argc, const char **argv, const char * const usage[]);
 
-extern int objtool_run(int argc, const char **argv);
+int objtool_run(int argc, const char **argv);
+
+void print_args(void);
 
 #endif /* _BUILTIN_H */

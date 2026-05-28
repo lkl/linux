@@ -1,27 +1,30 @@
-.test-rules:
-  rules:
-    - if: '$FD_FARM == "offline" && $RUNNER_TAG =~ /^google-freedreno-/'
-      when: never
-    - if: '$COLLABORA_FARM == "offline" && $RUNNER_TAG =~ /^mesa-ci-x86-64-lava-/'
-      when: never
-    - !reference [.no_scheduled_pipelines-rules, rules]
-    - when: on_success
+.allow_failure_lockdep:
+  variables:
+    FF_USE_NEW_BASH_EVAL_STRATEGY: 'true'
+  allow_failure:
+    exit_codes:
+      - 101
 
 .lava-test:
   extends:
-    - .test-rules
+    - .container+build-rules
+    - .allow_failure_lockdep
   timeout: "1h30m"
+  rules:
+    - !reference [.scheduled_pipeline-rules, rules]
+    - !reference [.collabora-farm-rules, rules]
+    - when: on_success
   script:
     # Note: Build dir (and thus install) may be dirty due to GIT_STRATEGY
     - rm -rf install
     - tar -xf artifacts/install.tar
-    - mv install/* artifacts/.
+    - mv -n install/* artifacts/.
     # Override it with our lava-submit.sh script
     - ./artifacts/lava-submit.sh
 
 .lava-igt:arm32:
   extends:
-    - .lava-test:arm32
+    - .lava-arm32-test-gl
   variables:
     HWCI_TEST_SCRIPT: "/install/igt_runner.sh"
     DEBIAN_ARCH: "armhf"
@@ -30,14 +33,14 @@
     - testing:arm32
   needs:
     - alpine/x86_64_lava_ssh_client
-    - kernel+rootfs_arm32
-    - debian/x86_64_build
+    - debian/arm32_test-gl
+    - python-artifacts
     - testing:arm32
     - igt:arm32
 
 .lava-igt:arm64:
   extends:
-    - .lava-test:arm64
+    - .lava-arm64-test-gl
   variables:
     HWCI_TEST_SCRIPT: "/install/igt_runner.sh"
     DEBIAN_ARCH: "arm64"
@@ -46,14 +49,14 @@
     - testing:arm64
   needs:
     - alpine/x86_64_lava_ssh_client
-    - kernel+rootfs_arm64
-    - debian/x86_64_build
+    - debian/arm64_test-gl
+    - python-artifacts
     - testing:arm64
     - igt:arm64
 
 .lava-igt:x86_64:
   extends:
-    - .lava-test:x86_64
+    - .lava-x86_64-test-gl
   variables:
     HWCI_TEST_SCRIPT: "/install/igt_runner.sh"
     DEBIAN_ARCH: "amd64"
@@ -62,17 +65,21 @@
     - testing:x86_64
   needs:
     - alpine/x86_64_lava_ssh_client
-    - kernel+rootfs_x86_64
-    - debian/x86_64_build
+    - debian/x86_64_test-gl
+    - python-artifacts
     - testing:x86_64
     - igt:x86_64
 
 .baremetal-igt-arm64:
   extends:
-    - .baremetal-test-arm64
-    - .use-debian/baremetal_arm64_test
-    - .test-rules
+    - .baremetal-test-arm64-gl
+    - .use-debian/baremetal_arm64_test-gl
+    - .allow_failure_lockdep
   timeout: "1h30m"
+  rules:
+    - !reference [.scheduled_pipeline-rules, rules]
+    - !reference [.google-freedreno-farm-rules, rules]
+    - when: on_success
   variables:
     FDO_CI_CONCURRENT: 10
     HWCI_TEST_SCRIPT: "/install/igt_runner.sh"
@@ -81,12 +88,36 @@
     BM_CMDLINE: "ip=dhcp console=ttyMSM0,115200n8 $BM_KERNEL_EXTRA_ARGS root=/dev/nfs rw nfsrootdebug nfsroot=,tcp,nfsvers=4.2 init=/init $BM_KERNELARGS"
     FARM: google
   needs:
-    - debian/baremetal_arm64_test
+    - debian/baremetal_arm64_test-gl
     - job: testing:arm64
       artifacts: false
     - igt:arm64
   tags:
     - $RUNNER_TAG
+
+.software-driver:
+  stage: software-driver
+  extends:
+    - .test-gl
+    - .allow_failure_lockdep
+  timeout: "1h30m"
+  rules:
+    - !reference [.scheduled_pipeline-rules, rules]
+    - when: on_success
+  tags:
+    - $FDO_RUNNER_JOB_PRIORITY_TAG_X86_64_KVM
+  before_script:
+    - !reference [default, before_script]
+    - rm -rf install
+    - tar -xf artifacts/install.tar
+  script:
+    - ln -sf $CI_PROJECT_DIR/install /install
+    - mv install/bzImage /kernel/bzImage
+    - install/crosvm-runner.sh install/igt_runner.sh
+  needs:
+    - debian/x86_64_test-gl
+    - testing:x86_64
+    - igt:x86_64
 
 .msm-sc7180:
   extends:
@@ -132,7 +163,7 @@ msm:apq8016:
     BM_KERNEL_EXTRA_ARGS: clk_ignore_unused
     RUNNER_TAG: google-freedreno-db410c
   script:
-    - ./install/bare-metal/fastboot.sh
+    - ./install/bare-metal/fastboot.sh || exit $?
 
 msm:apq8096:
   extends:
@@ -146,21 +177,23 @@ msm:apq8096:
     GPU_VERSION: apq8096
     RUNNER_TAG: google-freedreno-db820c
   script:
-    - ./install/bare-metal/fastboot.sh
+    - ./install/bare-metal/fastboot.sh || exit $?
 
-msm:sdm845:
+msm:sm8350-hdk:
   extends:
-    - .baremetal-igt-arm64
+    - .lava-igt:arm64
   stage: msm
-  parallel: 6
+  parallel: 4
   variables:
-    DEVICE_TYPE: sdm845-cheza-r3
+    BOOT_METHOD: fastboot
+    DEVICE_TYPE: sm8350-hdk
     DRIVER_NAME: msm
-    BM_KERNEL: https://${PIPELINE_ARTIFACTS_BASE}/arm64/cheza-kernel
-    GPU_VERSION: sdm845
-    RUNNER_TAG: google-freedreno-cheza
-  script:
-    - ./install/bare-metal/cros-servo.sh
+    DTB: ${DEVICE_TYPE}
+    FARM: collabora
+    GPU_VERSION: ${DEVICE_TYPE}
+    KERNEL_IMAGE_NAME: "Image.gz"
+    KERNEL_IMAGE_TYPE: ""
+    RUNNER_TAG: mesa-ci-x86-64-lava-sm8350-hdk
 
 .rockchip-device:
   variables:
@@ -275,7 +308,7 @@ i915:cml:
   variables:
     DEVICE_TYPE: asus-C436FA-Flip-hatch
     GPU_VERSION: cml
-    RUNNER_TAG: mesa-ci-x86-64-lava-asus-C436FA-flip-hatch
+    RUNNER_TAG: mesa-ci-x86-64-lava-asus-C436FA-Flip-hatch
 
 i915:tgl:
   extends:
@@ -285,6 +318,15 @@ i915:tgl:
     DEVICE_TYPE: acer-cp514-2h-1130g7-volteer
     GPU_VERSION: tgl
     RUNNER_TAG: mesa-ci-x86-64-lava-acer-cp514-2h-1130g7-volteer
+
+i915:jsl:
+  extends:
+    - .i915
+  parallel: 4
+  variables:
+    DEVICE_TYPE: acer-cb317-1h-c3z6-dedede
+    GPU_VERSION: jsl
+    RUNNER_TAG: mesa-ci-x86-64-lava-acer-cb317-1h-c3z6-dedede
 
 .amdgpu:
   extends:
@@ -414,47 +456,16 @@ panfrost:g12b:
     - .panfrost-gpu
 
 virtio_gpu:none:
-  stage: software-driver
-  timeout: "1h30m"
+  extends:
+    - .software-driver
   variables:
     CROSVM_GALLIUM_DRIVER: llvmpipe
     DRIVER_NAME: virtio_gpu
     GPU_VERSION: none
-  extends:
-    - .test-gl
-    - .test-rules
-  tags:
-    - kvm
-  script:
-    - ln -sf $CI_PROJECT_DIR/install /install
-    - mv install/bzImage /lava-files/bzImage
-    - mkdir -p $CI_PROJECT_DIR/results
-    - ln -sf $CI_PROJECT_DIR/results /results
-    - install/crosvm-runner.sh install/igt_runner.sh
-  needs:
-    - debian/x86_64_test-gl
-    - testing:x86_64
-    - igt:x86_64
 
 vkms:none:
-  stage: software-driver
-  timeout: "1h30m"
+  extends:
+    - .software-driver
   variables:
     DRIVER_NAME: vkms
     GPU_VERSION: none
-  extends:
-    - .test-gl
-    - .test-rules
-  tags:
-    - kvm
-  script:
-    - ln -sf $CI_PROJECT_DIR/install /install
-    - mv install/bzImage /lava-files/bzImage
-    - mkdir -p /lib/modules
-    - mkdir -p $CI_PROJECT_DIR/results
-    - ln -sf $CI_PROJECT_DIR/results /results
-    - ./install/crosvm-runner.sh ./install/igt_runner.sh
-  needs:
-    - debian/x86_64_test-gl
-    - testing:x86_64
-    - igt:x86_64

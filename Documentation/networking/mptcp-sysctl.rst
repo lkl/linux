@@ -8,9 +8,13 @@ MPTCP Sysfs variables
 ===============================
 
 add_addr_timeout - INTEGER (seconds)
-	Set the timeout after which an ADD_ADDR control message will be
-	resent to an MPTCP peer that has not acknowledged a previous
-	ADD_ADDR message.
+	Set the maximum value of timeout after which an ADD_ADDR control message
+	will be resent to an MPTCP peer that has not acknowledged a previous
+	ADD_ADDR message. A dynamically estimated retransmission timeout based
+	on the estimated connection round-trip-time is used if this value is
+	lower than the maximum one.
+
+	Do not retransmit if set to 0.
 
 	The default value matches TCP_RTO_MAX. This is a per-namespace
 	sysctl.
@@ -30,6 +34,10 @@ allow_join_initial_addr_port - BOOLEAN
 
 	Default: 1
 
+available_path_managers - STRING
+	Shows the available path managers choices that are registered. More
+	path managers may be available, but not loaded.
+
 available_schedulers - STRING
 	Shows the available schedulers choices that are registered. More packet
 	schedulers may be available, but not loaded.
@@ -41,7 +49,7 @@ blackhole_timeout - INTEGER (seconds)
 	MPTCP is re-enabled and will reset to the initial value when the
 	blackhole issue goes away.
 
-	0 to disable the blackhole detection.
+	0 to disable the blackhole detection. This is a per-namespace sysctl.
 
 	Default: 3600
 
@@ -72,6 +80,23 @@ enabled - BOOLEAN
 
 	Default: 1 (enabled)
 
+path_manager - STRING
+	Set the default path manager name to use for each new MPTCP
+	socket. In-kernel path management will control subflow
+	connections and address advertisements according to
+	per-namespace values configured over the MPTCP netlink
+	API. Userspace path management puts per-MPTCP-connection subflow
+	connection decisions and address advertisements under control of
+	a privileged userspace program, at the cost of more netlink
+	traffic to propagate all of the related events and commands.
+
+	This is a per-namespace sysctl.
+
+	* "kernel"          - In-kernel path manager
+	* "userspace"       - Userspace path manager
+
+	Default: "kernel"
+
 pm_type - INTEGER
 	Set the default path manager type to use for each new MPTCP
 	socket. In-kernel path management will control subflow
@@ -83,6 +108,8 @@ pm_type - INTEGER
 	traffic to propagate all of the related events and commands.
 
 	This is a per-namespace sysctl.
+
+	Deprecated since v6.15, use path_manager instead.
 
 	* 0 - In-kernel path manager
 	* 1 - Userspace path manager
@@ -108,3 +135,19 @@ stale_loss_cnt - INTEGER
 	This is a per-namespace sysctl.
 
 	Default: 4
+
+syn_retrans_before_tcp_fallback - INTEGER
+	The number of SYN + MP_CAPABLE retransmissions before falling back to
+	TCP, i.e. dropping the MPTCP options. In other words, if all the packets
+	are dropped on the way, there will be:
+
+	* The initial SYN with MPTCP support
+	* This number of SYN retransmitted with MPTCP support
+	* The next SYN retransmissions will be without MPTCP support
+
+	0 means the first retransmission will be done without MPTCP options.
+	>= 128 means that all SYN retransmissions will keep the MPTCP options. A
+	lower number might increase false-positive MPTCP blackholes detections.
+	This is a per-namespace sysctl.
+
+	Default: 2

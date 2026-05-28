@@ -136,7 +136,7 @@ static struct virtqueue *rp_find_vq(struct virtio_device *vdev,
 	size = vring_size(num, rvring->align);
 	memset(addr, 0, size);
 
-	dev_dbg(dev, "vring%d: va %pK qsz %d notifyid %d\n",
+	dev_dbg(dev, "vring%d: va %p qsz %d notifyid %d\n",
 		id, addr, num, rvring->notifyid);
 
 	/*
@@ -593,7 +593,7 @@ static void rproc_virtio_remove(struct platform_device *pdev)
 /* Platform driver */
 static struct platform_driver rproc_virtio_driver = {
 	.probe		= rproc_virtio_probe,
-	.remove_new	= rproc_virtio_remove,
+	.remove		= rproc_virtio_remove,
 	.driver		= {
 		.name	= "rproc-virtio",
 	},

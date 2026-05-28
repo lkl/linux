@@ -245,10 +245,6 @@ SYM_FUNC_ALIAS(__pi_idmap_cpu_replace_ttbr1, idmap_cpu_replace_ttbr1)
  *
  * Called exactly once from stop_machine context by each CPU found during boot.
  */
-	.pushsection	".data", "aw", %progbits
-SYM_DATA(__idmap_kpti_flag, .long 1)
-	.popsection
-
 SYM_TYPED_FUNC_START(idmap_kpti_install_ng_mappings)
 	cpu		.req	w0
 	temp_pte	.req	x0
@@ -273,7 +269,7 @@ SYM_TYPED_FUNC_START(idmap_kpti_install_ng_mappings)
 
 	mov	x5, x3				// preserve temp_pte arg
 	mrs	swapper_ttb, ttbr1_el1
-	adr_l	flag_ptr, __idmap_kpti_flag
+	adr_l	flag_ptr, idmap_kpti_bbml2_flag
 
 	cbnz	cpu, __idmap_kpti_secondary
 
@@ -416,7 +412,25 @@ alternative_else_nop_endif
 __idmap_kpti_secondary:
 	/* Uninstall swapper before surgery begins */
 	__idmap_cpu_set_reserved_ttbr1 x16, x17
+	b scondary_cpu_wait
 
+	.unreq	swapper_ttb
+	.unreq	flag_ptr
+SYM_FUNC_END(idmap_kpti_install_ng_mappings)
+	.popsection
+#endif
+
+	.pushsection ".idmap.text", "a"
+SYM_TYPED_FUNC_START(wait_linear_map_split_to_ptes)
+	/* Must be same registers as in idmap_kpti_install_ng_mappings */
+	swapper_ttb	.req	x3
+	flag_ptr	.req	x4
+
+	mrs     swapper_ttb, ttbr1_el1
+	adr_l   flag_ptr, idmap_kpti_bbml2_flag
+	__idmap_cpu_set_reserved_ttbr1 x16, x17
+
+scondary_cpu_wait:
 	/* Increment the flag to let the boot CPU we're ready */
 1:	ldxr	w16, [flag_ptr]
 	add	w16, w16, #1
@@ -436,9 +450,8 @@ __idmap_kpti_secondary:
 
 	.unreq	swapper_ttb
 	.unreq	flag_ptr
-SYM_FUNC_END(idmap_kpti_install_ng_mappings)
+SYM_FUNC_END(wait_linear_map_split_to_ptes)
 	.popsection
-#endif
 
 /*
  *	__cpu_setup
@@ -454,7 +467,7 @@ SYM_FUNC_START(__cpu_setup)
 	dsb	nsh
 
 	msr	cpacr_el1, xzr			// Reset cpacr_el1
-	mov	x1, #1 << 12			// Reset mdscr_el1 and disable
+	mov	x1, MDSCR_EL1_TDCC		// Reset mdscr_el1 and disable
 	msr	mdscr_el1, x1			// access to the DCC from EL0
 	reset_pmuserenr_el0 x1			// Disable PMU access from EL0
 	reset_amuserenr_el0 x1			// Disable AMU access from EL0
@@ -465,10 +478,12 @@ SYM_FUNC_START(__cpu_setup)
 	 */
 	mair	.req	x17
 	tcr	.req	x16
+	tcr2	.req	x15
 	mov_q	mair, MAIR_EL1_SET
 	mov_q	tcr, TCR_T0SZ(IDMAP_VA_BITS) | TCR_T1SZ(VA_BITS_MIN) | TCR_CACHE_FLAGS | \
 		     TCR_SHARED | TCR_TG_FLAGS | TCR_KASLR_FLAGS | TCR_ASID16 | \
 		     TCR_TBI0 | TCR_A1 | TCR_KASAN_SW_FLAGS | TCR_MTE_FLAGS
+	mov	tcr2, xzr
 
 	tcr_clear_errata_bits tcr, x9, x5
 
@@ -493,9 +508,14 @@ alternative_else_nop_endif
 	 * via capabilities.
 	 */
 	mrs	x9, ID_AA64MMFR1_EL1
-	and	x9, x9, ID_AA64MMFR1_EL1_HAFDBS_MASK
+	ubfx	x9, x9, ID_AA64MMFR1_EL1_HAFDBS_SHIFT, #4
 	cbz	x9, 1f
 	orr	tcr, tcr, #TCR_HA		// hardware Access flag update
+#ifdef CONFIG_ARM64_HAFT
+	cmp	x9, ID_AA64MMFR1_EL1_HAFDBS_HAFT
+	b.lt	1f
+	orr	tcr2, tcr2, TCR2_EL1_HAFT
+#endif /* CONFIG_ARM64_HAFT */
 1:
 #endif	/* CONFIG_ARM64_HW_AFDBM */
 	msr	mair_el1, mair
@@ -505,30 +525,20 @@ alternative_else_nop_endif
 	ubfx	x1, x1, #ID_AA64MMFR3_EL1_S1PIE_SHIFT, #4
 	cbz	x1, .Lskip_indirection
 
-	/*
-	 * The PROT_* macros describing the various memory types may resolve to
-	 * C expressions if they include the PTE_MAYBE_* macros, and so they
-	 * can only be used from C code. The PIE_E* constants below are also
-	 * defined in terms of those macros, but will mask out those
-	 * PTE_MAYBE_* constants, whether they are set or not. So #define them
-	 * as 0x0 here so we can evaluate the PIE_E* constants in asm context.
-	 */
-
-#define PTE_MAYBE_NG		0
-#define PTE_MAYBE_SHARED	0
-
-	mov_q	x0, PIE_E0
+	mov_q	x0, PIE_E0_ASM
 	msr	REG_PIRE0_EL1, x0
-	mov_q	x0, PIE_E1
+	mov_q	x0, PIE_E1_ASM
 	msr	REG_PIR_EL1, x0
 
-#undef PTE_MAYBE_NG
-#undef PTE_MAYBE_SHARED
-
-	mov	x0, TCR2_EL1x_PIE
-	msr	REG_TCR2_EL1, x0
+	orr	tcr2, tcr2, TCR2_EL1_PIE
 
 .Lskip_indirection:
+
+	mrs_s	x1, SYS_ID_AA64MMFR3_EL1
+	ubfx	x1, x1, #ID_AA64MMFR3_EL1_TCRX_SHIFT, #4
+	cbz	x1, 1f
+	msr	REG_TCR2_EL1, tcr2
+1:
 
 	/*
 	 * Prepare SCTLR
@@ -538,4 +548,5 @@ alternative_else_nop_endif
 
 	.unreq	mair
 	.unreq	tcr
+	.unreq	tcr2
 SYM_FUNC_END(__cpu_setup)

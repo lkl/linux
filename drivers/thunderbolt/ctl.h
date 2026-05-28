@@ -54,6 +54,7 @@ struct ctl_pkg {
  * @kref: Reference count
  * @ctl: Pointer to the control channel structure. Only set when the
  *	 request is queued.
+ * @request: Request is stored here
  * @request_size: Size of the request packet (in bytes)
  * @request_type: Type of the request packet
  * @response: Response is stored here
@@ -139,6 +140,5 @@ int tb_cfg_read(struct tb_ctl *ctl, void *buffer, u64 route, u32 port,
 int tb_cfg_write(struct tb_ctl *ctl, const void *buffer, u64 route, u32 port,
 		 enum tb_cfg_space space, u32 offset, u32 length);
 int tb_cfg_get_upstream_port(struct tb_ctl *ctl, u64 route);
-
 
 #endif

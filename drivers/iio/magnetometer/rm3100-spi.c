@@ -32,7 +32,6 @@ static int rm3100_probe(struct spi_device *spi)
 	spi->mode = SPI_MODE_0;
 	/* Data rates cannot exceed 1Mbits. */
 	spi->max_speed_hz = 1000000;
-	spi->bits_per_word = 8;
 	ret = spi_setup(spi);
 	if (ret)
 		return ret;
@@ -62,4 +61,4 @@ module_spi_driver(rm3100_driver);
 MODULE_AUTHOR("Song Qiang <songqiang1304521@gmail.com>");
 MODULE_DESCRIPTION("PNI RM3100 3-axis magnetometer spi driver");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(IIO_RM3100);
+MODULE_IMPORT_NS("IIO_RM3100");

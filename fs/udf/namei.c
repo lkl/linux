@@ -419,8 +419,8 @@ static int udf_mknod(struct mnt_idmap *idmap, struct inode *dir,
 	return udf_add_nondir(dentry, inode);
 }
 
-static int udf_mkdir(struct mnt_idmap *idmap, struct inode *dir,
-		     struct dentry *dentry, umode_t mode)
+static struct dentry *udf_mkdir(struct mnt_idmap *idmap, struct inode *dir,
+				struct dentry *dentry, umode_t mode)
 {
 	struct inode *inode;
 	struct udf_fileident_iter iter;
@@ -430,7 +430,7 @@ static int udf_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 
 	inode = udf_new_inode(dir, S_IFDIR | mode);
 	if (IS_ERR(inode))
-		return PTR_ERR(inode);
+		return ERR_CAST(inode);
 
 	iinfo = UDF_I(inode);
 	inode->i_op = &udf_dir_inode_operations;
@@ -439,7 +439,7 @@ static int udf_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 	if (err) {
 		clear_nlink(inode);
 		discard_new_inode(inode);
-		return err;
+		return ERR_PTR(err);
 	}
 	set_nlink(inode, 2);
 	iter.fi.icb.extLength = cpu_to_le32(inode->i_sb->s_blocksize);
@@ -456,7 +456,7 @@ static int udf_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 	if (err) {
 		clear_nlink(inode);
 		discard_new_inode(inode);
-		return err;
+		return ERR_PTR(err);
 	}
 	iter.fi.icb.extLength = cpu_to_le32(inode->i_sb->s_blocksize);
 	iter.fi.icb.extLocation = cpu_to_lelb(iinfo->i_location);
@@ -471,7 +471,7 @@ static int udf_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 	mark_inode_dirty(dir);
 	d_instantiate_new(dentry, inode);
 
-	return 0;
+	return NULL;
 }
 
 static int empty_dir(struct inode *dir)
@@ -517,7 +517,11 @@ static int udf_rmdir(struct inode *dir, struct dentry *dentry)
 			 inode->i_nlink);
 	clear_nlink(inode);
 	inode->i_size = 0;
-	inode_dec_link_count(dir);
+	if (dir->i_nlink >= 3)
+		inode_dec_link_count(dir);
+	else
+		udf_warn(inode->i_sb, "parent dir link count too low (%u)\n",
+			 dir->i_nlink);
 	udf_add_fid_counter(dir->i_sb, true, -1);
 	inode_set_mtime_to_ts(dir,
 			      inode_set_ctime_to_ts(dir, inode_set_ctime_current(inode)));
@@ -787,8 +791,18 @@ static int udf_rename(struct mnt_idmap *idmap, struct inode *old_dir,
 			retval = -ENOTEMPTY;
 			if (!empty_dir(new_inode))
 				goto out_oiter;
+			retval = -EFSCORRUPTED;
+			if (new_inode->i_nlink != 2)
+				goto out_oiter;
 		}
+		retval = -EFSCORRUPTED;
+		if (old_dir->i_nlink < 3)
+			goto out_oiter;
 		is_dir = true;
+	} else if (new_inode) {
+		retval = -EFSCORRUPTED;
+		if (new_inode->i_nlink < 1)
+			goto out_oiter;
 	}
 	if (is_dir && old_dir != new_dir) {
 		retval = udf_fiiter_find_entry(old_inode, &dotdot_name,

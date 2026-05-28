@@ -131,13 +131,13 @@ static const struct dev_pm_ops fimc_is_i2c_pm_ops = {
 };
 
 static const struct of_device_id fimc_is_i2c_of_match[] = {
-	{ .compatible = FIMC_IS_I2C_COMPATIBLE },
+	{ .compatible = "samsung,exynos4212-i2c-isp" },
 	{ },
 };
 
 static struct platform_driver fimc_is_i2c_driver = {
 	.probe		= fimc_is_i2c_probe,
-	.remove_new	= fimc_is_i2c_remove,
+	.remove		= fimc_is_i2c_remove,
 	.driver = {
 		.of_match_table = fimc_is_i2c_of_match,
 		.name		= "fimc-isp-i2c",

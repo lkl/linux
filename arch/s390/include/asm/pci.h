@@ -11,6 +11,9 @@
 #include <asm/pci_insn.h>
 #include <asm/sclp.h>
 
+#define ARCH_GENERIC_PCI_MMAP_RESOURCE	1
+#define arch_can_pci_mmap_wc()		1
+
 #define PCIBIOS_MIN_IO		0x1000
 #define PCIBIOS_MIN_MEM		0x10000000
 
@@ -96,7 +99,6 @@ struct zpci_bar_struct {
 	u8		size;		/* order 2 exponent */
 };
 
-struct s390_domain;
 struct kvm_zdev;
 
 #define ZPCI_FUNCTIONS_PER_BUS 256
@@ -107,9 +109,10 @@ struct zpci_bus {
 	struct list_head	resources;
 	struct list_head	bus_next;
 	struct resource		bus_resource;
-	int			pchid;
+	int			topo;		/* TID if topo_is_tid, PCHID otherwise */
 	int			domain_nr;
-	bool			multifunction;
+	u8			multifunction	: 1;
+	u8			topo_is_tid	: 1;
 	enum pci_bus_speed	max_bus_speed;
 };
 
@@ -130,17 +133,20 @@ struct zpci_dev {
 	u16		vfn;		/* virtual function number */
 	u16		pchid;		/* physical channel ID */
 	u16		maxstbl;	/* Maximum store block size */
+	u16		rid;		/* RID as supplied by firmware */
+	u16		tid;		/* Topology for which RID is valid */
 	u8		pfgid;		/* function group ID */
 	u8		pft;		/* pci function type */
 	u8		port;
+	u8		fidparm;
 	u8		dtsm;		/* Supported DT mask */
 	u8		rid_available	: 1;
 	u8		has_hp_slot	: 1;
 	u8		has_resources	: 1;
 	u8		is_physfn	: 1;
 	u8		util_str_avail	: 1;
-	u8		irqs_registered	: 1;
-	u8		reserved	: 2;
+	u8		tid_avail	: 1;
+	u8		rtr_avail	: 1; /* Relaxed translation allowed */
 	unsigned int	devfn;		/* DEVFN part of the RID*/
 
 	u8 pfip[CLP_PFIP_NR_SEGMENTS];	/* pci function internal path */
@@ -181,9 +187,10 @@ struct zpci_dev {
 	struct dentry	*debugfs_dev;
 
 	/* IOMMU and passthrough */
-	struct s390_domain *s390_domain; /* s390 IOMMU domain data */
+	struct iommu_domain *s390_domain; /* attached IOMMU domain */
 	struct kvm_zdev *kzdev;
 	struct mutex kzdev_lock;
+	spinlock_t dom_lock;		/* protect s390_domain change */
 };
 
 static inline bool zdev_enabled(struct zpci_dev *zdev)
@@ -210,12 +217,15 @@ extern struct airq_iv *zpci_aif_sbv;
 ----------------------------------------------------------------------------- */
 /* Base stuff */
 struct zpci_dev *zpci_create_device(u32 fid, u32 fh, enum zpci_state state);
+int zpci_add_device(struct zpci_dev *zdev);
 int zpci_enable_device(struct zpci_dev *);
+int zpci_reenable_device(struct zpci_dev *zdev);
 int zpci_disable_device(struct zpci_dev *);
 int zpci_scan_configured_device(struct zpci_dev *zdev, u32 fh);
 int zpci_deconfigure_device(struct zpci_dev *zdev);
 void zpci_device_reserved(struct zpci_dev *zdev);
 bool zpci_is_device_configured(struct zpci_dev *zdev);
+int zpci_scan_devices(void);
 
 int zpci_hot_reset_device(struct zpci_dev *zdev);
 int zpci_register_ioat(struct zpci_dev *, u8, u64, u64, u64, u8 *);
@@ -225,7 +235,7 @@ void zpci_update_fh(struct zpci_dev *zdev, u32 fh);
 
 /* CLP */
 int clp_setup_writeback_mio(void);
-int clp_scan_pci_devices(void);
+int clp_scan_pci_devices(struct list_head *scan_list);
 int clp_query_pci_fn(struct zpci_dev *zdev);
 int clp_enable_fh(struct zpci_dev *zdev, u32 *fh, u8 nr_dma_as);
 int clp_disable_fh(struct zpci_dev *zdev, u32 *fh);
@@ -235,9 +245,20 @@ int clp_refresh_fh(u32 fid, u32 *fh);
 /* UID */
 void update_uid_checking(bool new);
 
+/* Firmware Sysfs */
+int __init __zpci_fw_sysfs_init(void);
+
+static inline int __init zpci_fw_sysfs_init(void)
+{
+	if (IS_ENABLED(CONFIG_SYSFS))
+		return __zpci_fw_sysfs_init();
+	return 0;
+}
+
 /* IOMMU Interface */
 int zpci_init_iommu(struct zpci_dev *zdev);
 void zpci_destroy_iommu(struct zpci_dev *zdev);
+int zpci_iommu_register_ioat(struct zpci_dev *zdev, u8 *status);
 
 #ifdef CONFIG_PCI
 static inline bool zpci_use_mio(struct zpci_dev *zdev)

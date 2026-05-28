@@ -52,6 +52,17 @@ void threads_cleanup(void);
 #define TIF_HOST_THREAD			8
 #define TIF_NOTIFY_SIGNAL		9
 
+#define _TIF_SYSCALL_TRACE		(1 << TIF_SYSCALL_TRACE)
+#define _TIF_NOTIFY_RESUME		(1 << TIF_NOTIFY_RESUME)
+#define _TIF_SIGPENDING			(1 << TIF_SIGPENDING)
+#define _TIF_NEED_RESCHED		(1 << TIF_NEED_RESCHED)
+#define _TIF_RESTORE_SIGMASK		(1 << TIF_RESTORE_SIGMASK)
+#define _TIF_MEMDIE			(1 << TIF_MEMDIE)
+#define _TIF_NOHZ			(1 << TIF_NOHZ)
+#define _TIF_SCHED_JB			(1 << TIF_SCHED_JB)
+#define _TIF_HOST_THREAD		(1 << TIF_HOST_THREAD)
+#define _TIF_NOTIFY_SIGNAL		(1 << TIF_NOTIFY_SIGNAL)
+
 #define __HAVE_THREAD_FUNCTIONS
 
 #define task_thread_info(task)	((struct thread_info *)(task)->stack)

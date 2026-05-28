@@ -19,10 +19,10 @@
 #include <linux/miscdevice.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/export.h>
 #include <linux/mutex.h>
 #include <linux/cma.h>
 #include <linux/mm.h>
+#include <asm/machine.h>
 #include <asm/cpcmd.h>
 #include <asm/debug.h>
 #include <asm/vmcp.h>
@@ -52,7 +52,7 @@ early_param("vmcp_cma", early_parse_vmcp_cma);
 
 void __init vmcp_cma_reserve(void)
 {
-	if (!MACHINE_IS_VM)
+	if (!machine_is_vm())
 		return;
 	cma_declare_contiguous(0, vmcp_cma_size, 0, 0, 0, false, "vmcp", &vmcp_cma);
 }
@@ -254,7 +254,7 @@ static int __init vmcp_init(void)
 {
 	int ret;
 
-	if (!MACHINE_IS_VM)
+	if (!machine_is_vm())
 		return 0;
 
 	vmcp_debug = debug_register("vmcp", 1, 1, 240);

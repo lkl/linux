@@ -5,12 +5,19 @@
 #include <linux/const.h>
 #include <netinet/in.h>
 #include <test_progs.h>
+#include <unistd.h>
+#include <errno.h>
 #include "cgroup_helpers.h"
 #include "network_helpers.h"
 #include "mptcp_sock.skel.h"
 #include "mptcpify.skel.h"
+#include "mptcp_subflow.skel.h"
+#include "mptcp_sockmap.skel.h"
 
 #define NS_TEST "mptcp_ns"
+#define ADDR_1	"10.0.1.1"
+#define ADDR_2	"10.0.1.2"
+#define PORT_1	10001
 
 #ifndef IPPROTO_MPTCP
 #define IPPROTO_MPTCP 262
@@ -63,24 +70,6 @@ struct mptcp_storage {
 	struct sock *first;
 	char ca_name[TCP_CA_NAME_MAX];
 };
-
-static struct nstoken *create_netns(void)
-{
-	SYS(fail, "ip netns add %s", NS_TEST);
-	SYS(fail, "ip -net %s link set dev lo up", NS_TEST);
-
-	return open_netns(NS_TEST);
-fail:
-	return NULL;
-}
-
-static void cleanup_netns(struct nstoken *nstoken)
-{
-	if (nstoken)
-		close_netns(nstoken);
-
-	SYS_NOFAIL("ip netns del %s", NS_TEST);
-}
 
 static int start_mptcp_server(int family, const char *addr_str, __u16 port,
 			      int timeout_ms)
@@ -201,15 +190,15 @@ out:
 
 static void test_base(void)
 {
-	struct nstoken *nstoken = NULL;
+	struct netns_obj *netns = NULL;
 	int server_fd, cgroup_fd;
 
 	cgroup_fd = test__join_cgroup("/mptcp");
 	if (!ASSERT_GE(cgroup_fd, 0, "test__join_cgroup"))
 		return;
 
-	nstoken = create_netns();
-	if (!ASSERT_OK_PTR(nstoken, "create_netns"))
+	netns = netns_new(NS_TEST, true);
+	if (!ASSERT_OK_PTR(netns, "netns_new"))
 		goto fail;
 
 	/* without MPTCP */
@@ -232,7 +221,7 @@ with_mptcp:
 	close(server_fd);
 
 fail:
-	cleanup_netns(nstoken);
+	netns_free(netns);
 	close(cgroup_fd);
 }
 
@@ -317,21 +306,271 @@ out:
 
 static void test_mptcpify(void)
 {
-	struct nstoken *nstoken = NULL;
+	struct netns_obj *netns = NULL;
 	int cgroup_fd;
 
 	cgroup_fd = test__join_cgroup("/mptcpify");
 	if (!ASSERT_GE(cgroup_fd, 0, "test__join_cgroup"))
 		return;
 
-	nstoken = create_netns();
-	if (!ASSERT_OK_PTR(nstoken, "create_netns"))
+	netns = netns_new(NS_TEST, true);
+	if (!ASSERT_OK_PTR(netns, "netns_new"))
 		goto fail;
 
 	ASSERT_OK(run_mptcpify(cgroup_fd), "run_mptcpify");
 
 fail:
-	cleanup_netns(nstoken);
+	netns_free(netns);
+	close(cgroup_fd);
+}
+
+static int endpoint_init(char *flags)
+{
+	SYS(fail, "ip -net %s link add veth1 type veth peer name veth2", NS_TEST);
+	SYS(fail, "ip -net %s addr add %s/24 dev veth1", NS_TEST, ADDR_1);
+	SYS(fail, "ip -net %s link set dev veth1 up", NS_TEST);
+	SYS(fail, "ip -net %s addr add %s/24 dev veth2", NS_TEST, ADDR_2);
+	SYS(fail, "ip -net %s link set dev veth2 up", NS_TEST);
+	if (SYS_NOFAIL("ip -net %s mptcp endpoint add %s %s", NS_TEST, ADDR_2, flags)) {
+		printf("'ip mptcp' not supported, skip this test.\n");
+		test__skip();
+		goto fail;
+	}
+
+	return 0;
+fail:
+	return -1;
+}
+
+static void wait_for_new_subflows(int fd)
+{
+	socklen_t len;
+	u8 subflows;
+	int err, i;
+
+	len = sizeof(subflows);
+	/* Wait max 5 sec for new subflows to be created */
+	for (i = 0; i < 50; i++) {
+		err = getsockopt(fd, SOL_MPTCP, MPTCP_INFO, &subflows, &len);
+		if (!err && subflows > 0)
+			break;
+
+		usleep(100000); /* 0.1s */
+	}
+}
+
+static void run_subflow(void)
+{
+	int server_fd, client_fd, err;
+	char new[TCP_CA_NAME_MAX];
+	char cc[TCP_CA_NAME_MAX];
+	unsigned int mark;
+	socklen_t len;
+
+	server_fd = start_mptcp_server(AF_INET, ADDR_1, PORT_1, 0);
+	if (!ASSERT_OK_FD(server_fd, "start_mptcp_server"))
+		return;
+
+	client_fd = connect_to_fd(server_fd, 0);
+	if (!ASSERT_OK_FD(client_fd, "connect_to_fd"))
+		goto close_server;
+
+	send_byte(client_fd);
+	wait_for_new_subflows(client_fd);
+
+	len = sizeof(mark);
+	err = getsockopt(client_fd, SOL_SOCKET, SO_MARK, &mark, &len);
+	if (ASSERT_OK(err, "getsockopt(client_fd, SO_MARK)"))
+		ASSERT_EQ(mark, 0, "mark");
+
+	len = sizeof(new);
+	err = getsockopt(client_fd, SOL_TCP, TCP_CONGESTION, new, &len);
+	if (ASSERT_OK(err, "getsockopt(client_fd, TCP_CONGESTION)")) {
+		get_msk_ca_name(cc);
+		ASSERT_STREQ(new, cc, "cc");
+	}
+
+	close(client_fd);
+close_server:
+	close(server_fd);
+}
+
+static void test_subflow(void)
+{
+	struct mptcp_subflow *skel;
+	struct netns_obj *netns;
+	int cgroup_fd;
+
+	cgroup_fd = test__join_cgroup("/mptcp_subflow");
+	if (!ASSERT_OK_FD(cgroup_fd, "join_cgroup: mptcp_subflow"))
+		return;
+
+	skel = mptcp_subflow__open_and_load();
+	if (!ASSERT_OK_PTR(skel, "skel_open_load: mptcp_subflow"))
+		goto close_cgroup;
+
+	skel->bss->pid = getpid();
+
+	skel->links.mptcp_subflow =
+		bpf_program__attach_cgroup(skel->progs.mptcp_subflow, cgroup_fd);
+	if (!ASSERT_OK_PTR(skel->links.mptcp_subflow, "attach mptcp_subflow"))
+		goto skel_destroy;
+
+	skel->links._getsockopt_subflow =
+		bpf_program__attach_cgroup(skel->progs._getsockopt_subflow, cgroup_fd);
+	if (!ASSERT_OK_PTR(skel->links._getsockopt_subflow, "attach _getsockopt_subflow"))
+		goto skel_destroy;
+
+	netns = netns_new(NS_TEST, true);
+	if (!ASSERT_OK_PTR(netns, "netns_new: mptcp_subflow"))
+		goto skel_destroy;
+
+	if (endpoint_init("subflow") < 0)
+		goto close_netns;
+
+	run_subflow();
+
+close_netns:
+	netns_free(netns);
+skel_destroy:
+	mptcp_subflow__destroy(skel);
+close_cgroup:
+	close(cgroup_fd);
+}
+
+/* Test sockmap on MPTCP server handling non-mp-capable clients. */
+static void test_sockmap_with_mptcp_fallback(struct mptcp_sockmap *skel)
+{
+	int listen_fd = -1, client_fd1 = -1, client_fd2 = -1;
+	int server_fd1 = -1, server_fd2 = -1, sent, recvd;
+	char snd[9] = "123456789";
+	char rcv[10];
+
+	/* start server with MPTCP enabled */
+	listen_fd = start_mptcp_server(AF_INET, NULL, 0, 0);
+	if (!ASSERT_OK_FD(listen_fd, "sockmap-fb:start_mptcp_server"))
+		return;
+
+	skel->bss->trace_port = ntohs(get_socket_local_port(listen_fd));
+	skel->bss->sk_index = 0;
+	/* create client without MPTCP enabled */
+	client_fd1 = connect_to_fd_opts(listen_fd, NULL);
+	if (!ASSERT_OK_FD(client_fd1, "sockmap-fb:connect_to_fd"))
+		goto end;
+
+	server_fd1 = accept(listen_fd, NULL, 0);
+	skel->bss->sk_index = 1;
+	client_fd2 = connect_to_fd_opts(listen_fd, NULL);
+	if (!ASSERT_OK_FD(client_fd2, "sockmap-fb:connect_to_fd"))
+		goto end;
+
+	server_fd2 = accept(listen_fd, NULL, 0);
+	/* test normal redirect behavior: data sent by client_fd1 can be
+	 * received by client_fd2
+	 */
+	skel->bss->redirect_idx = 1;
+	sent = send(client_fd1, snd, sizeof(snd), 0);
+	if (!ASSERT_EQ(sent, sizeof(snd), "sockmap-fb:send(client_fd1)"))
+		goto end;
+
+	/* try to recv more bytes to avoid truncation check */
+	recvd = recv(client_fd2, rcv, sizeof(rcv), 0);
+	if (!ASSERT_EQ(recvd, sizeof(snd), "sockmap-fb:recv(client_fd2)"))
+		goto end;
+
+end:
+	if (client_fd1 >= 0)
+		close(client_fd1);
+	if (client_fd2 >= 0)
+		close(client_fd2);
+	if (server_fd1 >= 0)
+		close(server_fd1);
+	if (server_fd2 >= 0)
+		close(server_fd2);
+	close(listen_fd);
+}
+
+/* Test sockmap rejection of MPTCP sockets - both server and client sides. */
+static void test_sockmap_reject_mptcp(struct mptcp_sockmap *skel)
+{
+	int listen_fd = -1, server_fd = -1, client_fd1 = -1;
+	int err, zero = 0;
+
+	/* start server with MPTCP enabled */
+	listen_fd = start_mptcp_server(AF_INET, NULL, 0, 0);
+	if (!ASSERT_OK_FD(listen_fd, "start_mptcp_server"))
+		return;
+
+	skel->bss->trace_port = ntohs(get_socket_local_port(listen_fd));
+	skel->bss->sk_index = 0;
+	/* create client with MPTCP enabled */
+	client_fd1 = connect_to_fd(listen_fd, 0);
+	if (!ASSERT_OK_FD(client_fd1, "connect_to_fd client_fd1"))
+		goto end;
+
+	/* bpf_sock_map_update() called from sockops should reject MPTCP sk */
+	if (!ASSERT_EQ(skel->bss->helper_ret, -EOPNOTSUPP, "should reject"))
+		goto end;
+
+	server_fd = accept(listen_fd, NULL, 0);
+	err = bpf_map_update_elem(bpf_map__fd(skel->maps.sock_map),
+				  &zero, &server_fd, BPF_NOEXIST);
+	if (!ASSERT_EQ(err, -EOPNOTSUPP, "server should be disallowed"))
+		goto end;
+
+	/* MPTCP client should also be disallowed */
+	err = bpf_map_update_elem(bpf_map__fd(skel->maps.sock_map),
+				  &zero, &client_fd1, BPF_NOEXIST);
+	if (!ASSERT_EQ(err, -EOPNOTSUPP, "client should be disallowed"))
+		goto end;
+end:
+	if (client_fd1 >= 0)
+		close(client_fd1);
+	if (server_fd >= 0)
+		close(server_fd);
+	close(listen_fd);
+}
+
+static void test_mptcp_sockmap(void)
+{
+	struct mptcp_sockmap *skel;
+	struct netns_obj *netns;
+	int cgroup_fd, err;
+
+	cgroup_fd = test__join_cgroup("/mptcp_sockmap");
+	if (!ASSERT_OK_FD(cgroup_fd, "join_cgroup: mptcp_sockmap"))
+		return;
+
+	skel = mptcp_sockmap__open_and_load();
+	if (!ASSERT_OK_PTR(skel, "skel_open_load: mptcp_sockmap"))
+		goto close_cgroup;
+
+	skel->links.mptcp_sockmap_inject =
+		bpf_program__attach_cgroup(skel->progs.mptcp_sockmap_inject, cgroup_fd);
+	if (!ASSERT_OK_PTR(skel->links.mptcp_sockmap_inject, "attach sockmap"))
+		goto skel_destroy;
+
+	err = bpf_prog_attach(bpf_program__fd(skel->progs.mptcp_sockmap_redirect),
+			      bpf_map__fd(skel->maps.sock_map),
+			      BPF_SK_SKB_STREAM_VERDICT, 0);
+	if (!ASSERT_OK(err, "bpf_prog_attach stream verdict"))
+		goto skel_destroy;
+
+	netns = netns_new(NS_TEST, true);
+	if (!ASSERT_OK_PTR(netns, "netns_new: mptcp_sockmap"))
+		goto skel_destroy;
+
+	if (endpoint_init("subflow") < 0)
+		goto close_netns;
+
+	test_sockmap_with_mptcp_fallback(skel);
+	test_sockmap_reject_mptcp(skel);
+
+close_netns:
+	netns_free(netns);
+skel_destroy:
+	mptcp_sockmap__destroy(skel);
+close_cgroup:
 	close(cgroup_fd);
 }
 
@@ -341,4 +580,8 @@ void test_mptcp(void)
 		test_base();
 	if (test__start_subtest("mptcpify"))
 		test_mptcpify();
+	if (test__start_subtest("subflow"))
+		test_subflow();
+	if (test__start_subtest("sockmap"))
+		test_mptcp_sockmap();
 }

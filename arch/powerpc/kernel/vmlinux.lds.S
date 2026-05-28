@@ -1,10 +1,4 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-#ifdef CONFIG_PPC64
-#define PROVIDE32(x)	PROVIDE(__unused__##x)
-#else
-#define PROVIDE32(x)	PROVIDE(x)
-#endif
-
 #define BSS_FIRST_SECTIONS *(.bss.prominit)
 #define EMITS_PT_NOTE
 #define RO_EXCEPTION_TABLE_ALIGN	0
@@ -127,7 +121,6 @@ SECTIONS
 
 	. = ALIGN(PAGE_SIZE);
 	_etext = .;
-	PROVIDE32 (etext = .);
 
 	/* Read-only data */
 	RO_DATA(PAGE_SIZE)
@@ -265,14 +258,13 @@ SECTIONS
 	.init.text : AT(ADDR(.init.text) - LOAD_OFFSET) {
 		_sinittext = .;
 		INIT_TEXT
-
+		*(.tramp.ftrace.init);
 		/*
 		 *.init.text might be RO so we must ensure this section ends on
 		 * a page boundary.
 		 */
 		. = ALIGN(PAGE_SIZE);
 		_einittext = .;
-		*(.tramp.ftrace.init);
 	} :text
 
 	/* .exit.text is discarded at runtime, not link time,
@@ -395,7 +387,6 @@ SECTIONS
 
 	. = ALIGN(PAGE_SIZE);
 	_edata  =  .;
-	PROVIDE32 (edata = .);
 
 /*
  * And finally the bss
@@ -405,7 +396,6 @@ SECTIONS
 
 	. = ALIGN(PAGE_SIZE);
 	_end = . ;
-	PROVIDE32 (end = .);
 
 	DWARF_DEBUG
 	ELF_DETAILS

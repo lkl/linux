@@ -25,7 +25,7 @@ v3d_init_core(struct v3d_dev *v3d, int core)
 	 * type.  If you want the default behavior, you can still put
 	 * "2" in the indirect texture state's output_type field.
 	 */
-	if (v3d->ver < 40)
+	if (v3d->ver < V3D_GEN_41)
 		V3D_CORE_WRITE(core, V3D_CTL_MISCCFG, V3D_MISCCFG_OVRTMUOUT);
 
 	/* Whenever we flush the L2T cache, we always want to flush
@@ -58,7 +58,7 @@ v3d_idle_axi(struct v3d_dev *v3d, int core)
 static void
 v3d_idle_gca(struct v3d_dev *v3d)
 {
-	if (v3d->ver >= 41)
+	if (v3d->ver >= V3D_GEN_41)
 		return;
 
 	V3D_GCA_WRITE(V3D_GCA_SAFE_SHUTDOWN, V3D_GCA_SAFE_SHUTDOWN_EN);
@@ -105,6 +105,22 @@ v3d_reset_v3d(struct v3d_dev *v3d)
 }
 
 void
+v3d_reset_sms(struct v3d_dev *v3d)
+{
+	if (v3d->ver < V3D_GEN_71)
+		return;
+
+	V3D_SMS_WRITE(V3D_SMS_REE_CS, V3D_SET_FIELD(0x4, V3D_SMS_STATE));
+
+	if (wait_for(!(V3D_GET_FIELD(V3D_SMS_READ(V3D_SMS_REE_CS),
+				     V3D_SMS_STATE) == V3D_SMS_ISOLATING_FOR_RESET) &&
+		     !(V3D_GET_FIELD(V3D_SMS_READ(V3D_SMS_REE_CS),
+				     V3D_SMS_STATE) == V3D_SMS_RESETTING), 100)) {
+		DRM_ERROR("Failed to wait for SMS reset\n");
+	}
+}
+
+void
 v3d_reset(struct v3d_dev *v3d)
 {
 	struct drm_device *dev = &v3d->drm;
@@ -118,7 +134,10 @@ v3d_reset(struct v3d_dev *v3d)
 	if (false)
 		v3d_idle_axi(v3d, 0);
 
+	v3d_irq_disable(v3d);
+
 	v3d_idle_gca(v3d);
+	v3d_reset_sms(v3d);
 	v3d_reset_v3d(v3d);
 
 	v3d_mmu_set_page_table(v3d);
@@ -132,13 +151,13 @@ v3d_reset(struct v3d_dev *v3d)
 static void
 v3d_flush_l3(struct v3d_dev *v3d)
 {
-	if (v3d->ver < 41) {
+	if (v3d->ver < V3D_GEN_41) {
 		u32 gca_ctrl = V3D_GCA_READ(V3D_GCA_CACHE_CTRL);
 
 		V3D_GCA_WRITE(V3D_GCA_CACHE_CTRL,
 			      gca_ctrl | V3D_GCA_CACHE_CTRL_FLUSH);
 
-		if (v3d->ver < 33) {
+		if (v3d->ver < V3D_GEN_33) {
 			V3D_GCA_WRITE(V3D_GCA_CACHE_CTRL,
 				      gca_ctrl & ~V3D_GCA_CACHE_CTRL_FLUSH);
 		}
@@ -151,7 +170,7 @@ v3d_flush_l3(struct v3d_dev *v3d)
 static void
 v3d_invalidate_l2c(struct v3d_dev *v3d, int core)
 {
-	if (v3d->ver > 32)
+	if (v3d->ver >= V3D_GEN_33)
 		return;
 
 	V3D_CORE_WRITE(core, V3D_CTL_L2CACTL,
@@ -252,10 +271,12 @@ v3d_gem_init(struct drm_device *dev)
 		queue->fence_context = dma_fence_context_alloc(1);
 		memset(&queue->stats, 0, sizeof(queue->stats));
 		seqcount_init(&queue->stats.lock);
+
+		spin_lock_init(&queue->queue_lock);
+		spin_lock_init(&queue->fence_lock);
 	}
 
 	spin_lock_init(&v3d->mm_lock);
-	spin_lock_init(&v3d->job_lock);
 	ret = drmm_mutex_init(dev, &v3d->bo_lock);
 	if (ret)
 		return ret;
@@ -288,11 +309,14 @@ v3d_gem_init(struct drm_device *dev)
 	v3d_init_hw_state(v3d);
 	v3d_mmu_set_page_table(v3d);
 
+	v3d_gemfs_init(v3d);
+
 	ret = v3d_sched_init(v3d);
 	if (ret) {
 		drm_mm_takedown(&v3d->mm);
-		dma_free_coherent(v3d->drm.dev, 4096 * 1024, (void *)v3d->pt,
+		dma_free_coherent(v3d->drm.dev, pt_size, (void *)v3d->pt,
 				  v3d->pt_paddr);
+		return ret;
 	}
 
 	return 0;
@@ -302,16 +326,16 @@ void
 v3d_gem_destroy(struct drm_device *dev)
 {
 	struct v3d_dev *v3d = to_v3d_dev(dev);
+	enum v3d_queue q;
 
 	v3d_sched_fini(v3d);
+	v3d_gemfs_fini(v3d);
 
 	/* Waiting for jobs to finish would need to be done before
 	 * unregistering V3D.
 	 */
-	WARN_ON(v3d->bin_job);
-	WARN_ON(v3d->render_job);
-	WARN_ON(v3d->tfu_job);
-	WARN_ON(v3d->csd_job);
+	for (q = 0; q < V3D_MAX_QUEUES; q++)
+		WARN_ON(v3d->queue[q].active_job);
 
 	drm_mm_takedown(&v3d->mm);
 

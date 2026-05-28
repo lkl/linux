@@ -13,7 +13,11 @@
 
 #include "core.h"
 
-const struct pmc_bit_map lnl_ltr_show_map[] = {
+#define SOCM_LPM_REQ_GUID	0x15099748
+
+static const u8 LNL_LPM_REG_INDEX[] = {0, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 20};
+
+static const struct pmc_bit_map lnl_ltr_show_map[] = {
 	{"SOUTHPORT_A",		CNP_PMC_LTR_SPA},
 	{"SOUTHPORT_B",		CNP_PMC_LTR_SPB},
 	{"SATA",		CNP_PMC_LTR_SATA},
@@ -55,7 +59,7 @@ const struct pmc_bit_map lnl_ltr_show_map[] = {
 	{}
 };
 
-const struct pmc_bit_map lnl_power_gating_status_0_map[] = {
+static const struct pmc_bit_map lnl_power_gating_status_0_map[] = {
 	{"PMC_PGD0_PG_STS",			BIT(0),		0},
 	{"FUSE_OSSE_PGD0_PG_STS",		BIT(1),		0},
 	{"ESPISPI_PGD0_PG_STS",			BIT(2),		0},
@@ -91,7 +95,7 @@ const struct pmc_bit_map lnl_power_gating_status_0_map[] = {
 	{}
 };
 
-const struct pmc_bit_map lnl_power_gating_status_1_map[] = {
+static const struct pmc_bit_map lnl_power_gating_status_1_map[] = {
 	{"USBR0_PGD0_PG_STS",			BIT(0),		1},
 	{"SUSRAM_PGD0_PG_STS",			BIT(1),		1},
 	{"SMT1_PGD0_PG_STS",			BIT(2),		1},
@@ -127,7 +131,7 @@ const struct pmc_bit_map lnl_power_gating_status_1_map[] = {
 	{}
 };
 
-const struct pmc_bit_map lnl_power_gating_status_2_map[] = {
+static const struct pmc_bit_map lnl_power_gating_status_2_map[] = {
 	{"PSF8_PGD0_PG_STS",			BIT(0),		0},
 	{"SBR16B2_PGD0_PG_STS",			BIT(1),		0},
 	{"D2D_IPU_PGD0_PG_STS",			BIT(2),		1},
@@ -163,7 +167,7 @@ const struct pmc_bit_map lnl_power_gating_status_2_map[] = {
 	{}
 };
 
-const struct pmc_bit_map lnl_d3_status_0_map[] = {
+static const struct pmc_bit_map lnl_d3_status_0_map[] = {
 	{"LPSS_D3_STS",				BIT(3),		1},
 	{"XDCI_D3_STS",				BIT(4),		1},
 	{"XHCI_D3_STS",				BIT(5),		1},
@@ -175,7 +179,7 @@ const struct pmc_bit_map lnl_d3_status_0_map[] = {
 	{}
 };
 
-const struct pmc_bit_map lnl_d3_status_1_map[] = {
+static const struct pmc_bit_map lnl_d3_status_1_map[] = {
 	{"OSSE_SMT1_D3_STS",			BIT(7),		0},
 	{"GBE_D3_STS",				BIT(19),	0},
 	{"ITSS_D3_STS",				BIT(23),	0},
@@ -185,7 +189,7 @@ const struct pmc_bit_map lnl_d3_status_1_map[] = {
 	{}
 };
 
-const struct pmc_bit_map lnl_d3_status_2_map[] = {
+static const struct pmc_bit_map lnl_d3_status_2_map[] = {
 	{"ESE_D3_STS",				BIT(0),		0},
 	{"CSMERTC_D3_STS",			BIT(1),		0},
 	{"SUSRAM_D3_STS",			BIT(2),		0},
@@ -205,7 +209,7 @@ const struct pmc_bit_map lnl_d3_status_2_map[] = {
 	{}
 };
 
-const struct pmc_bit_map lnl_d3_status_3_map[] = {
+static const struct pmc_bit_map lnl_d3_status_3_map[] = {
 	{"THC0_D3_STS",				BIT(14),	1},
 	{"THC1_D3_STS",				BIT(15),	1},
 	{"OSSE_SMT3_D3_STS",			BIT(21),	0},
@@ -213,14 +217,14 @@ const struct pmc_bit_map lnl_d3_status_3_map[] = {
 	{}
 };
 
-const struct pmc_bit_map lnl_vnn_req_status_0_map[] = {
+static const struct pmc_bit_map lnl_vnn_req_status_0_map[] = {
 	{"LPSS_VNN_REQ_STS",			BIT(3),		1},
 	{"OSSE_VNN_REQ_STS",			BIT(15),	1},
 	{"ESPISPI_VNN_REQ_STS",			BIT(18),	1},
 	{}
 };
 
-const struct pmc_bit_map lnl_vnn_req_status_1_map[] = {
+static const struct pmc_bit_map lnl_vnn_req_status_1_map[] = {
 	{"NPK_VNN_REQ_STS",			BIT(4),		1},
 	{"OSSE_SMT1_VNN_REQ_STS",		BIT(7),		1},
 	{"DFXAGG_VNN_REQ_STS",			BIT(8),		0},
@@ -232,7 +236,7 @@ const struct pmc_bit_map lnl_vnn_req_status_1_map[] = {
 	{}
 };
 
-const struct pmc_bit_map lnl_vnn_req_status_2_map[] = {
+static const struct pmc_bit_map lnl_vnn_req_status_2_map[] = {
 	{"eSE_VNN_REQ_STS",			BIT(0),		1},
 	{"CSMERTC_VNN_REQ_STS",			BIT(1),		1},
 	{"CSE_VNN_REQ_STS",			BIT(4),		1},
@@ -249,14 +253,14 @@ const struct pmc_bit_map lnl_vnn_req_status_2_map[] = {
 	{}
 };
 
-const struct pmc_bit_map lnl_vnn_req_status_3_map[] = {
+static const struct pmc_bit_map lnl_vnn_req_status_3_map[] = {
 	{"DISP_SHIM_VNN_REQ_STS",		BIT(2),		0},
 	{"DTS0_VNN_REQ_STS",			BIT(7),		0},
 	{"GPIOCOM5_VNN_REQ_STS",		BIT(11),	2},
 	{}
 };
 
-const struct pmc_bit_map lnl_vnn_misc_status_map[] = {
+static const struct pmc_bit_map lnl_vnn_misc_status_map[] = {
 	{"CPU_C10_REQ_STS",			BIT(0),		0},
 	{"TS_OFF_REQ_STS",			BIT(1),		0},
 	{"PNDE_MET_REQ_STS",			BIT(2),		1},
@@ -292,7 +296,7 @@ const struct pmc_bit_map lnl_vnn_misc_status_map[] = {
 	{}
 };
 
-const struct pmc_bit_map lnl_clocksource_status_map[] = {
+static const struct pmc_bit_map lnl_clocksource_status_map[] = {
 	{"AON2_OFF_STS",			BIT(0),		0},
 	{"AON3_OFF_STS",			BIT(1),		1},
 	{"AON4_OFF_STS",			BIT(2),		1},
@@ -317,7 +321,7 @@ const struct pmc_bit_map lnl_clocksource_status_map[] = {
 	{}
 };
 
-const struct pmc_bit_map lnl_signal_status_map[] = {
+static const struct pmc_bit_map lnl_signal_status_map[] = {
 	{"LSX_Wake0_STS",			BIT(0),		0},
 	{"LSX_Wake1_STS",			BIT(1),		0},
 	{"LSX_Wake2_STS",			BIT(2),		0},
@@ -337,7 +341,7 @@ const struct pmc_bit_map lnl_signal_status_map[] = {
 	{}
 };
 
-const struct pmc_bit_map lnl_rsc_status_map[] = {
+static const struct pmc_bit_map lnl_rsc_status_map[] = {
 	{"Memory",				0,		1},
 	{"PSF0",				0,		1},
 	{"PSF4",				0,		1},
@@ -349,7 +353,7 @@ const struct pmc_bit_map lnl_rsc_status_map[] = {
 	{}
 };
 
-const struct pmc_bit_map *lnl_lpm_maps[] = {
+static const struct pmc_bit_map *lnl_lpm_maps[] = {
 	lnl_clocksource_status_map,
 	lnl_power_gating_status_0_map,
 	lnl_power_gating_status_1_map,
@@ -367,7 +371,7 @@ const struct pmc_bit_map *lnl_lpm_maps[] = {
 	NULL
 };
 
-const struct pmc_bit_map *lnl_blk_maps[] = {
+static const struct pmc_bit_map *lnl_blk_maps[] = {
 	lnl_power_gating_status_0_map,
 	lnl_power_gating_status_1_map,
 	lnl_power_gating_status_2_map,
@@ -386,7 +390,7 @@ const struct pmc_bit_map *lnl_blk_maps[] = {
 	NULL
 };
 
-const struct pmc_bit_map lnl_pfear_map[] = {
+static const struct pmc_bit_map lnl_pfear_map[] = {
 	{"PMC_0",			BIT(0)},
 	{"FUSE_OSSE",			BIT(1)},
 	{"ESPISPI",			BIT(2)},
@@ -498,12 +502,12 @@ const struct pmc_bit_map lnl_pfear_map[] = {
 	{}
 };
 
-const struct pmc_bit_map *ext_lnl_pfear_map[] = {
+static const struct pmc_bit_map *ext_lnl_pfear_map[] = {
 	lnl_pfear_map,
 	NULL
 };
 
-const struct pmc_reg_map lnl_socm_reg_map = {
+static const struct pmc_reg_map lnl_socm_reg_map = {
 	.pfear_sts = ext_lnl_pfear_map,
 	.slp_s0_offset = CNP_PMC_SLP_S0_RES_COUNTER_OFFSET,
 	.slp_s0_res_counter_step = TGL_PMC_SLP_S0_RES_COUNTER_STEP,
@@ -528,6 +532,16 @@ const struct pmc_reg_map lnl_socm_reg_map = {
 	.lpm_live_status_offset = MTL_LPM_LIVE_STATUS_OFFSET,
 	.s0ix_blocker_maps = lnl_blk_maps,
 	.s0ix_blocker_offset = LNL_S0IX_BLOCKER_OFFSET,
+	.lpm_reg_index = LNL_LPM_REG_INDEX,
+};
+
+static struct pmc_info lnl_pmc_info_list[] = {
+	{
+		.guid	= SOCM_LPM_REQ_GUID,
+		.devid	= PMC_DEVID_LNL_SOCM,
+		.map	= &lnl_socm_reg_map,
+	},
+	{}
 };
 
 #define LNL_NPU_PCI_DEV		0x643e
@@ -546,27 +560,23 @@ static void lnl_d3_fixup(void)
 static int lnl_resume(struct pmc_dev *pmcdev)
 {
 	lnl_d3_fixup();
-	pmc_core_send_ltr_ignore(pmcdev, 3, 0);
 
-	return pmc_core_resume_common(pmcdev);
+	return cnl_resume(pmcdev);
 }
 
-int lnl_core_init(struct pmc_dev *pmcdev)
+static int lnl_core_init(struct pmc_dev *pmcdev, struct pmc_dev_info *pmc_dev_info)
 {
-	int ret;
-	struct pmc *pmc = pmcdev->pmcs[PMC_IDX_SOC];
-
 	lnl_d3_fixup();
-
-	pmcdev->suspend = cnl_suspend;
-	pmcdev->resume = lnl_resume;
-
-	pmc->map = &lnl_socm_reg_map;
-	ret = get_primary_reg_base(pmc);
-	if (ret)
-		return ret;
-
-	pmc_core_get_low_power_modes(pmcdev);
-
-	return 0;
+	return generic_core_init(pmcdev, pmc_dev_info);
 }
+
+struct pmc_dev_info lnl_pmc_dev = {
+	.pci_func = 2,
+	.regmap_list = lnl_pmc_info_list,
+	.map = &lnl_socm_reg_map,
+	.sub_req_show = &pmc_core_substate_req_regs_fops,
+	.suspend = cnl_suspend,
+	.resume = lnl_resume,
+	.init = lnl_core_init,
+	.sub_req = pmc_core_pmt_get_lpm_req,
+};

@@ -62,7 +62,7 @@ static int load_c8sectpfe_fw(struct c8sectpfei *fei);
 
 static void c8sectpfe_timer_interrupt(struct timer_list *t)
 {
-	struct c8sectpfei *fei = from_timer(fei, t, timer);
+	struct c8sectpfei *fei = timer_container_of(fei, t, timer);
 	struct channel_info *channel;
 	int chan_num;
 
@@ -351,7 +351,7 @@ static int c8sectpfe_stop_feed(struct dvb_demux_feed *dvbdmxfeed)
 		dev_dbg(fei->dev, "%s:%d global_feed_count=%d\n"
 			, __func__, __LINE__, fei->global_feed_count);
 
-		del_timer(&fei->timer);
+		timer_delete(&fei->timer);
 	}
 
 	mutex_unlock(&fei->lock);
@@ -658,7 +658,7 @@ static irqreturn_t c8sectpfe_error_irq_handler(int irq, void *priv)
 static int c8sectpfe_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct device_node *child, *np = dev->of_node;
+	struct device_node *np = dev->of_node;
 	struct c8sectpfei *fei;
 	struct resource *res;
 	int ret, index = 0;
@@ -742,17 +742,15 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 		return PTR_ERR(fei->pinctrl);
 	}
 
-	for_each_child_of_node(np, child) {
+	for_each_child_of_node_scoped(np, child) {
 		struct device_node *i2c_bus;
 
 		fei->channel_data[index] = devm_kzalloc(dev,
 						sizeof(struct channel_info),
 						GFP_KERNEL);
 
-		if (!fei->channel_data[index]) {
-			ret = -ENOMEM;
-			goto err_node_put;
-		}
+		if (!fei->channel_data[index])
+			return -ENOMEM;
 
 		tsin = fei->channel_data[index];
 
@@ -761,7 +759,7 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 		ret = of_property_read_u32(child, "tsin-num", &tsin->tsin_id);
 		if (ret) {
 			dev_err(&pdev->dev, "No tsin_num found\n");
-			goto err_node_put;
+			return ret;
 		}
 
 		/* sanity check value */
@@ -769,8 +767,7 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 			dev_err(&pdev->dev,
 				"tsin-num %d specified greater than number\n\tof input block hw in SoC! (%d)",
 				tsin->tsin_id, fei->hw_stats.num_ib);
-			ret = -EINVAL;
-			goto err_node_put;
+			return -EINVAL;
 		}
 
 		tsin->invert_ts_clk = of_property_read_bool(child,
@@ -786,24 +783,21 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 					&tsin->dvb_card);
 		if (ret) {
 			dev_err(&pdev->dev, "No dvb-card found\n");
-			goto err_node_put;
+			return ret;
 		}
 
 		i2c_bus = of_parse_phandle(child, "i2c-bus", 0);
 		if (!i2c_bus) {
 			dev_err(&pdev->dev, "No i2c-bus found\n");
-			ret = -ENODEV;
-			goto err_node_put;
+			return -ENODEV;
 		}
 		tsin->i2c_adapter =
 			of_find_i2c_adapter_by_node(i2c_bus);
+		of_node_put(i2c_bus);
 		if (!tsin->i2c_adapter) {
 			dev_err(&pdev->dev, "No i2c adapter found\n");
-			of_node_put(i2c_bus);
-			ret = -ENODEV;
-			goto err_node_put;
+			return -ENODEV;
 		}
-		of_node_put(i2c_bus);
 
 		/* Acquire reset GPIO and activate it */
 		tsin->rst_gpio = devm_fwnode_gpiod_get(dev,
@@ -814,7 +808,7 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 		if (ret && ret != -EBUSY) {
 			dev_err(dev, "Can't request tsin%d reset gpio\n",
 				fei->channel_data[index]->tsin_id);
-			goto err_node_put;
+			return ret;
 		}
 
 		if (!ret) {
@@ -856,10 +850,6 @@ static int c8sectpfe_probe(struct platform_device *pdev)
 	c8sectpfe_debugfs_init(fei);
 
 	return 0;
-
-err_node_put:
-	of_node_put(child);
-	return ret;
 }
 
 static void c8sectpfe_remove(struct platform_device *pdev)
@@ -898,16 +888,15 @@ static void c8sectpfe_remove(struct platform_device *pdev)
 static int configure_channels(struct c8sectpfei *fei)
 {
 	int index = 0, ret;
-	struct device_node *child, *np = fei->dev->of_node;
+	struct device_node *np = fei->dev->of_node;
 
 	/* iterate round each tsin and configure memdma descriptor and IB hw */
-	for_each_child_of_node(np, child) {
+	for_each_child_of_node_scoped(np, child) {
 		ret = configure_memdma_and_inputblock(fei,
 						fei->channel_data[index]);
 		if (ret) {
 			dev_err(fei->dev,
 				"configure_memdma_and_inputblock failed\n");
-			of_node_put(child);
 			goto err_unmap;
 		}
 		index++;
@@ -1158,7 +1147,7 @@ static struct platform_driver c8sectpfe_driver = {
 		.of_match_table = c8sectpfe_match,
 	},
 	.probe	= c8sectpfe_probe,
-	.remove_new = c8sectpfe_remove,
+	.remove = c8sectpfe_remove,
 };
 
 module_platform_driver(c8sectpfe_driver);

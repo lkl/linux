@@ -607,15 +607,13 @@ static int ili9882t_add(struct ili9882t *ili)
 
 	ili->enable_gpio = devm_gpiod_get(dev, "enable", GPIOD_OUT_LOW);
 	if (IS_ERR(ili->enable_gpio)) {
-		dev_err(dev, "cannot get reset-gpios %ld\n",
+		dev_err(dev, "cannot get enable-gpios %ld\n",
 			PTR_ERR(ili->enable_gpio));
 		return PTR_ERR(ili->enable_gpio);
 	}
 
 	gpiod_set_value(ili->enable_gpio, 0);
 
-	drm_panel_init(&ili->base, dev, &ili9882t_funcs,
-		       DRM_MODE_CONNECTOR_DSI);
 	err = of_drm_get_panel_orientation(dev->of_node, &ili->orientation);
 	if (err < 0) {
 		dev_err(dev, "%pOF: failed to get orientation %d\n", dev->of_node, err);
@@ -640,9 +638,11 @@ static int ili9882t_probe(struct mipi_dsi_device *dsi)
 	int ret;
 	const struct panel_desc *desc;
 
-	ili = devm_kzalloc(&dsi->dev, sizeof(*ili), GFP_KERNEL);
-	if (!ili)
-		return -ENOMEM;
+	ili = devm_drm_panel_alloc(&dsi->dev, __typeof(*ili), base,
+				   &ili9882t_funcs, DRM_MODE_CONNECTOR_DSI);
+
+	if (IS_ERR(ili))
+		return PTR_ERR(ili);
 
 	desc = of_device_get_match_data(&dsi->dev);
 	dsi->lanes = desc->lanes;

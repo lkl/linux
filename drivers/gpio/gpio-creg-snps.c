@@ -27,7 +27,7 @@ struct creg_gpio {
 	const struct creg_layout *layout;
 };
 
-static void creg_gpio_set(struct gpio_chip *gc, unsigned int offset, int val)
+static int creg_gpio_set(struct gpio_chip *gc, unsigned int offset, int val)
 {
 	struct creg_gpio *hcg = gpiochip_get_data(gc);
 	const struct creg_layout *layout = hcg->layout;
@@ -47,13 +47,13 @@ static void creg_gpio_set(struct gpio_chip *gc, unsigned int offset, int val)
 	reg |=  (value << reg_shift);
 	writel(reg, hcg->regs);
 	spin_unlock_irqrestore(&hcg->lock, flags);
+
+	return 0;
 }
 
 static int creg_gpio_dir_out(struct gpio_chip *gc, unsigned int offset, int val)
 {
-	creg_gpio_set(gc, offset, val);
-
-	return 0;
+	return creg_gpio_set(gc, offset, val);
 }
 
 static int creg_gpio_validate_pg(struct device *dev, struct creg_gpio *hcg,

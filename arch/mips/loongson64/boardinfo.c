@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/kobject.h>
+#include <linux/string.h>
 #include <boot_param.h>
 
 static ssize_t boardinfo_show(struct kobject *kobj,
 			      struct kobj_attribute *attr, char *buf)
 {
-	char board_manufacturer[64] = {0};
+	char board_manufacturer[64];
 	char *tmp_board_manufacturer = board_manufacturer;
-	char bios_vendor[64] = {0};
+	char bios_vendor[64];
 	char *tmp_bios_vendor = bios_vendor;
 
-	strcpy(board_manufacturer, eboard->name);
-	strcpy(bios_vendor, einter->description);
+	strscpy_pad(board_manufacturer, eboard->name);
+	strscpy_pad(bios_vendor, einter->description);
 
 	return sprintf(buf,
 		       "Board Info\n"
@@ -21,13 +22,11 @@ static ssize_t boardinfo_show(struct kobject *kobj,
 		       "BIOS Info\n"
 		       "Vendor\t\t\t: %s\n"
 		       "Version\t\t\t: %s\n"
-		       "ROM Size\t\t: %d KB\n"
 		       "Release Date\t\t: %s\n",
 		       strsep(&tmp_board_manufacturer, "-"),
 		       eboard->name,
 		       strsep(&tmp_bios_vendor, "-"),
 		       einter->description,
-		       einter->size,
 		       especial->special_name);
 }
 static struct kobj_attribute boardinfo_attr = __ATTR(boardinfo, 0444,

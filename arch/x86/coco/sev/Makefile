@@ -1,15 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0
 
-obj-y += core.o
+obj-y += core.o noinstr.o vc-handle.o
 
-ifdef CONFIG_FUNCTION_TRACER
-CFLAGS_REMOVE_core.o = -pg
-endif
+# Clang 14 and older may fail to respect __no_sanitize_undefined when inlining
+UBSAN_SANITIZE_noinstr.o	:= n
 
-KASAN_SANITIZE_core.o	:= n
-KMSAN_SANITIZE_core.o	:= n
-KCOV_INSTRUMENT_core.o	:= n
-
-# With some compiler versions the generated code results in boot hangs, caused
-# by several compilation units. To be safe, disable all instrumentation.
-KCSAN_SANITIZE		:= n
+# GCC may fail to respect __no_sanitize_address or __no_kcsan when inlining
+KASAN_SANITIZE_noinstr.o	:= n
+KCSAN_SANITIZE_noinstr.o	:= n

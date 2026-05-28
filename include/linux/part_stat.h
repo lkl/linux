@@ -17,8 +17,8 @@ struct disk_stats {
 /*
  * Macros to operate on percpu disk statistics:
  *
- * {disk|part|all}_stat_{add|sub|inc|dec}() modify the stat counters and should
- * be called between disk_stat_lock() and disk_stat_unlock().
+ * part_stat_{add|sub|inc|dec}() modify the stat counters and should
+ * be called between part_stat_lock() and part_stat_unlock().
  *
  * part_stat_read() can be called at any time.
  */
@@ -33,7 +33,7 @@ struct disk_stats {
 
 #define part_stat_read(part, field)					\
 ({									\
-	typeof((part)->bd_stats->field) res = 0;			\
+	TYPEOF_UNQUAL((part)->bd_stats->field) res = 0;			\
 	unsigned int _cpu;						\
 	for_each_possible_cpu(_cpu)					\
 		res += per_cpu_ptr((part)->bd_stats, _cpu)->field; \
@@ -78,5 +78,7 @@ static inline void part_stat_set_all(struct block_device *part, int value)
 	local_read(&(part_stat_get(part, field)))
 #define part_stat_local_read_cpu(part, field, cpu)			\
 	local_read(&(part_stat_get_cpu(part, field, cpu)))
+
+unsigned int bdev_count_inflight(struct block_device *part);
 
 #endif /* _LINUX_PART_STAT_H */

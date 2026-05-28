@@ -1540,7 +1540,7 @@ static ssize_t pccard_extract_cis(struct pcmcia_socket *s, char *buf,
 
 
 static ssize_t pccard_show_cis(struct file *filp, struct kobject *kobj,
-			       struct bin_attribute *bin_attr,
+			       const struct bin_attribute *bin_attr,
 			       char *buf, loff_t off, size_t count)
 {
 	unsigned int size = 0x200;
@@ -1571,7 +1571,7 @@ static ssize_t pccard_show_cis(struct file *filp, struct kobject *kobj,
 
 
 static ssize_t pccard_store_cis(struct file *filp, struct kobject *kobj,
-				struct bin_attribute *bin_attr,
+				const struct bin_attribute *bin_attr,
 				char *buf, loff_t off, size_t count)
 {
 	struct pcmcia_socket *s;

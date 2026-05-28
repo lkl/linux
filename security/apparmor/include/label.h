@@ -19,6 +19,7 @@
 #include "lib.h"
 
 struct aa_ns;
+struct aa_ruleset;
 
 #define LOCAL_VEC_ENTRIES 8
 #define DEFINE_VEC(T, V)						\
@@ -109,7 +110,7 @@ struct label_it {
 	int i, j;
 };
 
-/* struct aa_label - lazy labeling struct
+/* struct aa_label_base - base info of label
  * @count: ref count of active users
  * @node: rbtree position
  * @rcu: rcu callback struct
@@ -118,7 +119,10 @@ struct label_it {
  * @flags: stale and other flags - values may change under label set lock
  * @secid: secid that references this label
  * @size: number of entries in @ent[]
- * @ent: set of profiles for label, actual size determined by @size
+ * @mediates: bitmask for label_mediates
+ * profile: label vec when embedded in a profile FLAG_PROFILE is set
+ * rules: variable length rules in a profile FLAG_PROFILE is set
+ * vec: vector of profiles comprising the compound label
  */
 struct aa_label {
 	struct kref count;
@@ -129,7 +133,18 @@ struct aa_label {
 	long flags;
 	u32 secid;
 	int size;
-	struct aa_profile *vec[];
+	u64 mediates;
+	union {
+		struct {
+			/* only used is the label is a profile, size of
+			 * rules[] is determined by the profile
+			 * profile[1] is poison or null as guard
+			 */
+			struct aa_profile *profile[2];
+			DECLARE_FLEX_ARRAY(struct aa_ruleset *, rules);
+		};
+		DECLARE_FLEX_ARRAY(struct aa_profile *, vec);
+	};
 };
 
 #define last_error(E, FN)				\
@@ -160,31 +175,7 @@ int aa_label_next_confined(struct aa_label *l, int i);
 #define label_for_each_cont(I, L, P)					\
 	for (++((I).i); ((P) = (L)->vec[(I).i]); ++((I).i))
 
-#define next_comb(I, L1, L2)						\
-do {									\
-	(I).j++;							\
-	if ((I).j >= (L2)->size) {					\
-		(I).i++;						\
-		(I).j = 0;						\
-	}								\
-} while (0)
 
-
-/* for each combination of P1 in L1, and P2 in L2 */
-#define label_for_each_comb(I, L1, L2, P1, P2)				\
-for ((I).i = (I).j = 0;							\
-	((P1) = (L1)->vec[(I).i]) && ((P2) = (L2)->vec[(I).j]);		\
-	(I) = next_comb(I, L1, L2))
-
-#define fn_for_each_comb(L1, L2, P1, P2, FN)				\
-({									\
-	struct label_it i;						\
-	int __E = 0;							\
-	label_for_each_comb(i, (L1), (L2), (P1), (P2)) {		\
-		last_error(__E, (FN));					\
-	}								\
-	__E;								\
-})
 
 /* for each profile that is enforcing confinement in a label */
 #define label_for_each_confined(I, L, P)				\
@@ -255,20 +246,17 @@ for ((I).i = (I).j = 0;							\
 #define fn_for_each_not_in_set(L1, L2, P, FN)				\
 	fn_for_each2_XXX((L1), (L2), P, FN, _not_in_set)
 
-#define LABEL_MEDIATES(L, C)						\
-({									\
-	struct aa_profile *profile;					\
-	struct label_it i;						\
-	int ret = 0;							\
-	label_for_each(i, (L), profile) {				\
-		if (RULE_MEDIATES(&profile->rules, (C))) {		\
-			ret = 1;					\
-			break;						\
-		}							\
-	}								\
-	ret;								\
-})
+static inline bool label_mediates(struct aa_label *L, unsigned char C)
+{
+	return (L)->mediates & (((u64) 1) << (C));
+}
 
+static inline bool label_mediates_safe(struct aa_label *L, unsigned char C)
+{
+	if (C > AA_CLASS_LAST)
+		return false;
+	return label_mediates(L, C);
+}
 
 void aa_labelset_destroy(struct aa_labelset *ls);
 void aa_labelset_init(struct aa_labelset *ls);
@@ -290,8 +278,6 @@ struct aa_label *aa_label_insert(struct aa_labelset *ls, struct aa_label *l);
 bool aa_label_replace(struct aa_label *old, struct aa_label *new);
 bool aa_label_make_newest(struct aa_labelset *ls, struct aa_label *old,
 			  struct aa_label *new);
-
-struct aa_label *aa_label_find(struct aa_label *l);
 
 struct aa_profile *aa_label_next_in_merge(struct label_it *I,
 					  struct aa_label *a,
@@ -320,8 +306,6 @@ void aa_label_seq_xprint(struct seq_file *f, struct aa_ns *ns,
 			 struct aa_label *label, int flags, gfp_t gfp);
 void aa_label_xprintk(struct aa_ns *ns, struct aa_label *label, int flags,
 		      gfp_t gfp);
-void aa_label_audit(struct audit_buffer *ab, struct aa_label *label, gfp_t gfp);
-void aa_label_seq_print(struct seq_file *f, struct aa_label *label, gfp_t gfp);
 void aa_label_printk(struct aa_label *label, gfp_t gfp);
 
 struct aa_label *aa_label_strn_parse(struct aa_label *base, const char *str,
@@ -443,6 +427,13 @@ static inline void aa_put_label(struct aa_label *l)
 {
 	if (l)
 		kref_put(&l->count, aa_label_kref);
+}
+
+/* wrapper fn to indicate semantics of the check */
+static inline bool __aa_subj_label_is_cached(struct aa_label *subj_label,
+					  struct aa_label *obj_label)
+{
+	return aa_label_is_subset(obj_label, subj_label);
 }
 
 

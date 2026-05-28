@@ -583,7 +583,6 @@ static void __sysrq_put_key_op(u8 key, const struct sysrq_key_op *op_p)
 void __handle_sysrq(u8 key, bool check_mask)
 {
 	const struct sysrq_key_op *op_p;
-	int orig_log_level;
 	int orig_suppress_printk;
 	int i;
 
@@ -593,13 +592,12 @@ void __handle_sysrq(u8 key, bool check_mask)
 	rcu_sysrq_start();
 	rcu_read_lock();
 	/*
-	 * Raise the apparent loglevel to maximum so that the sysrq header
-	 * is shown to provide the user with positive feedback.  We do not
-	 * simply emit this at KERN_EMERG as that would change message
-	 * routing in the consumers of /proc/kmsg.
+	 * Enter in the force_console context so that sysrq header is shown to
+	 * provide the user with positive feedback.  We do not simply emit this
+	 * at KERN_EMERG as that would change message routing in the consumers
+	 * of /proc/kmsg.
 	 */
-	orig_log_level = console_loglevel;
-	console_loglevel = CONSOLE_LOGLEVEL_DEFAULT;
+	printk_force_console_enter();
 
 	op_p = __sysrq_get_key_op(key);
 	if (op_p) {
@@ -609,11 +607,11 @@ void __handle_sysrq(u8 key, bool check_mask)
 		 */
 		if (!check_mask || sysrq_on_mask(op_p->enable_mask)) {
 			pr_info("%s\n", op_p->action_msg);
-			console_loglevel = orig_log_level;
+			printk_force_console_exit();
 			op_p->handler(key);
 		} else {
 			pr_info("This sysrq operation is disabled.\n");
-			console_loglevel = orig_log_level;
+			printk_force_console_exit();
 		}
 	} else {
 		pr_info("HELP : ");
@@ -631,7 +629,7 @@ void __handle_sysrq(u8 key, bool check_mask)
 			}
 		}
 		pr_cont("\n");
-		console_loglevel = orig_log_level;
+		printk_force_console_exit();
 	}
 	rcu_read_unlock();
 	rcu_sysrq_end();
@@ -714,7 +712,8 @@ static void sysrq_parse_reset_sequence(struct sysrq_state *state)
 
 static void sysrq_do_reset(struct timer_list *t)
 {
-	struct sysrq_state *state = from_timer(state, t, keyreset_timer);
+	struct sysrq_state *state = timer_container_of(state, t,
+						       keyreset_timer);
 
 	state->reset_requested = true;
 
@@ -745,7 +744,7 @@ static void sysrq_detect_reset_sequence(struct sysrq_state *state,
 		 */
 		if (value && state->reset_seq_cnt) {
 			state->reset_canceled = true;
-			del_timer(&state->keyreset_timer);
+			timer_delete(&state->keyreset_timer);
 		}
 	} else if (value == 0) {
 		/*
@@ -753,7 +752,7 @@ static void sysrq_detect_reset_sequence(struct sysrq_state *state,
 		 * to be pressed and held for the reset timeout
 		 * to hold.
 		 */
-		del_timer(&state->keyreset_timer);
+		timer_delete(&state->keyreset_timer);
 
 		if (--state->reset_seq_cnt == 0)
 			state->reset_canceled = false;
@@ -1120,6 +1119,46 @@ int sysrq_toggle_support(int enable_mask)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(sysrq_toggle_support);
+
+static int sysrq_sysctl_handler(const struct ctl_table *table, int write,
+				void *buffer, size_t *lenp, loff_t *ppos)
+{
+	int tmp, ret;
+	struct ctl_table t = *table;
+
+	tmp = sysrq_mask();
+	t.data = &tmp;
+
+	/*
+	 * Behaves like do_proc_dointvec as t does not have min nor max.
+	 */
+	ret = proc_dointvec_minmax(&t, write, buffer, lenp, ppos);
+	if (ret)
+		return ret;
+
+	if (write)
+		sysrq_toggle_support(tmp);
+
+	return 0;
+}
+
+static const struct ctl_table sysrq_sysctl_table[] = {
+	{
+		.procname	= "sysrq",
+		.data		= NULL,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= sysrq_sysctl_handler,
+	},
+};
+
+static int __init init_sysrq_sysctl(void)
+{
+	register_sysctl_init("kernel", sysrq_sysctl_table);
+	return 0;
+}
+
+subsys_initcall(init_sysrq_sysctl);
 
 static int __sysrq_swap_key_ops(u8 key, const struct sysrq_key_op *insert_op_p,
 				const struct sysrq_key_op *remove_op_p)

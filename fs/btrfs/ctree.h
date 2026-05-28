@@ -6,8 +6,7 @@
 #ifndef BTRFS_CTREE_H
 #define BTRFS_CTREE_H
 
-#include "linux/cleanup.h"
-#include <linux/pagemap.h>
+#include <linux/cleanup.h>
 #include <linux/spinlock.h>
 #include <linux/rbtree.h>
 #include <linux/mutex.h>
@@ -62,7 +61,6 @@ struct btrfs_path {
 	/* if there is real range locking, this locks field will change */
 	u8 locks[BTRFS_MAX_LEVEL];
 	u8 reada;
-	/* keep some upper locks as we walk down */
 	u8 lowest_level;
 
 	/*
@@ -70,6 +68,7 @@ struct btrfs_path {
 	 * and to force calls to keep space in the nodes
 	 */
 	unsigned int search_for_split:1;
+	/* Keep some upper locks as we walk down. */
 	unsigned int keep_locks:1;
 	unsigned int skip_locking:1;
 	unsigned int search_commit_root:1;
@@ -225,16 +224,10 @@ struct btrfs_root {
 
 	struct list_head root_list;
 
-	/*
-	 * Xarray that keeps track of in-memory inodes, protected by the lock
-	 * @inode_lock.
-	 */
+	/* Xarray that keeps track of in-memory inodes. */
 	struct xarray inodes;
 
-	/*
-	 * Xarray that keeps track of delayed nodes of every inode, protected
-	 * by @inode_lock.
-	 */
+	/* Xarray that keeps track of delayed nodes of every inode. */
 	struct xarray delayed_nodes;
 	/*
 	 * right now this just gets used so that a root has its own devid
@@ -371,6 +364,25 @@ static inline void btrfs_set_root_last_trans(struct btrfs_root *root, u64 transi
 }
 
 /*
+ * Return the generation this root started with.
+ *
+ * Every normal root that is created with root->root_key.offset set to it's
+ * originating generation.  If it is a snapshot it is the generation when the
+ * snapshot was created.
+ *
+ * However for TREE_RELOC roots root_key.offset is the objectid of the owning
+ * tree root.  Thankfully we copy the root item of the owning tree root, which
+ * has it's last_snapshot set to what we would have root_key.offset set to, so
+ * return that if this is a TREE_RELOC root.
+ */
+static inline u64 btrfs_root_origin_generation(const struct btrfs_root *root)
+{
+	if (btrfs_root_id(root) == BTRFS_TREE_RELOC_OBJECTID)
+		return btrfs_root_last_snapshot(&root->root_item);
+	return root->root_key.offset;
+}
+
+/*
  * Structure that conveys information about an extent that is going to replace
  * all the extents in a file range.
  */
@@ -487,24 +499,10 @@ static inline u32 BTRFS_MAX_XATTR_SIZE(const struct btrfs_fs_info *info)
 	return BTRFS_MAX_ITEM_SIZE(info) - sizeof(struct btrfs_dir_item);
 }
 
-#define BTRFS_BYTES_TO_BLKS(fs_info, bytes) \
-				((bytes) >> (fs_info)->sectorsize_bits)
-
-static inline gfp_t btrfs_alloc_write_mask(struct address_space *mapping)
-{
-	return mapping_gfp_constraint(mapping, ~__GFP_FS);
-}
-
-void btrfs_error_unpin_extent_range(struct btrfs_fs_info *fs_info, u64 start, u64 end);
-int btrfs_discard_extent(struct btrfs_fs_info *fs_info, u64 bytenr,
-			 u64 num_bytes, u64 *actual_bytes);
-int btrfs_trim_fs(struct btrfs_fs_info *fs_info, struct fstrim_range *range);
-
-/* ctree.c */
 int __init btrfs_ctree_init(void);
 void __cold btrfs_ctree_exit(void);
 
-int btrfs_bin_search(struct extent_buffer *eb, int first_slot,
+int btrfs_bin_search(const struct extent_buffer *eb, int first_slot,
 		     const struct btrfs_key *key, int *slot);
 
 int __pure btrfs_comp_cpu_keys(const struct btrfs_key *k1, const struct btrfs_key *k2);
@@ -572,9 +570,9 @@ int btrfs_copy_root(struct btrfs_trans_handle *trans,
 		      struct btrfs_root *root,
 		      struct extent_buffer *buf,
 		      struct extent_buffer **cow_ret, u64 new_root_objectid);
-bool btrfs_block_can_be_shared(struct btrfs_trans_handle *trans,
-			       struct btrfs_root *root,
-			       struct extent_buffer *buf);
+bool btrfs_block_can_be_shared(const struct btrfs_trans_handle *trans,
+			       const struct btrfs_root *root,
+			       const struct extent_buffer *buf);
 int btrfs_del_ptr(struct btrfs_trans_handle *trans, struct btrfs_root *root,
 		  struct btrfs_path *path, int level, int slot);
 void btrfs_extend_item(struct btrfs_trans_handle *trans,
@@ -723,37 +721,23 @@ static inline int btrfs_next_item(struct btrfs_root *root, struct btrfs_path *p)
 }
 int btrfs_leaf_free_space(const struct extent_buffer *leaf);
 
-static inline int is_fstree(u64 rootid)
+static inline bool btrfs_is_fstree(u64 rootid)
 {
-	if (rootid == BTRFS_FS_TREE_OBJECTID ||
-	    ((s64)rootid >= (s64)BTRFS_FIRST_FREE_OBJECTID &&
-	      !btrfs_qgroup_level(rootid)))
-		return 1;
-	return 0;
+	if (rootid == BTRFS_FS_TREE_OBJECTID)
+		return true;
+
+	if ((s64)rootid < (s64)BTRFS_FIRST_FREE_OBJECTID)
+		return false;
+
+	if (btrfs_qgroup_level(rootid) != 0)
+		return false;
+
+	return true;
 }
 
 static inline bool btrfs_is_data_reloc_root(const struct btrfs_root *root)
 {
 	return root->root_key.objectid == BTRFS_DATA_RELOC_TREE_OBJECTID;
 }
-
-u16 btrfs_csum_type_size(u16 type);
-int btrfs_super_csum_size(const struct btrfs_super_block *s);
-const char *btrfs_super_csum_name(u16 csum_type);
-const char *btrfs_super_csum_driver(u16 csum_type);
-size_t __attribute_const__ btrfs_get_num_csums(void);
-
-/*
- * We use page status Private2 to indicate there is an ordered extent with
- * unfinished IO.
- *
- * Rename the Private2 accessors to Ordered, to improve readability.
- */
-#define PageOrdered(page)		PagePrivate2(page)
-#define SetPageOrdered(page)		SetPagePrivate2(page)
-#define ClearPageOrdered(page)		ClearPagePrivate2(page)
-#define folio_test_ordered(folio)	folio_test_private_2(folio)
-#define folio_set_ordered(folio)	folio_set_private_2(folio)
-#define folio_clear_ordered(folio)	folio_clear_private_2(folio)
 
 #endif

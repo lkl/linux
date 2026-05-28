@@ -107,7 +107,7 @@ static void stmpe_work(struct work_struct *work)
 
 	/*
 	 * touch_det sometimes get desasserted or just get stuck. This appears
-	 * to be a silicon bug, We still have to clearify this with the
+	 * to be a silicon bug, We still have to clarify this with the
 	 * manufacture. As a workaround We release the key anyway if the
 	 * touch_det keeps coming in after 4ms, while the FIFO contains no value
 	 * during the whole time.
@@ -140,7 +140,7 @@ static irqreturn_t stmpe_ts_handler(int irq, void *data)
 
 	/*
 	 * The FIFO sometimes just crashes and stops generating interrupts. This
-	 * appears to be a silicon bug. We still have to clearify this with
+	 * appears to be a silicon bug. We still have to clarify this with
 	 * the manufacture. As a workaround we disable the TSC while we are
 	 * collecting data and flush the FIFO after reading
 	 */
@@ -362,16 +362,11 @@ static struct platform_driver stmpe_ts_driver = {
 		.name = STMPE_TS_NAME,
 	},
 	.probe = stmpe_input_probe,
-	.remove_new = stmpe_ts_remove,
+	.remove = stmpe_ts_remove,
 };
 module_platform_driver(stmpe_ts_driver);
 
-static const struct of_device_id stmpe_ts_ids[] = {
-	{ .compatible = "st,stmpe-ts", },
-	{ },
-};
-MODULE_DEVICE_TABLE(of, stmpe_ts_ids);
-
+MODULE_ALIAS("platform:stmpe-ts");
 MODULE_AUTHOR("Luotao Fu <l.fu@pengutronix.de>");
 MODULE_DESCRIPTION("STMPEXXX touchscreen driver");
 MODULE_LICENSE("GPL");

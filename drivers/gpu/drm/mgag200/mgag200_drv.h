@@ -25,7 +25,6 @@
 
 #define DRIVER_NAME		"mgag200"
 #define DRIVER_DESC		"MGA G200 SE"
-#define DRIVER_DATE		"20110418"
 
 #define DRIVER_MAJOR		1
 #define DRIVER_MINOR		0
@@ -197,6 +196,7 @@ enum mga_type {
 	G200_EV,
 	G200_EH,
 	G200_EH3,
+	G200_EH5,
 	G200_ER,
 	G200_EW3,
 };
@@ -335,6 +335,8 @@ struct mga_device *mgag200_g200eh_device_create(struct pci_dev *pdev,
 						const struct drm_driver *drv);
 struct mga_device *mgag200_g200eh3_device_create(struct pci_dev *pdev,
 						 const struct drm_driver *drv);
+struct mga_device *mgag200_g200eh5_device_create(struct pci_dev *pdev,
+						 const struct drm_driver *drv);
 struct mga_device *mgag200_g200er_device_create(struct pci_dev *pdev,
 						const struct drm_driver *drv);
 struct mga_device *mgag200_g200ew3_device_create(struct pci_dev *pdev,
@@ -380,10 +382,10 @@ int mgag200_primary_plane_helper_get_scanout_buffer(struct drm_plane *plane,
 	.destroy = drm_plane_cleanup, \
 	DRM_GEM_SHADOW_PLANE_FUNCS
 
-void mgag200_crtc_set_gamma_linear(struct mga_device *mdev, const struct drm_format_info *format);
-void mgag200_crtc_set_gamma(struct mga_device *mdev,
-			    const struct drm_format_info *format,
-			    struct drm_color_lut *lut);
+void mgag200_crtc_fill_gamma(struct mga_device *mdev, const struct drm_format_info *format);
+void mgag200_crtc_load_gamma(struct mga_device *mdev,
+			     const struct drm_format_info *format,
+			     struct drm_color_lut *lut);
 
 enum drm_mode_status mgag200_crtc_helper_mode_valid(struct drm_crtc *crtc,
 						    const struct drm_display_mode *mode);

@@ -26,7 +26,7 @@ config POWER_RESET_AT91_POWEROFF
 config POWER_RESET_AT91_RESET
 	tristate "Atmel AT91 reset driver"
 	depends on ARCH_AT91
-	default SOC_AT91SAM9 || SOC_SAM9X60 || SOC_SAMA5
+	default SOC_AT91SAM9 || SOC_SAM9X60 || SOC_SAM9X7 || SOC_SAMA5
 	help
 	  This driver supports restart for Atmel AT91SAM9 and SAMA5
 	  SoCs
@@ -34,7 +34,7 @@ config POWER_RESET_AT91_RESET
 config POWER_RESET_AT91_SAMA5D2_SHDWC
 	tristate "Atmel AT91 SAMA5D2-Compatible shutdown controller driver"
 	depends on ARCH_AT91
-	default SOC_SAM9X60 || SOC_SAMA5
+	default SOC_SAM9X60 || SOC_SAM9X7 || SOC_SAMA5
 	help
 	  This driver supports the alternate shutdown controller for some Atmel
 	  SAMA5 SoCs. It is present for example on SAMA5D2 SoC.
@@ -79,6 +79,7 @@ config POWER_RESET_EP93XX
 	bool "Cirrus EP93XX reset driver" if COMPILE_TEST
 	depends on MFD_SYSCON
 	default ARCH_EP93XX
+	select AUXILIARY_BUS
 	help
 	  This driver provides restart support for Cirrus EP93XX SoC.
 
@@ -126,6 +127,15 @@ config POWER_RESET_LINKSTATION
 	  It also makes the device compatible with the WoL function.
 
 	  Say Y here if you have a Buffalo LinkStation LS421D/E.
+
+config POWER_RESET_MACSMC
+	tristate "Apple SMC reset/power-off driver"
+	depends on MFD_MACSMC
+	help
+	  This driver supports reset and power-off on Apple Mac machines
+	  that implement this functionality via the SMC.
+
+	  Say Y here if you have an Apple Silicon Mac.
 
 config POWER_RESET_MSM
 	bool "Qualcomm MSM power-off driver"
@@ -214,6 +224,27 @@ config POWER_RESET_ST
 	depends on ARCH_STI
 	help
 	  Reset support for STMicroelectronics boards.
+
+config POWER_RESET_TH1520_AON
+	tristate "T-Head TH1520 AON firmware poweroff and reset driver"
+	depends on TH1520_PM_DOMAINS
+	help
+	  This driver supports power-off and reset operations for T-Head
+	  TH1520 SoCs running the AON firmware.
+
+config POWER_RESET_TORADEX_EC
+	tristate "Toradex Embedded Controller power-off and reset driver"
+	depends on ARCH_MXC || COMPILE_TEST
+	depends on I2C
+	select REGMAP_I2C
+	help
+	  This driver supports power-off and reset for SMARC Toradex SoMs,
+	  for example the SMARC iMX8MP and SMARC iMX95, using Toradex
+	  Embedded Controller (EC).
+
+	  Say Y here if you have a Toradex SMARC SoM.
+
+	  If unsure, say N.
 
 config POWER_RESET_TPS65086
 	bool "TPS65086 restart driver"

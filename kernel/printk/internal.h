@@ -53,6 +53,8 @@ int devkmsg_sysctl_set_loglvl(const struct ctl_table *table, int write,
 
 /* Flags for a single printk record. */
 enum printk_info_flags {
+	/* always show on console, ignore console_loglevel */
+	LOG_FORCE_CON	= 1,
 	LOG_NEWLINE	= 2,	/* text ended with a newline */
 	LOG_CONT	= 8,	/* text is a fragment of a continuation line */
 };
@@ -62,6 +64,8 @@ struct dev_printk_info;
 
 extern struct printk_ringbuffer *prb;
 extern bool printk_kthreads_running;
+extern bool printk_kthreads_ready;
+extern bool debug_non_panic_cpus;
 
 __printf(4, 0)
 int vprintk_store(int facility, int level,
@@ -69,7 +73,6 @@ int vprintk_store(int facility, int level,
 		  const char *fmt, va_list args);
 
 __printf(1, 0) int vprintk_default(const char *fmt, va_list args);
-__printf(1, 0) int vprintk_deferred(const char *fmt, va_list args);
 
 void __printk_safe_enter(void);
 void __printk_safe_exit(void);
@@ -90,6 +93,7 @@ bool printk_percpu_data_ready(void);
 
 void defer_console_output(void);
 bool is_printk_legacy_deferred(void);
+bool is_printk_force_console(void);
 
 u16 printk_parse_prefix(const char *text, int *level,
 			enum printk_info_flags *flags);
@@ -176,6 +180,7 @@ static inline void nbcon_kthread_wake(struct console *con)
 #define PRINTKRB_RECORD_MAX	0
 
 #define printk_kthreads_running (false)
+#define printk_kthreads_ready (false)
 
 /*
  * In !PRINTK builds we still export console_sem
@@ -327,11 +332,16 @@ struct printk_message {
 	unsigned long		dropped;
 };
 
-bool other_cpu_in_panic(void);
 bool printk_get_next_message(struct printk_message *pmsg, u64 seq,
 			     bool is_extended, bool may_supress);
 
 #ifdef CONFIG_PRINTK
 void console_prepend_dropped(struct printk_message *pmsg, unsigned long dropped);
 void console_prepend_replay(struct printk_message *pmsg);
+#endif
+
+#ifdef CONFIG_SMP
+bool is_printk_cpu_sync_owner(void);
+#else
+static inline bool is_printk_cpu_sync_owner(void) { return false; }
 #endif

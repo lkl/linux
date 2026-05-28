@@ -14,7 +14,6 @@
 struct clps711x_chip {
 	void __iomem *pmpcon;
 	struct clk *clk;
-	spinlock_t lock;
 };
 
 static inline struct clps711x_chip *to_clps711x_chip(struct pwm_chip *chip)
@@ -42,7 +41,6 @@ static int clps711x_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 	struct clps711x_chip *priv = to_clps711x_chip(chip);
 	/* PWM0 - bits 4..7, PWM1 - bits 8..11 */
 	u32 shift = (pwm->hwpwm + 1) * 4;
-	unsigned long flags;
 	u32 pmpcon, val;
 
 	if (state->polarity != PWM_POLARITY_NORMAL)
@@ -56,14 +54,10 @@ static int clps711x_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 	else
 		val = 0;
 
-	spin_lock_irqsave(&priv->lock, flags);
-
 	pmpcon = readl(priv->pmpcon);
 	pmpcon &= ~(0xf << shift);
 	pmpcon |= val << shift;
 	writel(pmpcon, priv->pmpcon);
-
-	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return 0;
 }
@@ -93,12 +87,10 @@ static int clps711x_pwm_probe(struct platform_device *pdev)
 
 	chip->ops = &clps711x_pwm_ops;
 
-	spin_lock_init(&priv->lock);
-
 	return devm_pwmchip_add(&pdev->dev, chip);
 }
 
-static const struct of_device_id __maybe_unused clps711x_pwm_dt_ids[] = {
+static const struct of_device_id clps711x_pwm_dt_ids[] = {
 	{ .compatible = "cirrus,ep7209-pwm", },
 	{ }
 };
@@ -107,7 +99,7 @@ MODULE_DEVICE_TABLE(of, clps711x_pwm_dt_ids);
 static struct platform_driver clps711x_pwm_driver = {
 	.driver = {
 		.name = "clps711x-pwm",
-		.of_match_table = of_match_ptr(clps711x_pwm_dt_ids),
+		.of_match_table = clps711x_pwm_dt_ids,
 	},
 	.probe = clps711x_pwm_probe,
 };

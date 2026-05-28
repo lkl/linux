@@ -14,7 +14,7 @@
 #include <asm/pgtable-bits.h>
 #include <asm/string.h>
 
-extern void __init __iomem *early_ioremap(u64 phys_addr, unsigned long size);
+extern void __init __iomem *early_ioremap(phys_addr_t phys_addr, unsigned long size);
 extern void __init early_iounmap(void __iomem *addr, unsigned long size);
 
 #define early_memremap early_ioremap
@@ -23,9 +23,12 @@ extern void __init early_iounmap(void __iomem *addr, unsigned long size);
 #ifdef CONFIG_ARCH_IOREMAP
 
 static inline void __iomem *ioremap_prot(phys_addr_t offset, unsigned long size,
-					 unsigned long prot_val)
+					 pgprot_t prot)
 {
-	switch (prot_val & _CACHE_MASK) {
+	if (offset > TO_PHYS_MASK)
+		return NULL;
+
+	switch (pgprot_val(prot) & _CACHE_MASK) {
 	case _CACHE_CC:
 		return (void __iomem *)(unsigned long)(CACHE_BASE + offset);
 	case _CACHE_SUC:
@@ -38,7 +41,7 @@ static inline void __iomem *ioremap_prot(phys_addr_t offset, unsigned long size,
 }
 
 #define ioremap(offset, size)		\
-	ioremap_prot((offset), (size), pgprot_val(PAGE_KERNEL_SUC))
+	ioremap_prot((offset), (size), PAGE_KERNEL_SUC)
 
 #define iounmap(addr) 			((void)(addr))
 
@@ -55,22 +58,12 @@ static inline void __iomem *ioremap_prot(phys_addr_t offset, unsigned long size,
  */
 #define ioremap_wc(offset, size)	\
 	ioremap_prot((offset), (size),	\
-		pgprot_val(wc_enabled ? PAGE_KERNEL_WUC : PAGE_KERNEL_SUC))
+		     wc_enabled ? PAGE_KERNEL_WUC : PAGE_KERNEL_SUC)
 
 #define ioremap_cache(offset, size)	\
-	ioremap_prot((offset), (size), pgprot_val(PAGE_KERNEL))
+	ioremap_prot((offset), (size), PAGE_KERNEL)
 
 #define mmiowb() wmb()
-
-/*
- * String version of I/O memory access operations.
- */
-extern void __memset_io(volatile void __iomem *dst, int c, size_t count);
-extern void __memcpy_toio(volatile void __iomem *to, const void *from, size_t count);
-extern void __memcpy_fromio(void *to, const volatile void __iomem *from, size_t count);
-#define memset_io(c, v, l)     __memset_io((c), (v), (l))
-#define memcpy_fromio(a, c, l) __memcpy_fromio((a), (c), (l))
-#define memcpy_toio(c, a, l)   __memcpy_toio((c), (a), (l))
 
 #define __io_aw() mmiowb()
 

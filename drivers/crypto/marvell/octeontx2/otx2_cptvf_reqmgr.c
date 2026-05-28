@@ -264,9 +264,10 @@ static int cpt_process_ccode(struct otx2_cptlfs_info *lfs,
 				break;
 			}
 
-			dev_err(&pdev->dev,
-				"Request failed with software error code 0x%x\n",
-				cpt_status->s.uc_compcode);
+			pr_debug("Request failed with software error code 0x%x: algo = %s driver = %s\n",
+				 cpt_status->s.uc_compcode,
+				 info->req->areq->tfm->__crt_alg->cra_name,
+				 info->req->areq->tfm->__crt_alg->cra_driver_name);
 			otx2_cpt_dump_sg_list(pdev, info->req);
 			break;
 		}
@@ -390,9 +391,19 @@ void otx2_cpt_post_process(struct otx2_cptlf_wqe *wqe)
 			      &wqe->lfs->lf[wqe->lf_num].pqueue);
 }
 
-int otx2_cpt_get_kcrypto_eng_grp_num(struct pci_dev *pdev)
+int otx2_cpt_get_eng_grp_num(struct pci_dev *pdev,
+			     enum otx2_cpt_eng_type eng_type)
 {
 	struct otx2_cptvf_dev *cptvf = pci_get_drvdata(pdev);
 
-	return cptvf->lfs.kcrypto_eng_grp_num;
+	switch (eng_type) {
+	case OTX2_CPT_SE_TYPES:
+		return cptvf->lfs.kcrypto_se_eng_grp_num;
+	case OTX2_CPT_AE_TYPES:
+		return cptvf->lfs.kcrypto_ae_eng_grp_num;
+	default:
+		dev_err(&cptvf->pdev->dev, "Unsupported engine type");
+		break;
+	}
+	return -ENXIO;
 }

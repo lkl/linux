@@ -158,7 +158,6 @@ static ssize_t sof_ipc_flood_dfs_write(struct file *file, const char __user *buf
 	unsigned long ipc_duration_ms = 0;
 	bool flood_duration_test = false;
 	unsigned long ipc_count = 0;
-	struct dentry *dentry;
 	int err;
 	char *string;
 	int ret;
@@ -182,14 +181,7 @@ static ssize_t sof_ipc_flood_dfs_write(struct file *file, const char __user *buf
 	 * ipc_duration_ms test floods the DSP for the time specified
 	 * in the debugfs entry.
 	 */
-	dentry = file->f_path.dentry;
-	if (strcmp(dentry->d_name.name, DEBUGFS_IPC_FLOOD_COUNT) &&
-	    strcmp(dentry->d_name.name, DEBUGFS_IPC_FLOOD_DURATION)) {
-		ret = -EINVAL;
-		goto out;
-	}
-
-	if (!strcmp(dentry->d_name.name, DEBUGFS_IPC_FLOOD_DURATION))
+	if (debugfs_get_aux_num(file))
 		flood_duration_test = true;
 
 	/* test completion criterion */
@@ -231,7 +223,6 @@ static ssize_t sof_ipc_flood_dfs_write(struct file *file, const char __user *buf
 	ret = sof_debug_ipc_flood_test(cdev, flood_duration_test,
 				       ipc_duration_ms, ipc_count);
 
-	pm_runtime_mark_last_busy(dev);
 	err = pm_runtime_put_autosuspend(dev);
 	if (err < 0)
 		dev_err_ratelimited(dev, "debugfs write failed to idle %d\n", err);
@@ -252,22 +243,15 @@ static ssize_t sof_ipc_flood_dfs_read(struct file *file, char __user *buffer,
 	struct sof_ipc_flood_priv *priv = cdev->data;
 	size_t size_ret;
 
-	struct dentry *dentry;
+	if (*ppos)
+		return 0;
 
-	dentry = file->f_path.dentry;
-	if (!strcmp(dentry->d_name.name, DEBUGFS_IPC_FLOOD_COUNT) ||
-	    !strcmp(dentry->d_name.name, DEBUGFS_IPC_FLOOD_DURATION)) {
-		if (*ppos)
-			return 0;
+	count = min_t(size_t, count, strlen(priv->buf));
+	size_ret = copy_to_user(buffer, priv->buf, count);
+	if (size_ret)
+		return -EFAULT;
 
-		count = min_t(size_t, count, strlen(priv->buf));
-		size_ret = copy_to_user(buffer, priv->buf, count);
-		if (size_ret)
-			return -EFAULT;
-
-		*ppos += count;
-		return count;
-	}
+	*ppos += count;
 	return count;
 }
 
@@ -320,12 +304,12 @@ static int sof_ipc_flood_probe(struct auxiliary_device *auxdev,
 	priv->dfs_root = debugfs_create_dir(dev_name(dev), debugfs_root);
 	if (!IS_ERR_OR_NULL(priv->dfs_root)) {
 		/* create read-write ipc_flood_count debugfs entry */
-		debugfs_create_file(DEBUGFS_IPC_FLOOD_COUNT, 0644, priv->dfs_root,
-				    cdev, &sof_ipc_flood_fops);
+		debugfs_create_file_aux_num(DEBUGFS_IPC_FLOOD_COUNT, 0644,
+				    priv->dfs_root, cdev, 0, &sof_ipc_flood_fops);
 
 		/* create read-write ipc_flood_duration_ms debugfs entry */
-		debugfs_create_file(DEBUGFS_IPC_FLOOD_DURATION, 0644,
-				    priv->dfs_root, cdev, &sof_ipc_flood_fops);
+		debugfs_create_file_aux_num(DEBUGFS_IPC_FLOOD_DURATION, 0644,
+				    priv->dfs_root, cdev, 1, &sof_ipc_flood_fops);
 
 		if (auxdev->id == 0) {
 			/*
@@ -396,4 +380,4 @@ module_auxiliary_driver(sof_ipc_flood_client_drv);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("SOF IPC Flood Test Client Driver");
-MODULE_IMPORT_NS(SND_SOC_SOF_CLIENT);
+MODULE_IMPORT_NS("SND_SOC_SOF_CLIENT");

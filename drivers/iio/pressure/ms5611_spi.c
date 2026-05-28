@@ -92,7 +92,6 @@ static int ms5611_spi_probe(struct spi_device *spi)
 
 	spi->mode = SPI_MODE_0;
 	spi->max_speed_hz = min(spi->max_speed_hz, 20000000U);
-	spi->bits_per_word = 8;
 	ret = spi_setup(spi);
 	if (ret < 0)
 		return ret;
@@ -134,4 +133,4 @@ module_spi_driver(ms5611_driver);
 MODULE_AUTHOR("Tomasz Duszynski <tduszyns@gmail.com>");
 MODULE_DESCRIPTION("MS5611 spi driver");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(IIO_MS5611);
+MODULE_IMPORT_NS("IIO_MS5611");

@@ -10,6 +10,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/input.h>
 #include <linux/module.h>
@@ -136,7 +137,7 @@ static void ml_schedule_timer(struct ml_device *ml)
 
 	if (!events) {
 		pr_debug("no actions\n");
-		del_timer(&ml->timer);
+		timer_delete(&ml->timer);
 	} else {
 		pr_debug("timer set\n");
 		mod_timer(&ml->timer, earliest);
@@ -399,15 +400,13 @@ static void ml_play_effects(struct ml_device *ml)
 
 static void ml_effect_timer(struct timer_list *t)
 {
-	struct ml_device *ml = from_timer(ml, t, timer);
+	struct ml_device *ml = timer_container_of(ml, t, timer);
 	struct input_dev *dev = ml->dev;
-	unsigned long flags;
 
 	pr_debug("timer: updating effects\n");
 
-	spin_lock_irqsave(&dev->event_lock, flags);
+	guard(spinlock_irqsave)(&dev->event_lock);
 	ml_play_effects(ml);
-	spin_unlock_irqrestore(&dev->event_lock, flags);
 }
 
 /*
@@ -465,7 +464,7 @@ static int ml_ff_upload(struct input_dev *dev,
 	struct ml_device *ml = dev->ff->private;
 	struct ml_effect_state *state = &ml->states[effect->id];
 
-	spin_lock_irq(&dev->event_lock);
+	guard(spinlock_irq)(&dev->event_lock);
 
 	if (test_bit(FF_EFFECT_STARTED, &state->flags)) {
 		__clear_bit(FF_EFFECT_PLAYING, &state->flags);
@@ -476,8 +475,6 @@ static int ml_ff_upload(struct input_dev *dev,
 		state->adj_at = state->play_at;
 		ml_schedule_timer(ml);
 	}
-
-	spin_unlock_irq(&dev->event_lock);
 
 	return 0;
 }
@@ -493,7 +490,7 @@ static void ml_ff_destroy(struct ff_device *ff)
 	 * do not actually stop the timer, and therefore we should
 	 * do it here.
 	 */
-	del_timer_sync(&ml->timer);
+	timer_delete_sync(&ml->timer);
 
 	kfree(ml->private);
 }
@@ -507,12 +504,11 @@ static void ml_ff_destroy(struct ff_device *ff)
 int input_ff_create_memless(struct input_dev *dev, void *data,
 		int (*play_effect)(struct input_dev *, void *, struct ff_effect *))
 {
-	struct ml_device *ml;
 	struct ff_device *ff;
 	int error;
 	int i;
 
-	ml = kzalloc(sizeof(struct ml_device), GFP_KERNEL);
+	struct ml_device *ml __free(kfree) = kzalloc(sizeof(*ml), GFP_KERNEL);
 	if (!ml)
 		return -ENOMEM;
 
@@ -525,13 +521,10 @@ int input_ff_create_memless(struct input_dev *dev, void *data,
 	set_bit(FF_GAIN, dev->ffbit);
 
 	error = input_ff_create(dev, FF_MEMLESS_EFFECTS);
-	if (error) {
-		kfree(ml);
+	if (error)
 		return error;
-	}
 
 	ff = dev->ff;
-	ff->private = ml;
 	ff->upload = ml_ff_upload;
 	ff->playback = ml_ff_playback;
 	ff->set_gain = ml_ff_set_gain;
@@ -547,6 +540,8 @@ int input_ff_create_memless(struct input_dev *dev, void *data,
 
 	for (i = 0; i < FF_MEMLESS_EFFECTS; i++)
 		ml->states[i].effect = &ff->effects[i];
+
+	ff->private = no_free_ptr(ml);
 
 	return 0;
 }

@@ -141,6 +141,7 @@ enum s5p_mfc_inst_state {
 	MFCINST_RES_CHANGE_INIT,
 	MFCINST_RES_CHANGE_FLUSH,
 	MFCINST_RES_CHANGE_END,
+	MFCINST_NAL_ABORT,
 };
 
 /*
@@ -766,7 +767,11 @@ struct mfc_control {
 #define s5p_mfc_hw_call(f, op, args...) \
 	((f && f->op) ? f->op(args) : (typeof(f->op(args)))(-ENODEV))
 
-#define fh_to_ctx(__fh) container_of(__fh, struct s5p_mfc_ctx, fh)
+static inline struct s5p_mfc_ctx *file_to_ctx(struct file *filp)
+{
+	return container_of(file_to_v4l2_fh(filp), struct s5p_mfc_ctx, fh);
+}
+
 #define ctrl_to_ctx(__ctrl) \
 	container_of((__ctrl)->handler, struct s5p_mfc_ctx, ctrl_handler)
 

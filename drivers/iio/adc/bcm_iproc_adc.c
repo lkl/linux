@@ -511,10 +511,8 @@ static int iproc_adc_probe(struct platform_device *pdev)
 
 	indio_dev = devm_iio_device_alloc(&pdev->dev,
 					sizeof(*adc_priv));
-	if (!indio_dev) {
-		dev_err(&pdev->dev, "failed to allocate iio device\n");
+	if (!indio_dev)
 		return -ENOMEM;
-	}
 
 	adc_priv = iio_priv(indio_dev);
 	platform_set_drvdata(pdev, indio_dev);
@@ -611,10 +609,10 @@ static const struct of_device_id iproc_adc_of_match[] = {
 MODULE_DEVICE_TABLE(of, iproc_adc_of_match);
 
 static struct platform_driver iproc_adc_driver = {
-	.probe  = iproc_adc_probe,
-	.remove_new = iproc_adc_remove,
-	.driver	= {
-		.name	= "iproc-static-adc",
+	.probe = iproc_adc_probe,
+	.remove = iproc_adc_remove,
+	.driver = {
+		.name = "iproc-static-adc",
 		.of_match_table = iproc_adc_of_match,
 	},
 };

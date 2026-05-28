@@ -432,7 +432,7 @@ static int pcwd_stop(void)
 	int stat_reg;
 
 	/* Stop the timer */
-	del_timer(&pcwd_private.timer);
+	timer_delete(&pcwd_private.timer);
 
 	/*  Disable the board  */
 	if (pcwd_private.revision == PCWD_REVISION_C) {
@@ -833,7 +833,7 @@ static int pcwd_isa_match(struct device *dev, unsigned int id)
 			port0 = inb_p(base_addr);
 			port1 = inb_p(base_addr + 1);
 
-			/* Has either hearbeat bit changed?  */
+			/* Has either heartbeat bit changed?  */
 			if ((port0 ^ last_port0) & WD_HRTBT ||
 			    (port1 ^ last_port1) & WD_REVC_HRBT) {
 				retval = 1;

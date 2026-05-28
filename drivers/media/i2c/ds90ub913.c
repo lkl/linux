@@ -8,10 +8,10 @@
  * Copyright (c) 2023 Tomi Valkeinen <tomi.valkeinen@ideasonboard.com>
  */
 
+#include <linux/bitfield.h>
 #include <linux/clk-provider.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
-#include <linux/fwnode.h>
 #include <linux/gpio/driver.h>
 #include <linux/i2c-atr.h>
 #include <linux/i2c.h>
@@ -118,30 +118,65 @@ static const struct ub913_format_info *ub913_find_format(u32 incode)
 	return NULL;
 }
 
-static int ub913_read(const struct ub913_data *priv, u8 reg, u8 *val)
+static int ub913_read(const struct ub913_data *priv, u8 reg, u8 *val,
+		      int *err)
 {
 	unsigned int v;
 	int ret;
 
+	if (err && *err)
+		return *err;
+
 	ret = regmap_read(priv->regmap, reg, &v);
-	if (ret < 0) {
+	if (ret) {
 		dev_err(&priv->client->dev,
 			"Cannot read register 0x%02x: %d!\n", reg, ret);
-		return ret;
+		goto out;
 	}
 
 	*val = v;
-	return 0;
+
+out:
+	if (ret && err)
+		*err = ret;
+
+	return ret;
 }
 
-static int ub913_write(const struct ub913_data *priv, u8 reg, u8 val)
+static int ub913_write(const struct ub913_data *priv, u8 reg, u8 val,
+		       int *err)
 {
 	int ret;
+
+	if (err && *err)
+		return *err;
 
 	ret = regmap_write(priv->regmap, reg, val);
 	if (ret < 0)
 		dev_err(&priv->client->dev,
 			"Cannot write register 0x%02x: %d!\n", reg, ret);
+
+	if (ret && err)
+		*err = ret;
+
+	return ret;
+}
+
+static int ub913_update_bits(const struct ub913_data *priv, u8 reg, u8 mask,
+			     u8 val, int *err)
+{
+	int ret;
+
+	if (err && *err)
+		return *err;
+
+	ret = regmap_update_bits(priv->regmap, reg, mask, val);
+	if (ret < 0)
+		dev_err(&priv->client->dev,
+			"Cannot update register 0x%02x %d!\n", reg, ret);
+
+	if (ret && err)
+		*err = ret;
 
 	return ret;
 }
@@ -168,9 +203,9 @@ static int ub913_gpio_direction_out(struct gpio_chip *gc, unsigned int offset,
 						   0));
 }
 
-static void ub913_gpio_set(struct gpio_chip *gc, unsigned int offset, int value)
+static int ub913_gpio_set(struct gpio_chip *gc, unsigned int offset, int value)
 {
-	ub913_gpio_direction_out(gc, offset, value);
+	return ub913_gpio_direction_out(gc, offset, value);
 }
 
 static int ub913_gpio_of_xlate(struct gpio_chip *gc,
@@ -190,7 +225,7 @@ static int ub913_gpiochip_probe(struct ub913_data *priv)
 	int ret;
 
 	/* Initialize GPIOs 0 and 1 to local control, tri-state */
-	ub913_write(priv, UB913_REG_GPIO_CFG(0), 0);
+	ub913_write(priv, UB913_REG_GPIO_CFG(0), 0, NULL);
 
 	gc->label = dev_name(dev);
 	gc->parent = dev;
@@ -298,17 +333,8 @@ static int _ub913_set_routing(struct v4l2_subdev *sd,
 		.quantization = V4L2_QUANTIZATION_LIM_RANGE,
 		.xfer_func = V4L2_XFER_FUNC_SRGB,
 	};
-	struct v4l2_subdev_stream_configs *stream_configs;
-	unsigned int i;
+	struct v4l2_subdev_route *route;
 	int ret;
-
-	/*
-	 * Note: we can only support up to V4L2_FRAME_DESC_ENTRY_MAX, until
-	 * frame desc is made dynamically allocated.
-	 */
-
-	if (routing->num_routes > V4L2_FRAME_DESC_ENTRY_MAX)
-		return -EINVAL;
 
 	ret = v4l2_subdev_routing_validate(sd, routing,
 					   V4L2_SUBDEV_ROUTING_ONLY_1_TO_1);
@@ -319,13 +345,15 @@ static int _ub913_set_routing(struct v4l2_subdev *sd,
 	if (ret)
 		return ret;
 
-	stream_configs = &state->stream_configs;
+	for_each_active_route(&state->routing, route) {
+		struct v4l2_mbus_framefmt *fmt;
 
-	for (i = 0; i < stream_configs->num_configs; i++) {
-		if (stream_configs->configs[i].pad == UB913_PAD_SINK)
-			stream_configs->configs[i].fmt = in_format;
-		else
-			stream_configs->configs[i].fmt = out_format;
+		fmt = v4l2_subdev_state_get_format(state, route->sink_pad,
+						   route->sink_stream);
+		*fmt = in_format;
+		fmt = v4l2_subdev_state_get_format(state, route->source_pad,
+						   route->source_stream);
+		*fmt = out_format;
 	}
 
 	return 0;
@@ -436,9 +464,9 @@ static int ub913_set_fmt(struct v4l2_subdev *sd,
 	if (!fmt)
 		return -EINVAL;
 
-	format->format.code = finfo->outcode;
-
 	*fmt = format->format;
+
+	fmt->code = finfo->outcode;
 
 	return 0;
 }
@@ -468,25 +496,41 @@ static int ub913_log_status(struct v4l2_subdev *sd)
 {
 	struct ub913_data *priv = sd_to_ub913(sd);
 	struct device *dev = &priv->client->dev;
-	u8 v = 0, v1 = 0, v2 = 0;
+	u8 v, v1, v2;
+	int ret;
 
-	ub913_read(priv, UB913_REG_MODE_SEL, &v);
+	ret = ub913_read(priv, UB913_REG_MODE_SEL, &v, NULL);
+	if (ret)
+		return ret;
+
 	dev_info(dev, "MODE_SEL %#02x\n", v);
 
-	ub913_read(priv, UB913_REG_CRC_ERRORS_LSB, &v1);
-	ub913_read(priv, UB913_REG_CRC_ERRORS_MSB, &v2);
+	ub913_read(priv, UB913_REG_CRC_ERRORS_LSB, &v1, &ret);
+	ub913_read(priv, UB913_REG_CRC_ERRORS_MSB, &v2, &ret);
+	if (ret)
+		return ret;
+
 	dev_info(dev, "CRC errors %u\n", v1 | (v2 << 8));
 
 	/* clear CRC errors */
-	ub913_read(priv, UB913_REG_GENERAL_CFG, &v);
+	ub913_read(priv, UB913_REG_GENERAL_CFG, &v, &ret);
 	ub913_write(priv, UB913_REG_GENERAL_CFG,
-		    v | UB913_REG_GENERAL_CFG_CRC_ERR_RESET);
-	ub913_write(priv, UB913_REG_GENERAL_CFG, v);
+		    v | UB913_REG_GENERAL_CFG_CRC_ERR_RESET, &ret);
+	ub913_write(priv, UB913_REG_GENERAL_CFG, v, &ret);
 
-	ub913_read(priv, UB913_REG_GENERAL_STATUS, &v);
+	if (ret)
+		return ret;
+
+	ret = ub913_read(priv, UB913_REG_GENERAL_STATUS, &v, NULL);
+	if (ret)
+		return ret;
+
 	dev_info(dev, "GENERAL_STATUS %#02x\n", v);
 
-	ub913_read(priv, UB913_REG_PLL_OVR, &v);
+	ret = ub913_read(priv, UB913_REG_PLL_OVR, &v, NULL);
+	if (ret)
+		return ret;
+
 	dev_info(dev, "PLL_OVR %#02x\n", v);
 
 	return 0;
@@ -642,11 +686,11 @@ static int ub913_i2c_master_init(struct ub913_data *priv)
 	scl_high = div64_u64((u64)scl_high * ref, 1000000000);
 	scl_low = div64_u64((u64)scl_low * ref, 1000000000);
 
-	ret = ub913_write(priv, UB913_REG_SCL_HIGH_TIME, scl_high);
+	ret = ub913_write(priv, UB913_REG_SCL_HIGH_TIME, scl_high, NULL);
 	if (ret)
 		return ret;
 
-	ret = ub913_write(priv, UB913_REG_SCL_LOW_TIME, scl_low);
+	ret = ub913_write(priv, UB913_REG_SCL_LOW_TIME, scl_low, NULL);
 	if (ret)
 		return ret;
 
@@ -656,6 +700,7 @@ static int ub913_i2c_master_init(struct ub913_data *priv)
 static int ub913_add_i2c_adapter(struct ub913_data *priv)
 {
 	struct device *dev = &priv->client->dev;
+	struct i2c_atr_adap_desc desc = { };
 	struct fwnode_handle *i2c_handle;
 	int ret;
 
@@ -663,8 +708,12 @@ static int ub913_add_i2c_adapter(struct ub913_data *priv)
 	if (!i2c_handle)
 		return 0;
 
-	ret = i2c_atr_add_adapter(priv->plat_data->atr, priv->plat_data->port,
-				  dev, i2c_handle);
+	desc.chan_id = priv->plat_data->port;
+	desc.parent = dev;
+	desc.bus_handle = i2c_handle;
+	desc.num_aliases = 0;
+
+	ret = i2c_atr_add_adapter(priv->plat_data->atr, &desc);
 
 	fwnode_handle_put(i2c_handle);
 
@@ -715,7 +764,7 @@ static int ub913_hw_init(struct ub913_data *priv)
 	int ret;
 	u8 v;
 
-	ret = ub913_read(priv, UB913_REG_MODE_SEL, &v);
+	ret = ub913_read(priv, UB913_REG_MODE_SEL, &v, NULL);
 	if (ret)
 		return ret;
 
@@ -733,10 +782,13 @@ static int ub913_hw_init(struct ub913_data *priv)
 	if (ret)
 		return dev_err_probe(dev, ret, "i2c master init failed\n");
 
-	ub913_read(priv, UB913_REG_GENERAL_CFG, &v);
-	v &= ~UB913_REG_GENERAL_CFG_PCLK_RISING;
-	v |= priv->pclk_polarity_rising ? UB913_REG_GENERAL_CFG_PCLK_RISING : 0;
-	ub913_write(priv, UB913_REG_GENERAL_CFG, v);
+	ret = ub913_update_bits(priv, UB913_REG_GENERAL_CFG,
+				UB913_REG_GENERAL_CFG_PCLK_RISING,
+				FIELD_PREP(UB913_REG_GENERAL_CFG_PCLK_RISING,
+					   priv->pclk_polarity_rising), NULL);
+
+	if (ret)
+		return ret;
 
 	return 0;
 }
@@ -793,7 +845,6 @@ static void ub913_subdev_uninit(struct ub913_data *priv)
 	v4l2_async_unregister_subdev(&priv->sd);
 	ub913_v4l2_nf_unregister(priv);
 	v4l2_subdev_cleanup(&priv->sd);
-	fwnode_handle_put(priv->sd.fwnode);
 	media_entity_cleanup(&priv->sd.entity);
 }
 
@@ -904,4 +955,4 @@ MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Texas Instruments DS90UB913 FPD-Link III Serializer Driver");
 MODULE_AUTHOR("Luca Ceresoli <luca@lucaceresoli.net>");
 MODULE_AUTHOR("Tomi Valkeinen <tomi.valkeinen@ideasonboard.com>");
-MODULE_IMPORT_NS(I2C_ATR);
+MODULE_IMPORT_NS("I2C_ATR");

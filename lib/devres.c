@@ -115,9 +115,8 @@ EXPORT_SYMBOL(devm_ioremap_wc);
  */
 void devm_iounmap(struct device *dev, void __iomem *addr)
 {
-	WARN_ON(devres_destroy(dev, devm_ioremap_release, devm_ioremap_match,
+	WARN_ON(devres_release(dev, devm_ioremap_release, devm_ioremap_match,
 			       (__force void *)addr));
-	iounmap(addr);
 }
 EXPORT_SYMBOL(devm_iounmap);
 
@@ -207,6 +206,7 @@ void __iomem *devm_ioremap_resource_wc(struct device *dev,
 {
 	return __devm_ioremap_resource(dev, res, DEVM_IOREMAP_WC);
 }
+EXPORT_SYMBOL(devm_ioremap_resource_wc);
 
 /*
  * devm_of_iomap - Requests a resource and maps the memory mapped IO
@@ -308,8 +308,7 @@ EXPORT_SYMBOL(devm_ioport_map);
  */
 void devm_ioport_unmap(struct device *dev, void __iomem *addr)
 {
-	ioport_unmap(addr);
-	WARN_ON(devres_destroy(dev, devm_ioport_map_release,
+	WARN_ON(devres_release(dev, devm_ioport_map_release,
 			       devm_ioport_map_match, (__force void *)addr));
 }
 EXPORT_SYMBOL(devm_ioport_unmap);

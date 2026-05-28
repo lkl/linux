@@ -180,20 +180,14 @@ static int mmc_test_set_blksize(struct mmc_test_card *test, unsigned size)
 	return mmc_set_blocklen(test->card, size);
 }
 
-static bool mmc_test_card_cmd23(struct mmc_card *card)
-{
-	return mmc_card_mmc(card) ||
-	       (mmc_card_sd(card) && card->scr.cmds & SD_SCR_CMD23_SUPPORT);
-}
-
 static void mmc_test_prepare_sbc(struct mmc_test_card *test,
 				 struct mmc_request *mrq, unsigned int blocks)
 {
 	struct mmc_card *card = test->card;
 
-	if (!mrq->sbc || !mmc_host_cmd23(card->host) ||
-	    !mmc_test_card_cmd23(card) || !mmc_op_multi(mrq->cmd->opcode) ||
-	    (card->quirks & MMC_QUIRK_BLK_NO_CMD23)) {
+	if (!mrq->sbc || !mmc_host_can_cmd23(card->host) ||
+	    !mmc_card_can_cmd23(card) || !mmc_op_multi(mrq->cmd->opcode) ||
+	    mmc_card_blk_no_cmd23(card)) {
 		mrq->sbc = NULL;
 		return;
 	}
@@ -1510,7 +1504,7 @@ static int mmc_test_area_erase(struct mmc_test_card *test)
 {
 	struct mmc_test_area *t = &test->area;
 
-	if (!mmc_can_erase(test->card))
+	if (!mmc_card_can_erase(test->card))
 		return 0;
 
 	return mmc_erase(test->card, t->dev_addr, t->max_sz >> 9,
@@ -1746,10 +1740,10 @@ static int mmc_test_profile_trim_perf(struct mmc_test_card *test)
 	struct timespec64 ts1, ts2;
 	int ret;
 
-	if (!mmc_can_trim(test->card))
+	if (!mmc_card_can_trim(test->card))
 		return RESULT_UNSUP_CARD;
 
-	if (!mmc_can_erase(test->card))
+	if (!mmc_card_can_erase(test->card))
 		return RESULT_UNSUP_HOST;
 
 	for (sz = 512; sz < t->max_sz; sz <<= 1) {
@@ -1863,10 +1857,10 @@ static int mmc_test_profile_seq_trim_perf(struct mmc_test_card *test)
 	struct timespec64 ts1, ts2;
 	int ret;
 
-	if (!mmc_can_trim(test->card))
+	if (!mmc_card_can_trim(test->card))
 		return RESULT_UNSUP_CARD;
 
-	if (!mmc_can_erase(test->card))
+	if (!mmc_card_can_erase(test->card))
 		return RESULT_UNSUP_HOST;
 
 	for (sz = 512; sz <= t->max_sz; sz <<= 1) {
@@ -2114,7 +2108,7 @@ static int mmc_test_rw_multiple(struct mmc_test_card *test,
 		return 0;
 
 	/* prepare test area */
-	if (mmc_can_erase(test->card) &&
+	if (mmc_card_can_erase(test->card) &&
 	    tdata->prepare & MMC_TEST_PREP_ERASE) {
 		ret = mmc_erase(test->card, dev_addr,
 				size / 512, test->card->erase_arg);
@@ -2390,7 +2384,7 @@ static int mmc_test_ongoing_transfer(struct mmc_test_card *test,
 			     512, write);
 
 	if (use_sbc && t->blocks > 1 && !mrq->sbc) {
-		ret =  mmc_host_cmd23(host) ?
+		ret =  mmc_host_can_cmd23(host) ?
 		       RESULT_UNSUP_CARD :
 		       RESULT_UNSUP_HOST;
 		goto out_free;
@@ -3240,6 +3234,12 @@ static int mmc_test_probe(struct mmc_card *card)
 
 	if (!mmc_card_mmc(card) && !mmc_card_sd(card))
 		return -ENODEV;
+
+	if (mmc_card_ult_capacity(card)) {
+		pr_info("%s: mmc-test currently UNSUPPORTED for SDUC\n",
+			mmc_hostname(card->host));
+		return -EOPNOTSUPP;
+	}
 
 	ret = mmc_test_register_dbgfs_file(card);
 	if (ret)

@@ -30,7 +30,7 @@
 #include "dcn314_dio_stream_encoder.h"
 #include "reg_helper.h"
 #include "hw_shared.h"
-#include "link.h"
+#include "link_service.h"
 #include "dpcd_defs.h"
 
 #define DC_LOGGER \
@@ -81,6 +81,15 @@ void enc314_disable_fifo(struct stream_encoder *enc)
 	struct dcn10_stream_encoder *enc1 = DCN10STRENC_FROM_STRENC(enc);
 
 	REG_UPDATE(DIG_FIFO_CTRL0, DIG_FIFO_ENABLE, 0);
+}
+
+static bool enc314_is_fifo_enabled(struct stream_encoder *enc)
+{
+	struct dcn10_stream_encoder *enc1 = DCN10STRENC_FROM_STRENC(enc);
+	uint32_t reset_val;
+
+	REG_GET(DIG_FIFO_CTRL0, DIG_FIFO_ENABLE, &reset_val);
+	return (reset_val != 0);
 }
 
 void enc314_dp_set_odm_combine(
@@ -468,6 +477,7 @@ static const struct stream_encoder_funcs dcn314_str_enc_funcs = {
 
 	.enable_fifo = enc314_enable_fifo,
 	.disable_fifo = enc314_disable_fifo,
+	.is_fifo_enabled = enc314_is_fifo_enabled,
 	.set_input_mode = enc314_set_dig_input_mode,
 };
 

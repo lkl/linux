@@ -617,12 +617,12 @@ static const struct khadas_ts050_panel_cmd ts050_init_code[] = {
 	{0xd4, {0x04}, 0x01}, /* RGBMIPICTRL: VSYNC front porch = 4 */
 };
 
-struct khadas_ts050_panel_data ts050_panel_data = {
+static struct khadas_ts050_panel_data ts050_panel_data = {
 	.init_code = (struct khadas_ts050_panel_cmd *)ts050_init_code,
 	.len = ARRAY_SIZE(ts050_init_code)
 };
 
-struct khadas_ts050_panel_data ts050v2_panel_data = {
+static struct khadas_ts050_panel_data ts050v2_panel_data = {
 	.init_code = (struct khadas_ts050_panel_cmd *)ts050v2_init_code,
 	.len = ARRAY_SIZE(ts050v2_init_code)
 };
@@ -821,9 +821,6 @@ static int khadas_ts050_panel_add(struct khadas_ts050_panel *khadas_ts050)
 		return dev_err_probe(dev, PTR_ERR(khadas_ts050->enable_gpio),
 				     "failed to get enable gpio");
 
-	drm_panel_init(&khadas_ts050->base, &khadas_ts050->link->dev,
-		       &khadas_ts050_panel_funcs, DRM_MODE_CONNECTOR_DSI);
-
 	err = drm_panel_of_backlight(&khadas_ts050->base);
 	if (err)
 		return err;
@@ -850,10 +847,12 @@ static int khadas_ts050_panel_probe(struct mipi_dsi_device *dsi)
 	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
 			  MIPI_DSI_MODE_LPM | MIPI_DSI_MODE_NO_EOT_PACKET;
 
-	khadas_ts050 = devm_kzalloc(&dsi->dev, sizeof(*khadas_ts050),
-				    GFP_KERNEL);
-	if (!khadas_ts050)
-		return -ENOMEM;
+	khadas_ts050 = devm_drm_panel_alloc(&dsi->dev, __typeof(*khadas_ts050),
+					    base, &khadas_ts050_panel_funcs,
+					    DRM_MODE_CONNECTOR_DSI);
+
+	if (IS_ERR(khadas_ts050))
+		return PTR_ERR(khadas_ts050);
 
 	khadas_ts050->panel_data = (struct khadas_ts050_panel_data *)data;
 	mipi_dsi_set_drvdata(dsi, khadas_ts050);

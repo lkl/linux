@@ -10,8 +10,7 @@
 #include <assert.h>
 #include <unistd.h>
 #include <stdarg.h>
-
-#define unlikely(cond) (cond)
+#include <linux/kallsyms.h>
 
 #include <asm/insn.h>
 #include <inat.c>
@@ -106,7 +105,7 @@ static void parse_args(int argc, char **argv)
 	}
 }
 
-#define BUFSIZE 256
+#define BUFSIZE (256 + KSYM_NAME_LEN)
 
 int main(int argc, char **argv)
 {
@@ -168,7 +167,7 @@ int main(int argc, char **argv)
 		pr_warn("Decoded and checked %d instructions with %d "
 			"failures\n", insns, warnings);
 	else
-		fprintf(stdout, "%s: success: Decoded and checked %d"
+		fprintf(stdout, "  %s: success: Decoded and checked %d"
 			" instructions\n", prog, insns);
 	return 0;
 }

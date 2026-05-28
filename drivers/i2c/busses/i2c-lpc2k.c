@@ -442,8 +442,13 @@ static int i2c_lpc2k_suspend(struct device *dev)
 static int i2c_lpc2k_resume(struct device *dev)
 {
 	struct lpc2k_i2c *i2c = dev_get_drvdata(dev);
+	int ret;
 
-	clk_enable(i2c->clk);
+	ret = clk_enable(i2c->clk);
+	if (ret) {
+		dev_err(dev, "failed to enable clock.\n");
+		return ret;
+	}
 	i2c_lpc2k_reset(i2c);
 
 	return 0;
@@ -462,7 +467,7 @@ MODULE_DEVICE_TABLE(of, lpc2k_i2c_match);
 
 static struct platform_driver i2c_lpc2k_driver = {
 	.probe	= i2c_lpc2k_probe,
-	.remove_new = i2c_lpc2k_remove,
+	.remove = i2c_lpc2k_remove,
 	.driver	= {
 		.name		= "lpc2k-i2c",
 		.pm		= pm_sleep_ptr(&i2c_lpc2k_dev_pm_ops),

@@ -10,7 +10,6 @@
 
 #include <linux/sysfs.h>
 
-#include "zcrypt_api.h"
 #include "zcrypt_ccamisc.h"
 #include "zcrypt_ep11misc.h"
 
@@ -30,13 +29,13 @@ static int sys_pkey_handler_gen_key(u32 keytype, u32 keysubtype,
 	rc = pkey_handler_gen_key(NULL, 0,
 				  keytype, keysubtype,
 				  keybitsize, flags,
-				  keybuf, keybuflen, keyinfo);
+				  keybuf, keybuflen, keyinfo, 0);
 	if (rc == -ENODEV) {
 		pkey_handler_request_modules();
 		rc = pkey_handler_gen_key(NULL, 0,
 					  keytype, keysubtype,
 					  keybitsize, flags,
-					  keybuf, keybuflen, keyinfo);
+					  keybuf, keybuflen, keyinfo, 0);
 	}
 
 	return rc;
@@ -185,7 +184,7 @@ static ssize_t pkey_protkey_hmac_attr_read(u32 keytype, char *buf,
 
 static ssize_t protkey_aes_128_read(struct file *filp,
 				    struct kobject *kobj,
-				    struct bin_attribute *attr,
+				    const struct bin_attribute *attr,
 				    char *buf, loff_t off,
 				    size_t count)
 {
@@ -195,7 +194,7 @@ static ssize_t protkey_aes_128_read(struct file *filp,
 
 static ssize_t protkey_aes_192_read(struct file *filp,
 				    struct kobject *kobj,
-				    struct bin_attribute *attr,
+				    const struct bin_attribute *attr,
 				    char *buf, loff_t off,
 				    size_t count)
 {
@@ -205,7 +204,7 @@ static ssize_t protkey_aes_192_read(struct file *filp,
 
 static ssize_t protkey_aes_256_read(struct file *filp,
 				    struct kobject *kobj,
-				    struct bin_attribute *attr,
+				    const struct bin_attribute *attr,
 				    char *buf, loff_t off,
 				    size_t count)
 {
@@ -215,7 +214,7 @@ static ssize_t protkey_aes_256_read(struct file *filp,
 
 static ssize_t protkey_aes_128_xts_read(struct file *filp,
 					struct kobject *kobj,
-					struct bin_attribute *attr,
+					const struct bin_attribute *attr,
 					char *buf, loff_t off,
 					size_t count)
 {
@@ -225,7 +224,7 @@ static ssize_t protkey_aes_128_xts_read(struct file *filp,
 
 static ssize_t protkey_aes_256_xts_read(struct file *filp,
 					struct kobject *kobj,
-					struct bin_attribute *attr,
+					const struct bin_attribute *attr,
 					char *buf, loff_t off,
 					size_t count)
 {
@@ -235,7 +234,7 @@ static ssize_t protkey_aes_256_xts_read(struct file *filp,
 
 static ssize_t protkey_aes_xts_128_read(struct file *filp,
 					struct kobject *kobj,
-					struct bin_attribute *attr,
+					const struct bin_attribute *attr,
 					char *buf, loff_t off,
 					size_t count)
 {
@@ -245,7 +244,7 @@ static ssize_t protkey_aes_xts_128_read(struct file *filp,
 
 static ssize_t protkey_aes_xts_256_read(struct file *filp,
 					struct kobject *kobj,
-					struct bin_attribute *attr,
+					const struct bin_attribute *attr,
 					char *buf, loff_t off,
 					size_t count)
 {
@@ -255,7 +254,7 @@ static ssize_t protkey_aes_xts_256_read(struct file *filp,
 
 static ssize_t protkey_hmac_512_read(struct file *filp,
 				     struct kobject *kobj,
-				     struct bin_attribute *attr,
+				     const struct bin_attribute *attr,
 				     char *buf, loff_t off,
 				     size_t count)
 {
@@ -265,7 +264,7 @@ static ssize_t protkey_hmac_512_read(struct file *filp,
 
 static ssize_t protkey_hmac_1024_read(struct file *filp,
 				      struct kobject *kobj,
-				      struct bin_attribute *attr,
+				      const struct bin_attribute *attr,
 				      char *buf, loff_t off,
 				      size_t count)
 {
@@ -273,17 +272,17 @@ static ssize_t protkey_hmac_1024_read(struct file *filp,
 					   buf, off, count);
 }
 
-static BIN_ATTR_RO(protkey_aes_128, sizeof(struct protaeskeytoken));
-static BIN_ATTR_RO(protkey_aes_192, sizeof(struct protaeskeytoken));
-static BIN_ATTR_RO(protkey_aes_256, sizeof(struct protaeskeytoken));
-static BIN_ATTR_RO(protkey_aes_128_xts, 2 * sizeof(struct protaeskeytoken));
-static BIN_ATTR_RO(protkey_aes_256_xts, 2 * sizeof(struct protaeskeytoken));
-static BIN_ATTR_RO(protkey_aes_xts_128, sizeof(struct protkeytoken) + 64);
-static BIN_ATTR_RO(protkey_aes_xts_256, sizeof(struct protkeytoken) + 96);
-static BIN_ATTR_RO(protkey_hmac_512, sizeof(struct protkeytoken) + 96);
-static BIN_ATTR_RO(protkey_hmac_1024, sizeof(struct protkeytoken) + 160);
+static const BIN_ATTR_RO(protkey_aes_128, sizeof(struct protaeskeytoken));
+static const BIN_ATTR_RO(protkey_aes_192, sizeof(struct protaeskeytoken));
+static const BIN_ATTR_RO(protkey_aes_256, sizeof(struct protaeskeytoken));
+static const BIN_ATTR_RO(protkey_aes_128_xts, 2 * sizeof(struct protaeskeytoken));
+static const BIN_ATTR_RO(protkey_aes_256_xts, 2 * sizeof(struct protaeskeytoken));
+static const BIN_ATTR_RO(protkey_aes_xts_128, sizeof(struct protkeytoken) + 64);
+static const BIN_ATTR_RO(protkey_aes_xts_256, sizeof(struct protkeytoken) + 96);
+static const BIN_ATTR_RO(protkey_hmac_512, sizeof(struct protkeytoken) + 96);
+static const BIN_ATTR_RO(protkey_hmac_1024, sizeof(struct protkeytoken) + 160);
 
-static struct bin_attribute *protkey_attrs[] = {
+static const struct bin_attribute *const protkey_attrs[] = {
 	&bin_attr_protkey_aes_128,
 	&bin_attr_protkey_aes_192,
 	&bin_attr_protkey_aes_256,
@@ -296,8 +295,8 @@ static struct bin_attribute *protkey_attrs[] = {
 	NULL
 };
 
-static struct attribute_group protkey_attr_group = {
-	.name	   = "protkey",
+static const struct attribute_group protkey_attr_group = {
+	.name	       = "protkey",
 	.bin_attrs = protkey_attrs,
 };
 
@@ -342,7 +341,7 @@ static ssize_t pkey_ccadata_aes_attr_read(u32 keytype, bool is_xts, char *buf,
 
 static ssize_t ccadata_aes_128_read(struct file *filp,
 				    struct kobject *kobj,
-				    struct bin_attribute *attr,
+				    const struct bin_attribute *attr,
 				    char *buf, loff_t off,
 				    size_t count)
 {
@@ -352,7 +351,7 @@ static ssize_t ccadata_aes_128_read(struct file *filp,
 
 static ssize_t ccadata_aes_192_read(struct file *filp,
 				    struct kobject *kobj,
-				    struct bin_attribute *attr,
+				    const struct bin_attribute *attr,
 				    char *buf, loff_t off,
 				    size_t count)
 {
@@ -362,7 +361,7 @@ static ssize_t ccadata_aes_192_read(struct file *filp,
 
 static ssize_t ccadata_aes_256_read(struct file *filp,
 				    struct kobject *kobj,
-				    struct bin_attribute *attr,
+				    const struct bin_attribute *attr,
 				    char *buf, loff_t off,
 				    size_t count)
 {
@@ -372,7 +371,7 @@ static ssize_t ccadata_aes_256_read(struct file *filp,
 
 static ssize_t ccadata_aes_128_xts_read(struct file *filp,
 					struct kobject *kobj,
-					struct bin_attribute *attr,
+					const struct bin_attribute *attr,
 					char *buf, loff_t off,
 					size_t count)
 {
@@ -382,7 +381,7 @@ static ssize_t ccadata_aes_128_xts_read(struct file *filp,
 
 static ssize_t ccadata_aes_256_xts_read(struct file *filp,
 					struct kobject *kobj,
-					struct bin_attribute *attr,
+					const struct bin_attribute *attr,
 					char *buf, loff_t off,
 					size_t count)
 {
@@ -390,13 +389,13 @@ static ssize_t ccadata_aes_256_xts_read(struct file *filp,
 					  off, count);
 }
 
-static BIN_ATTR_RO(ccadata_aes_128, sizeof(struct secaeskeytoken));
-static BIN_ATTR_RO(ccadata_aes_192, sizeof(struct secaeskeytoken));
-static BIN_ATTR_RO(ccadata_aes_256, sizeof(struct secaeskeytoken));
-static BIN_ATTR_RO(ccadata_aes_128_xts, 2 * sizeof(struct secaeskeytoken));
-static BIN_ATTR_RO(ccadata_aes_256_xts, 2 * sizeof(struct secaeskeytoken));
+static const BIN_ATTR_RO(ccadata_aes_128, sizeof(struct secaeskeytoken));
+static const BIN_ATTR_RO(ccadata_aes_192, sizeof(struct secaeskeytoken));
+static const BIN_ATTR_RO(ccadata_aes_256, sizeof(struct secaeskeytoken));
+static const BIN_ATTR_RO(ccadata_aes_128_xts, 2 * sizeof(struct secaeskeytoken));
+static const BIN_ATTR_RO(ccadata_aes_256_xts, 2 * sizeof(struct secaeskeytoken));
 
-static struct bin_attribute *ccadata_attrs[] = {
+static const struct bin_attribute *const ccadata_attrs[] = {
 	&bin_attr_ccadata_aes_128,
 	&bin_attr_ccadata_aes_192,
 	&bin_attr_ccadata_aes_256,
@@ -405,8 +404,8 @@ static struct bin_attribute *ccadata_attrs[] = {
 	NULL
 };
 
-static struct attribute_group ccadata_attr_group = {
-	.name	   = "ccadata",
+static const struct attribute_group ccadata_attr_group = {
+	.name	       = "ccadata",
 	.bin_attrs = ccadata_attrs,
 };
 
@@ -456,7 +455,7 @@ static ssize_t pkey_ccacipher_aes_attr_read(enum pkey_key_size keybits,
 
 static ssize_t ccacipher_aes_128_read(struct file *filp,
 				      struct kobject *kobj,
-				      struct bin_attribute *attr,
+				      const struct bin_attribute *attr,
 				      char *buf, loff_t off,
 				      size_t count)
 {
@@ -466,7 +465,7 @@ static ssize_t ccacipher_aes_128_read(struct file *filp,
 
 static ssize_t ccacipher_aes_192_read(struct file *filp,
 				      struct kobject *kobj,
-				      struct bin_attribute *attr,
+				      const struct bin_attribute *attr,
 				      char *buf, loff_t off,
 				      size_t count)
 {
@@ -476,7 +475,7 @@ static ssize_t ccacipher_aes_192_read(struct file *filp,
 
 static ssize_t ccacipher_aes_256_read(struct file *filp,
 				      struct kobject *kobj,
-				      struct bin_attribute *attr,
+				      const struct bin_attribute *attr,
 				      char *buf, loff_t off,
 				      size_t count)
 {
@@ -486,7 +485,7 @@ static ssize_t ccacipher_aes_256_read(struct file *filp,
 
 static ssize_t ccacipher_aes_128_xts_read(struct file *filp,
 					  struct kobject *kobj,
-					  struct bin_attribute *attr,
+					  const struct bin_attribute *attr,
 					  char *buf, loff_t off,
 					  size_t count)
 {
@@ -496,7 +495,7 @@ static ssize_t ccacipher_aes_128_xts_read(struct file *filp,
 
 static ssize_t ccacipher_aes_256_xts_read(struct file *filp,
 					  struct kobject *kobj,
-					  struct bin_attribute *attr,
+					  const struct bin_attribute *attr,
 					  char *buf, loff_t off,
 					  size_t count)
 {
@@ -504,13 +503,13 @@ static ssize_t ccacipher_aes_256_xts_read(struct file *filp,
 					    off, count);
 }
 
-static BIN_ATTR_RO(ccacipher_aes_128, CCACIPHERTOKENSIZE);
-static BIN_ATTR_RO(ccacipher_aes_192, CCACIPHERTOKENSIZE);
-static BIN_ATTR_RO(ccacipher_aes_256, CCACIPHERTOKENSIZE);
-static BIN_ATTR_RO(ccacipher_aes_128_xts, 2 * CCACIPHERTOKENSIZE);
-static BIN_ATTR_RO(ccacipher_aes_256_xts, 2 * CCACIPHERTOKENSIZE);
+static const BIN_ATTR_RO(ccacipher_aes_128, CCACIPHERTOKENSIZE);
+static const BIN_ATTR_RO(ccacipher_aes_192, CCACIPHERTOKENSIZE);
+static const BIN_ATTR_RO(ccacipher_aes_256, CCACIPHERTOKENSIZE);
+static const BIN_ATTR_RO(ccacipher_aes_128_xts, 2 * CCACIPHERTOKENSIZE);
+static const BIN_ATTR_RO(ccacipher_aes_256_xts, 2 * CCACIPHERTOKENSIZE);
 
-static struct bin_attribute *ccacipher_attrs[] = {
+static const struct bin_attribute *const ccacipher_attrs[] = {
 	&bin_attr_ccacipher_aes_128,
 	&bin_attr_ccacipher_aes_192,
 	&bin_attr_ccacipher_aes_256,
@@ -519,8 +518,8 @@ static struct bin_attribute *ccacipher_attrs[] = {
 	NULL
 };
 
-static struct attribute_group ccacipher_attr_group = {
-	.name	   = "ccacipher",
+static const struct attribute_group ccacipher_attr_group = {
+	.name	       = "ccacipher",
 	.bin_attrs = ccacipher_attrs,
 };
 
@@ -571,7 +570,7 @@ static ssize_t pkey_ep11_aes_attr_read(enum pkey_key_size keybits,
 
 static ssize_t ep11_aes_128_read(struct file *filp,
 				 struct kobject *kobj,
-				 struct bin_attribute *attr,
+				 const struct bin_attribute *attr,
 				 char *buf, loff_t off,
 				 size_t count)
 {
@@ -581,7 +580,7 @@ static ssize_t ep11_aes_128_read(struct file *filp,
 
 static ssize_t ep11_aes_192_read(struct file *filp,
 				 struct kobject *kobj,
-				 struct bin_attribute *attr,
+				 const struct bin_attribute *attr,
 				 char *buf, loff_t off,
 				 size_t count)
 {
@@ -591,7 +590,7 @@ static ssize_t ep11_aes_192_read(struct file *filp,
 
 static ssize_t ep11_aes_256_read(struct file *filp,
 				 struct kobject *kobj,
-				 struct bin_attribute *attr,
+				 const struct bin_attribute *attr,
 				 char *buf, loff_t off,
 				 size_t count)
 {
@@ -601,7 +600,7 @@ static ssize_t ep11_aes_256_read(struct file *filp,
 
 static ssize_t ep11_aes_128_xts_read(struct file *filp,
 				     struct kobject *kobj,
-				     struct bin_attribute *attr,
+				     const struct bin_attribute *attr,
 				     char *buf, loff_t off,
 				     size_t count)
 {
@@ -611,7 +610,7 @@ static ssize_t ep11_aes_128_xts_read(struct file *filp,
 
 static ssize_t ep11_aes_256_xts_read(struct file *filp,
 				     struct kobject *kobj,
-				     struct bin_attribute *attr,
+				     const struct bin_attribute *attr,
 				     char *buf, loff_t off,
 				     size_t count)
 {
@@ -619,13 +618,13 @@ static ssize_t ep11_aes_256_xts_read(struct file *filp,
 				       off, count);
 }
 
-static BIN_ATTR_RO(ep11_aes_128, MAXEP11AESKEYBLOBSIZE);
-static BIN_ATTR_RO(ep11_aes_192, MAXEP11AESKEYBLOBSIZE);
-static BIN_ATTR_RO(ep11_aes_256, MAXEP11AESKEYBLOBSIZE);
-static BIN_ATTR_RO(ep11_aes_128_xts, 2 * MAXEP11AESKEYBLOBSIZE);
-static BIN_ATTR_RO(ep11_aes_256_xts, 2 * MAXEP11AESKEYBLOBSIZE);
+static const BIN_ATTR_RO(ep11_aes_128, MAXEP11AESKEYBLOBSIZE);
+static const BIN_ATTR_RO(ep11_aes_192, MAXEP11AESKEYBLOBSIZE);
+static const BIN_ATTR_RO(ep11_aes_256, MAXEP11AESKEYBLOBSIZE);
+static const BIN_ATTR_RO(ep11_aes_128_xts, 2 * MAXEP11AESKEYBLOBSIZE);
+static const BIN_ATTR_RO(ep11_aes_256_xts, 2 * MAXEP11AESKEYBLOBSIZE);
 
-static struct bin_attribute *ep11_attrs[] = {
+static const struct bin_attribute *const ep11_attrs[] = {
 	&bin_attr_ep11_aes_128,
 	&bin_attr_ep11_aes_192,
 	&bin_attr_ep11_aes_256,
@@ -634,7 +633,7 @@ static struct bin_attribute *ep11_attrs[] = {
 	NULL
 };
 
-static struct attribute_group ep11_attr_group = {
+static const struct attribute_group ep11_attr_group = {
 	.name	   = "ep11",
 	.bin_attrs = ep11_attrs,
 };

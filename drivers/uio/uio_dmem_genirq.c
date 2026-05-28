@@ -167,6 +167,8 @@ static int uio_dmem_genirq_probe(struct platform_device *pdev)
 		}
 		uioinfo->name = devm_kasprintf(&pdev->dev, GFP_KERNEL, "%pOFn",
 					       pdev->dev.of_node);
+		if (!uioinfo->name)
+			return -ENOMEM;
 		uioinfo->version = "devicetree";
 	}
 
@@ -210,8 +212,6 @@ static int uio_dmem_genirq_probe(struct platform_device *pdev)
 	}
 
 	if (uioinfo->irq) {
-		struct irq_data *irq_data = irq_get_irq_data(uioinfo->irq);
-
 		/*
 		 * If a level interrupt, dont do lazy disable. Otherwise the
 		 * irq will fire again since clearing of the actual cause, on
@@ -219,8 +219,7 @@ static int uio_dmem_genirq_probe(struct platform_device *pdev)
 		 * irqd_is_level_type() isn't used since isn't valid until
 		 * irq is configured.
 		 */
-		if (irq_data &&
-		    irqd_get_trigger_type(irq_data) & IRQ_TYPE_LEVEL_MASK) {
+		if (irq_get_trigger_type(uioinfo->irq) & IRQ_TYPE_LEVEL_MASK) {
 			dev_dbg(&pdev->dev, "disable lazy unmask\n");
 			irq_set_status_flags(uioinfo->irq, IRQ_DISABLE_UNLAZY);
 		}
@@ -298,28 +297,6 @@ static int uio_dmem_genirq_probe(struct platform_device *pdev)
 	return devm_uio_register_device(&pdev->dev, priv->uioinfo);
 }
 
-static int uio_dmem_genirq_runtime_nop(struct device *dev)
-{
-	/* Runtime PM callback shared between ->runtime_suspend()
-	 * and ->runtime_resume(). Simply returns success.
-	 *
-	 * In this driver pm_runtime_get_sync() and pm_runtime_put_sync()
-	 * are used at open() and release() time. This allows the
-	 * Runtime PM code to turn off power to the device while the
-	 * device is unused, ie before open() and after release().
-	 *
-	 * This Runtime PM callback does not need to save or restore
-	 * any registers since user space is responsbile for hardware
-	 * register reinitialization after open().
-	 */
-	return 0;
-}
-
-static const struct dev_pm_ops uio_dmem_genirq_dev_pm_ops = {
-	.runtime_suspend = uio_dmem_genirq_runtime_nop,
-	.runtime_resume = uio_dmem_genirq_runtime_nop,
-};
-
 #ifdef CONFIG_OF
 static const struct of_device_id uio_of_genirq_match[] = {
 	{ /* empty for now */ },
@@ -331,7 +308,6 @@ static struct platform_driver uio_dmem_genirq = {
 	.probe = uio_dmem_genirq_probe,
 	.driver = {
 		.name = DRIVER_NAME,
-		.pm = &uio_dmem_genirq_dev_pm_ops,
 		.of_match_table = of_match_ptr(uio_of_genirq_match),
 	},
 };

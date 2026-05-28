@@ -187,7 +187,7 @@ static inline char *get_saved_cmdlines(int idx)
 
 static inline void set_cmdline(int idx, const char *cmdline)
 {
-	strncpy(get_saved_cmdlines(idx), cmdline, TASK_COMM_LEN);
+	strscpy(get_saved_cmdlines(idx), cmdline, TASK_COMM_LEN);
 }
 
 static void free_saved_cmdlines_buffer(struct saved_cmdlines_buffer *s)
@@ -224,7 +224,6 @@ static struct saved_cmdlines_buffer *allocate_cmdlines_buffer(unsigned int val)
 	/* Place map_cmdline_to_pid array right after saved_cmdlines */
 	s->map_cmdline_to_pid = (unsigned *)&s->saved_cmdlines[val * TASK_COMM_LEN];
 
-	s->cmdline_idx = 0;
 	memset(&s->map_pid_to_cmdline, NO_CMDLINE_MAP,
 	       sizeof(s->map_pid_to_cmdline));
 	memset(s->map_cmdline_to_pid, NO_CMDLINE_MAP,
@@ -247,6 +246,8 @@ int trace_save_cmdline(struct task_struct *tsk)
 	/* treat recording of idle task as a success */
 	if (!tsk->pid)
 		return 1;
+
+	BUILD_BUG_ON(!is_power_of_2(PID_MAX_DEFAULT));
 
 	tpid = tsk->pid & (PID_MAX_DEFAULT - 1);
 
@@ -442,7 +443,7 @@ int trace_alloc_tgid_map(void)
 	if (tgid_map)
 		return 0;
 
-	tgid_map_max = pid_max;
+	tgid_map_max = init_pid_ns.pid_max;
 	map = kvcalloc(tgid_map_max + 1, sizeof(*tgid_map),
 		       GFP_KERNEL);
 	if (!map)

@@ -1629,7 +1629,7 @@ static int lpc32xx_ep_enable(struct usb_ep *_ep,
 		return -ESHUTDOWN;
 	}
 
-	tmp = desc->bmAttributes & USB_ENDPOINT_XFERTYPE_MASK;
+	tmp = usb_endpoint_type(desc);
 	switch (tmp) {
 	case USB_ENDPOINT_XFER_CONTROL:
 		return -EINVAL;
@@ -3249,7 +3249,7 @@ MODULE_DEVICE_TABLE(of, lpc32xx_udc_of_match);
 
 static struct platform_driver lpc32xx_udc_driver = {
 	.probe		= lpc32xx_udc_probe,
-	.remove_new	= lpc32xx_udc_remove,
+	.remove		= lpc32xx_udc_remove,
 	.shutdown	= lpc32xx_udc_shutdown,
 	.suspend	= lpc32xx_udc_suspend,
 	.resume		= lpc32xx_udc_resume,

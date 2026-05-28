@@ -7,17 +7,23 @@ $schema: http://devicetree.org/meta-schemas/core.yaml#
 title: NVIDIA Tegra HDMI CEC
 
 maintainers:
-  - Hans Verkuil <hverkuil-cisco@xs4all.nl>
+  - Hans Verkuil <hverkuil@kernel.org>
 
 allOf:
   - $ref: cec-common.yaml#
 
 properties:
   compatible:
-    enum:
-      - nvidia,tegra114-cec
-      - nvidia,tegra124-cec
-      - nvidia,tegra210-cec
+    oneOf:
+      - enum:
+          - nvidia,tegra114-cec
+          - nvidia,tegra124-cec
+          - nvidia,tegra210-cec
+      - items:
+          - enum:
+              - nvidia,tegra186-cec
+              - nvidia,tegra194-cec
+          - const: nvidia,tegra210-cec
 
   clocks:
     maxItems: 1

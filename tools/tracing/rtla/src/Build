@@ -1,5 +1,7 @@
 rtla-y += trace.o
 rtla-y += utils.o
+rtla-y += actions.o
+rtla-y += common.o
 rtla-y += osnoise.o
 rtla-y += osnoise_top.o
 rtla-y += osnoise_hist.o
@@ -8,4 +10,5 @@ rtla-y += timerlat_top.o
 rtla-y += timerlat_hist.o
 rtla-y += timerlat_u.o
 rtla-y += timerlat_aa.o
+rtla-y += timerlat_bpf.o
 rtla-y += rtla.o

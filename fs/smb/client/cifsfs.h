@@ -59,8 +59,8 @@ extern int cifs_unlink(struct inode *dir, struct dentry *dentry);
 extern int cifs_hardlink(struct dentry *, struct inode *, struct dentry *);
 extern int cifs_mknod(struct mnt_idmap *, struct inode *, struct dentry *,
 		      umode_t, dev_t);
-extern int cifs_mkdir(struct mnt_idmap *, struct inode *, struct dentry *,
-		      umode_t);
+extern struct dentry *cifs_mkdir(struct mnt_idmap *, struct inode *, struct dentry *,
+				 umode_t);
 extern int cifs_rmdir(struct inode *, struct dentry *);
 extern int cifs_rename2(struct mnt_idmap *, struct inode *,
 			struct dentry *, struct inode *, struct dentry *,
@@ -103,8 +103,8 @@ extern int cifs_lock(struct file *, int, struct file_lock *);
 extern int cifs_fsync(struct file *, loff_t, loff_t, int);
 extern int cifs_strict_fsync(struct file *, loff_t, loff_t, int);
 extern int cifs_flush(struct file *, fl_owner_t id);
-extern int cifs_file_mmap(struct file *file, struct vm_area_struct *vma);
-extern int cifs_file_strict_mmap(struct file *file, struct vm_area_struct *vma);
+int cifs_file_mmap_prepare(struct vm_area_desc *desc);
+int cifs_file_strict_mmap_prepare(struct vm_area_desc *desc);
 extern const struct file_operations cifs_dir_ops;
 extern int cifs_readdir(struct file *file, struct dir_context *ctx);
 
@@ -135,7 +135,6 @@ extern ssize_t cifs_file_copychunk_range(unsigned int xid,
 
 extern long cifs_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
 extern void cifs_setsize(struct inode *inode, loff_t offset);
-extern int cifs_truncate_page(struct address_space *mapping, loff_t from);
 
 struct smb3_fs_context;
 extern struct dentry *cifs_smb3_do_mount(struct file_system_type *fs_type,
@@ -146,6 +145,6 @@ extern const struct export_operations cifs_export_ops;
 #endif /* CONFIG_CIFS_NFSD_EXPORT */
 
 /* when changing internal version - update following two lines at same time */
-#define SMB3_PRODUCT_BUILD 51
-#define CIFS_VERSION   "2.51"
+#define SMB3_PRODUCT_BUILD 57
+#define CIFS_VERSION   "2.57"
 #endif				/* _CIFSFS_H */

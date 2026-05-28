@@ -26,8 +26,26 @@ void nested_vmx_free_vcpu(struct kvm_vcpu *vcpu);
 enum nvmx_vmentry_status nested_vmx_enter_non_root_mode(struct kvm_vcpu *vcpu,
 						     bool from_vmentry);
 bool nested_vmx_reflect_vmexit(struct kvm_vcpu *vcpu);
-void nested_vmx_vmexit(struct kvm_vcpu *vcpu, u32 vm_exit_reason,
-		       u32 exit_intr_info, unsigned long exit_qualification);
+void __nested_vmx_vmexit(struct kvm_vcpu *vcpu, u32 vm_exit_reason,
+			 u32 exit_intr_info, unsigned long exit_qualification,
+			 u32 exit_insn_len);
+
+static inline void nested_vmx_vmexit(struct kvm_vcpu *vcpu, u32 vm_exit_reason,
+				     u32 exit_intr_info,
+				     unsigned long exit_qualification)
+{
+	u32 exit_insn_len;
+
+	if (to_vmx(vcpu)->fail || vm_exit_reason == -1 ||
+	    (vm_exit_reason & VMX_EXIT_REASONS_FAILED_VMENTRY))
+		exit_insn_len = 0;
+	else
+		exit_insn_len = vmcs_read32(VM_EXIT_INSTRUCTION_LEN);
+
+	__nested_vmx_vmexit(vcpu, vm_exit_reason, exit_intr_info,
+			    exit_qualification, exit_insn_len);
+}
+
 void nested_sync_vmcs12_to_shadow(struct kvm_vcpu *vcpu);
 int vmx_set_vmx_msr(struct kvm_vcpu *vcpu, u32 msr_index, u64 data);
 int vmx_get_vmx_msr(struct nested_vmx_msrs *msrs, u32 msr_index, u64 *pdata);
@@ -289,6 +307,11 @@ static inline bool nested_cr4_valid(struct kvm_vcpu *vcpu, unsigned long val)
 
 	return fixed_bits_valid(val, fixed0, fixed1) &&
 	       __kvm_is_valid_cr4(vcpu, val);
+}
+
+static inline bool nested_cpu_has_no_hw_errcode_cc(struct kvm_vcpu *vcpu)
+{
+	return to_vmx(vcpu)->nested.msrs.basic & VMX_BASIC_NO_HW_ERROR_CODE_CC;
 }
 
 /* No difference in the restrictions on guest and host CR4 in VMX operation. */

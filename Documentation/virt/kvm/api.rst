@@ -7,8 +7,19 @@ The Definitive KVM (Kernel-based Virtual Machine) API Documentation
 1. General description
 ======================
 
-The kvm API is a set of ioctls that are issued to control various aspects
-of a virtual machine.  The ioctls belong to the following classes:
+The kvm API is centered around different kinds of file descriptors
+and ioctls that can be issued to these file descriptors.  An initial
+open("/dev/kvm") obtains a handle to the kvm subsystem; this handle
+can be used to issue system ioctls.  A KVM_CREATE_VM ioctl on this
+handle will create a VM file descriptor which can be used to issue VM
+ioctls.  A KVM_CREATE_VCPU or KVM_CREATE_DEVICE ioctl on a VM fd will
+create a virtual cpu or device and return a file descriptor pointing to
+the new resource.
+
+In other words, the kvm API is a set of ioctls that are issued to
+different kinds of file descriptor in order to control various aspects of
+a virtual machine.  Depending on the file descriptor that accepts them,
+ioctls belong to the following classes:
 
  - System ioctls: These query and set global attributes which affect the
    whole kvm subsystem.  In addition a system ioctl is used to create
@@ -35,18 +46,19 @@ of a virtual machine.  The ioctls belong to the following classes:
    device ioctls must be issued from the same process (address space) that
    was used to create the VM.
 
-2. File descriptors
-===================
+While most ioctls are specific to one kind of file descriptor, in some
+cases the same ioctl can belong to more than one class.
 
-The kvm API is centered around file descriptors.  An initial
-open("/dev/kvm") obtains a handle to the kvm subsystem; this handle
-can be used to issue system ioctls.  A KVM_CREATE_VM ioctl on this
-handle will create a VM file descriptor which can be used to issue VM
-ioctls.  A KVM_CREATE_VCPU or KVM_CREATE_DEVICE ioctl on a VM fd will
-create a virtual cpu or device and return a file descriptor pointing to
-the new resource.  Finally, ioctls on a vcpu or device fd can be used
-to control the vcpu or device.  For vcpus, this includes the important
-task of actually running guest code.
+The KVM API grew over time.  For this reason, KVM defines many constants
+of the form ``KVM_CAP_*``, each corresponding to a set of functionality
+provided by one or more ioctls.  Availability of these "capabilities" can
+be checked with :ref:`KVM_CHECK_EXTENSION <KVM_CHECK_EXTENSION>`.  Some
+capabilities also need to be enabled for VMs or VCPUs where their
+functionality is desired (see :ref:`cap_enable` and :ref:`cap_enable_vm`).
+
+
+2. Restrictions
+===============
 
 In general file descriptors can be migrated among processes by means
 of fork() and the SCM_RIGHTS facility of unix domain socket.  These
@@ -96,12 +108,9 @@ description:
   Capability:
       which KVM extension provides this ioctl.  Can be 'basic',
       which means that is will be provided by any kernel that supports
-      API version 12 (see section 4.1), a KVM_CAP_xyz constant, which
-      means availability needs to be checked with KVM_CHECK_EXTENSION
-      (see section 4.4), or 'none' which means that while not all kernels
-      support this ioctl, there's no capability bit to check its
-      availability: for kernels that don't support the ioctl,
-      the ioctl returns -ENOTTY.
+      API version 12 (see :ref:`KVM_GET_API_VERSION <KVM_GET_API_VERSION>`),
+      or a KVM_CAP_xyz constant that can be checked with
+      :ref:`KVM_CHECK_EXTENSION <KVM_CHECK_EXTENSION>`.
 
   Architectures:
       which instruction set architectures provide this ioctl.
@@ -117,6 +126,8 @@ description:
       the return value.  General error numbers (EBADF, ENOMEM, EINVAL)
       are not detailed, but errors with specific meanings are.
 
+
+.. _KVM_GET_API_VERSION:
 
 4.1 KVM_GET_API_VERSION
 -----------------------
@@ -246,6 +257,8 @@ This list also varies by kvm version and host processor, but does not change
 otherwise.
 
 
+.. _KVM_CHECK_EXTENSION:
+
 4.4 KVM_CHECK_EXTENSION
 -----------------------
 
@@ -288,7 +301,7 @@ the VCPU file descriptor can be mmap-ed, including:
 
 - if KVM_CAP_DIRTY_LOG_RING is available, a number of pages at
   KVM_DIRTY_LOG_PAGE_OFFSET * PAGE_SIZE.  For more information on
-  KVM_CAP_DIRTY_LOG_RING, see section 8.3.
+  KVM_CAP_DIRTY_LOG_RING, see :ref:`KVM_CAP_DIRTY_LOG_RING`.
 
 
 4.7 KVM_CREATE_VCPU
@@ -338,8 +351,8 @@ KVM_S390_SIE_PAGE_OFFSET in order to obtain a memory map of the virtual
 cpu's hardware control block.
 
 
-4.8 KVM_GET_DIRTY_LOG (vm ioctl)
---------------------------------
+4.8 KVM_GET_DIRTY_LOG
+---------------------
 
 :Capability: basic
 :Architectures: all
@@ -987,6 +1000,10 @@ blobs in userspace.  When the guest writes the MSR, kvm copies one
 page of a blob (32- or 64-bit, depending on the vcpu mode) to guest
 memory.
 
+The MSR index must be in the range [0x40000000, 0x4fffffff], i.e. must reside
+in the range that is unofficially reserved for use by hypervisors.  The min/max
+values are enumerated via KVM_XEN_MSR_MIN_INDEX and KVM_XEN_MSR_MAX_INDEX.
+
 ::
 
   struct kvm_xen_hvm_config {
@@ -1212,6 +1229,9 @@ It is not possible to read back a pending external abort (injected via
 KVM_SET_VCPU_EVENTS or otherwise) because such an exception is always delivered
 directly to the virtual CPU).
 
+Calling this ioctl on a vCPU that hasn't been initialized will return
+-ENOEXEC.
+
 ::
 
   struct kvm_vcpu_events {
@@ -1292,13 +1312,15 @@ exceptions by manipulating individual registers using the KVM_SET_ONE_REG API.
 
 See KVM_GET_VCPU_EVENTS for the data structure.
 
+Calling this ioctl on a vCPU that hasn't been initialized will return
+-ENOEXEC.
 
 4.33 KVM_GET_DEBUGREGS
 ----------------------
 
 :Capability: KVM_CAP_DEBUGREGS
 :Architectures: x86
-:Type: vm ioctl
+:Type: vcpu ioctl
 :Parameters: struct kvm_debugregs (out)
 :Returns: 0 on success, -1 on error
 
@@ -1320,7 +1342,7 @@ Reads debug registers from the vcpu.
 
 :Capability: KVM_CAP_DEBUGREGS
 :Architectures: x86
-:Type: vm ioctl
+:Type: vcpu ioctl
 :Parameters: struct kvm_debugregs (in)
 :Returns: 0 on success, -1 on error
 
@@ -1394,6 +1416,9 @@ the memory region are automatically reflected into the guest.  For example, an
 mmap() that affects the region will be made visible immediately.  Another
 example is madvise(MADV_DROP).
 
+For TDX guest, deleting/moving memory region loses guest memory contents.
+Read only region isn't supported.  Only as-id 0 is supported.
+
 Note: On arm64, a write generated by the page-table walker (to update
 the Access and Dirty flags, for example) never results in a
 KVM_EXIT_MMIO exit when the slot has the KVM_MEM_READONLY flag. This
@@ -1406,7 +1431,7 @@ fetch) is injected in the guest.
 S390:
 ^^^^^
 
-Returns -EINVAL if the VM has the KVM_VM_S390_UCONTROL flag set.
+Returns -EINVAL or -EEXIST if the VM has the KVM_VM_S390_UCONTROL flag set.
 Returns -EINVAL if called on a protected VM.
 
 4.36 KVM_SET_TSS_ADDR
@@ -1428,6 +1453,8 @@ This ioctl is required on Intel-based hosts.  This is needed on Intel hardware
 because of a quirk in the virtualization implementation (see the internals
 documentation when it pops into existence).
 
+
+.. _KVM_ENABLE_CAP:
 
 4.37 KVM_ENABLE_CAP
 -------------------
@@ -1810,15 +1837,18 @@ emulate them efficiently. The fields in each entry are defined as follows:
          the values returned by the cpuid instruction for
          this function/index combination
 
-The TSC deadline timer feature (CPUID leaf 1, ecx[24]) is always returned
-as false, since the feature depends on KVM_CREATE_IRQCHIP for local APIC
-support.  Instead it is reported via::
+x2APIC (CPUID leaf 1, ecx[21) and TSC deadline timer (CPUID leaf 1, ecx[24])
+may be returned as true, but they depend on KVM_CREATE_IRQCHIP for in-kernel
+emulation of the local APIC.  TSC deadline timer support is also reported via::
 
   ioctl(KVM_CHECK_EXTENSION, KVM_CAP_TSC_DEADLINE_TIMER)
 
 if that returns true and you use KVM_CREATE_IRQCHIP, or if you emulate the
 feature in userspace, then you can enable the feature for KVM_SET_CPUID2.
 
+Enabling x2APIC in KVM_SET_CPUID2 requires KVM_CREATE_IRQCHIP as KVM doesn't
+support forwarding x2APIC MSR accesses to userspace, i.e. KVM does not support
+emulating x2APIC in userspace.
 
 4.47 KVM_PPC_GET_PVINFO
 -----------------------
@@ -1899,6 +1929,9 @@ No flags are specified so far, the corresponding field must be set to zero.
   #define KVM_IRQ_ROUTING_HV_SINT 4
   #define KVM_IRQ_ROUTING_XEN_EVTCHN 5
 
+On s390, adding a KVM_IRQ_ROUTING_S390_ADAPTER is rejected on ucontrol VMs with
+error -EINVAL.
+
 flags:
 
 - KVM_MSI_VALID_DEVID: used along with KVM_IRQ_ROUTING_MSI routing entry
@@ -1978,7 +2011,14 @@ frequency is KHz.
 
 If the KVM_CAP_VM_TSC_CONTROL capability is advertised, this can also
 be used as a vm ioctl to set the initial tsc frequency of subsequently
-created vCPUs.
+created vCPUs.  Note, the vm ioctl is only allowed prior to creating vCPUs.
+
+For TSC protected Confidential Computing (CoCo) VMs where TSC frequency
+is configured once at VM scope and remains unchanged during VM's
+lifetime, the vm ioctl should be used to configure the TSC frequency
+and the vcpu ioctl is not supported.
+
+Example of such CoCo VMs: TDX guests.
 
 4.56 KVM_GET_TSC_KHZ
 --------------------
@@ -2116,8 +2156,8 @@ TLB, prior to calling KVM_RUN on the associated vcpu.
 
 The "bitmap" field is the userspace address of an array.  This array
 consists of a number of bits, equal to the total number of TLB entries as
-determined by the last successful call to KVM_CONFIG_TLB, rounded up to the
-nearest multiple of 64.
+determined by the last successful call to ``KVM_ENABLE_CAP(KVM_CAP_SW_TLB)``,
+rounded up to the nearest multiple of 64.
 
 Each bit corresponds to one TLB entry, ordered the same as in the shared TLB
 array.
@@ -2168,42 +2208,6 @@ to map the created TCE table into userspace.  This lets userspace read
 the entries written by kernel-handled H_PUT_TCE calls, and also lets
 userspace update the TCE table directly which is useful in some
 circumstances.
-
-
-4.63 KVM_ALLOCATE_RMA
----------------------
-
-:Capability: KVM_CAP_PPC_RMA
-:Architectures: powerpc
-:Type: vm ioctl
-:Parameters: struct kvm_allocate_rma (out)
-:Returns: file descriptor for mapping the allocated RMA
-
-This allocates a Real Mode Area (RMA) from the pool allocated at boot
-time by the kernel.  An RMA is a physically-contiguous, aligned region
-of memory used on older POWER processors to provide the memory which
-will be accessed by real-mode (MMU off) accesses in a KVM guest.
-POWER processors support a set of sizes for the RMA that usually
-includes 64MB, 128MB, 256MB and some larger powers of two.
-
-::
-
-  /* for KVM_ALLOCATE_RMA */
-  struct kvm_allocate_rma {
-	__u64 rma_size;
-  };
-
-The return value is a file descriptor which can be passed to mmap(2)
-to map the allocated RMA into userspace.  The mapped area can then be
-passed to the KVM_SET_USER_MEMORY_REGION ioctl to establish it as the
-RMA for a virtual machine.  The size of the RMA in bytes (which is
-fixed at host kernel boot time) is returned in the rma_size field of
-the argument structure.
-
-The KVM_CAP_PPC_RMA capability is 1 or 2 if the KVM_ALLOCATE_RMA ioctl
-is supported; 2 if the processor requires all virtual machines to have
-an RMA, or 1 if the processor can use an RMA but doesn't require it,
-because it supports the Virtual RMA (VRMA) facility.
 
 
 4.64 KVM_NMI
@@ -2602,7 +2606,7 @@ Specifically:
 ======================= ========= ===== =======================================
 
 .. [1] These encodings are not accepted for SVE-enabled vcpus.  See
-       KVM_ARM_VCPU_INIT.
+       :ref:`KVM_ARM_VCPU_INIT`.
 
        The equivalent register content can be accessed via bits [127:0] of
        the corresponding SVE Zn registers instead for vcpus that have SVE
@@ -2909,6 +2913,16 @@ such as set vcpu counter or reset vcpu, and they have the following id bit patte
 
   0x9030 0000 0002 <reg:16>
 
+x86 MSR registers have the following id bit patterns::
+  0x2030 0002 <msr number:32>
+
+Following are the KVM-defined registers for x86:
+
+======================= ========= =============================================
+    Encoding            Register  Description
+======================= ========= =============================================
+  0x2030 0003 0000 0000 SSP       Shadow Stack Pointer
+======================= ========= =============================================
 
 4.69 KVM_GET_ONE_REG
 --------------------
@@ -3075,6 +3089,12 @@ This IOCTL replaces the obsolete KVM_GET_PIT.
 
 Sets the state of the in-kernel PIT model. Only valid after KVM_CREATE_PIT2.
 See KVM_GET_PIT2 for details on struct kvm_pit_state2.
+
+.. Tip::
+  ``KVM_SET_PIT2`` strictly adheres to the spec of Intel 8254 PIT.  For example,
+  a ``count`` value of 0 in ``struct kvm_pit_channel_state`` is interpreted as
+  65536, which is the maximum count value. Refer to `Intel 8254 programmable
+  interval timer <https://www.scs.stanford.edu/10wi-cs140/pintos/specs/8254.pdf>`_.
 
 This IOCTL replaces the obsolete KVM_SET_PIT.
 
@@ -3471,7 +3491,8 @@ The initial values are defined as:
 	- FPSIMD/NEON registers: set to 0
 	- SVE registers: set to 0
 	- System registers: Reset to their architecturally defined
-	  values as for a warm reset to EL1 (resp. SVC)
+	  values as for a warm reset to EL1 (resp. SVC) or EL2 (in the
+	  case of EL2 being enabled).
 
 Note that because some registers reflect machine topology, all vcpus
 should be created before this ioctl is invoked.
@@ -3538,6 +3559,17 @@ Possible features:
 	      - the KVM_REG_ARM64_SVE_VLS pseudo-register is immutable, and can
 	        no longer be written using KVM_SET_ONE_REG.
 
+	- KVM_ARM_VCPU_HAS_EL2: Enable Nested Virtualisation support,
+	  booting the guest from EL2 instead of EL1.
+	  Depends on KVM_CAP_ARM_EL2.
+	  The VM is running with HCR_EL2.E2H being RES1 (VHE) unless
+	  KVM_ARM_VCPU_HAS_EL2_E2H0 is also set.
+
+	- KVM_ARM_VCPU_HAS_EL2_E2H0: Restrict Nested Virtualisation
+	  support to HCR_EL2.E2H being RES0 (non-VHE).
+	  Depends on KVM_CAP_ARM_EL2_E2H0.
+	  KVM_ARM_VCPU_HAS_EL2 must also be set.
+
 4.83 KVM_ARM_PREFERRED_TARGET
 -----------------------------
 
@@ -3571,7 +3603,7 @@ VCPU matching underlying host.
 ---------------------
 
 :Capability: basic
-:Architectures: arm64, mips, riscv
+:Architectures: arm64, mips, riscv, x86 (if KVM_CAP_ONE_REG)
 :Type: vcpu ioctl
 :Parameters: struct kvm_reg_list (in/out)
 :Returns: 0 on success; -1 on error
@@ -3593,6 +3625,29 @@ Errors:
 This ioctl returns the guest registers that are supported for the
 KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.
 
+Note that s390 does not support KVM_GET_REG_LIST for historical reasons
+(read: nobody cared).  The set of registers in kernels 4.x and newer is:
+
+- KVM_REG_S390_TODPR
+
+- KVM_REG_S390_EPOCHDIFF
+
+- KVM_REG_S390_CPU_TIMER
+
+- KVM_REG_S390_CLOCK_COMP
+
+- KVM_REG_S390_PFTOKEN
+
+- KVM_REG_S390_PFCOMPARE
+
+- KVM_REG_S390_PFSELECT
+
+- KVM_REG_S390_PP
+
+- KVM_REG_S390_GBEA
+
+Note, for x86, all MSRs enumerated by KVM_GET_MSR_INDEX_LIST are supported as
+type KVM_X86_REG_TYPE_MSR, but are NOT enumerated via KVM_GET_REG_LIST.
 
 4.85 KVM_ARM_SET_DEVICE_ADDR (deprecated)
 -----------------------------------------
@@ -4758,7 +4813,7 @@ H_GET_CPU_CHARACTERISTICS hypercall.
 
 :Capability: basic
 :Architectures: x86
-:Type: vm
+:Type: vm ioctl, vcpu ioctl
 :Parameters: an opaque platform specific structure (in/out)
 :Returns: 0 on success; -1 on error
 
@@ -4766,9 +4821,11 @@ If the platform supports creating encrypted VMs then this ioctl can be used
 for issuing platform-specific memory encryption commands to manage those
 encrypted VMs.
 
-Currently, this ioctl is used for issuing Secure Encrypted Virtualization
-(SEV) commands on AMD Processors. The SEV commands are defined in
-Documentation/virt/kvm/x86/amd-memory-encryption.rst.
+Currently, this ioctl is used for issuing both Secure Encrypted Virtualization
+(SEV) commands on AMD Processors and Trusted Domain Extensions (TDX) commands
+on Intel Processors.  The detailed commands are defined in
+Documentation/virt/kvm/x86/amd-memory-encryption.rst and
+Documentation/virt/kvm/x86/intel-tdx.rst.
 
 4.111 KVM_MEMORY_ENCRYPT_REG_REGION
 -----------------------------------
@@ -4956,8 +5013,8 @@ Coalesced pio is based on coalesced mmio. There is little difference
 between coalesced mmio and pio except that coalesced pio records accesses
 to I/O ports.
 
-4.117 KVM_CLEAR_DIRTY_LOG (vm ioctl)
-------------------------------------
+4.117 KVM_CLEAR_DIRTY_LOG
+-------------------------
 
 :Capability: KVM_CAP_MANUAL_DIRTY_LOG_PROTECT2
 :Architectures: x86, arm64, mips
@@ -5093,8 +5150,8 @@ Recognised values for feature:
 Finalizes the configuration of the specified vcpu feature.
 
 The vcpu must already have been initialised, enabling the affected feature, by
-means of a successful KVM_ARM_VCPU_INIT call with the appropriate flag set in
-features[].
+means of a successful :ref:`KVM_ARM_VCPU_INIT <KVM_ARM_VCPU_INIT>` call with the
+appropriate flag set in features[].
 
 For affected vcpu features, this is a mandatory step that must be performed
 before the vcpu is fully usable.
@@ -5266,7 +5323,7 @@ the cpu reset definition in the POP (Principles Of Operation).
 4.123 KVM_S390_INITIAL_RESET
 ----------------------------
 
-:Capability: none
+:Capability: basic
 :Architectures: s390
 :Type: vcpu ioctl
 :Parameters: none
@@ -5574,7 +5631,7 @@ KVM_XEN_ATTR_TYPE_SHARED_INFO_HVA
   in guest physical address space. This attribute should be used in
   preference to KVM_XEN_ATTR_TYPE_SHARED_INFO as it avoids
   unnecessary invalidation of an internal cache when the page is
-  re-mapped in guest physcial address space.
+  re-mapped in guest physical address space.
 
   Setting the hva to zero will disable the shared_info page.
 
@@ -6205,7 +6262,7 @@ applied.
 .. _KVM_ARM_GET_REG_WRITABLE_MASKS:
 
 4.139 KVM_ARM_GET_REG_WRITABLE_MASKS
--------------------------------------------
+------------------------------------
 
 :Capability: KVM_CAP_ARM_SUPPORTED_REG_MASK_RANGES
 :Architectures: arm64
@@ -6380,6 +6437,24 @@ most one mapping per page, i.e. binding multiple memory regions to a single
 guest_memfd range is not allowed (any number of memory regions can be bound to
 a single guest_memfd file, but the bound ranges must not overlap).
 
+The capability KVM_CAP_GUEST_MEMFD_FLAGS enumerates the `flags` that can be
+specified via KVM_CREATE_GUEST_MEMFD.  Currently defined flags:
+
+  ============================ ================================================
+  GUEST_MEMFD_FLAG_MMAP        Enable using mmap() on the guest_memfd file
+                               descriptor.
+  GUEST_MEMFD_FLAG_INIT_SHARED Make all memory in the file shared during
+                               KVM_CREATE_GUEST_MEMFD (memory files created
+                               without INIT_SHARED will be marked private).
+                               Shared memory can be faulted into host userspace
+                               page tables. Private memory cannot.
+  ============================ ================================================
+
+When the KVM MMU performs a PFN lookup to service a guest fault and the backing
+guest_memfd has the GUEST_MEMFD_FLAG_MMAP set, then the fault will always be
+consumed from guest_memfd, regardless of whether it is a shared or a private
+fault.
+
 See KVM_SET_USER_MEMORY_REGION2 for additional details.
 
 4.143 KVM_PRE_FAULT_MEMORY
@@ -6442,6 +6517,8 @@ the capability to be present.
 
 `flags` must currently be zero.
 
+
+.. _kvm_run:
 
 5. The kvm_run structure
 ========================
@@ -6616,7 +6693,8 @@ to the byte array.
 .. note::
 
       For KVM_EXIT_IO, KVM_EXIT_MMIO, KVM_EXIT_OSI, KVM_EXIT_PAPR, KVM_EXIT_XEN,
-      KVM_EXIT_EPR, KVM_EXIT_X86_RDMSR and KVM_EXIT_X86_WRMSR the corresponding
+      KVM_EXIT_EPR, KVM_EXIT_HYPERCALL, KVM_EXIT_TDX,
+      KVM_EXIT_X86_RDMSR and KVM_EXIT_X86_WRMSR the corresponding
       operations are complete (and guest state is consistent) only after userspace
       has re-entered the kernel with KVM_RUN.  The kernel side will first finish
       incomplete operations and then check for pending signals.
@@ -6815,6 +6893,7 @@ should put the acknowledged interrupt vector into the 'epr' field.
   #define KVM_SYSTEM_EVENT_WAKEUP         4
   #define KVM_SYSTEM_EVENT_SUSPEND        5
   #define KVM_SYSTEM_EVENT_SEV_TERM       6
+  #define KVM_SYSTEM_EVENT_TDX_FATAL      7
 			__u32 type;
                         __u32 ndata;
                         __u64 data[16];
@@ -6841,6 +6920,11 @@ Valid values for 'type' are:
    reset/shutdown of the VM.
  - KVM_SYSTEM_EVENT_SEV_TERM -- an AMD SEV guest requested termination.
    The guest physical address of the guest's GHCB is stored in `data[0]`.
+ - KVM_SYSTEM_EVENT_TDX_FATAL -- a TDX guest reported a fatal error state.
+   KVM doesn't do any parsing or conversion, it just dumps 16 general-purpose
+   registers to userspace, in ascending order of the 4-bit indices for x86-64
+   general-purpose registers in instruction encoding, as defined in the Intel
+   SDM.
  - KVM_SYSTEM_EVENT_WAKEUP -- the exiting vCPU is in a suspended state and
    KVM has recognized a wakeup event. Userspace may honor this event by
    marking the exiting vCPU as runnable, or deny it and call KVM_RUN again.
@@ -6853,6 +6937,10 @@ the first `ndata` items (possibly zero) of the data array are valid.
 
  - for arm64, data[0] is set to KVM_SYSTEM_EVENT_RESET_FLAG_PSCI_RESET2 if
    the guest issued a SYSTEM_RESET2 call according to v1.1 of the PSCI
+   specification.
+
+ - for arm64, data[0] is set to KVM_SYSTEM_EVENT_SHUTDOWN_FLAG_PSCI_OFF2
+   if the guest issued a SYSTEM_OFF2 call according to v1.3 of the PSCI
    specification.
 
  - for RISC-V, data[0] is set to the value of the second argument of the
@@ -6887,6 +6975,12 @@ either:
 
  - Deny the guest request to suspend the VM. See ARM DEN0022D.b 5.19.2
    "Caller responsibilities" for possible return values.
+
+Hibernation using the PSCI SYSTEM_OFF2 call is enabled when PSCI v1.3
+is enabled. If a guest invokes the PSCI SYSTEM_OFF2 function, KVM will
+exit to userspace with the KVM_SYSTEM_EVENT_SHUTDOWN event type and with
+data[0] set to KVM_SYSTEM_EVENT_SHUTDOWN_FLAG_PSCI_OFF2. The only
+supported hibernate type for the SYSTEM_OFF2 function is HIBERNATE_OFF.
 
 ::
 
@@ -7131,6 +7225,69 @@ The valid value for 'flags' is:
 
 ::
 
+		/* KVM_EXIT_TDX */
+		struct {
+			__u64 flags;
+			__u64 nr;
+			union {
+				struct {
+					u64 ret;
+					u64 data[5];
+				} unknown;
+				struct {
+					u64 ret;
+					u64 gpa;
+					u64 size;
+				} get_quote;
+				struct {
+					u64 ret;
+					u64 leaf;
+					u64 r11, r12, r13, r14;
+				} get_tdvmcall_info;
+				struct {
+					u64 ret;
+					u64 vector;
+				} setup_event_notify;
+			};
+		} tdx;
+
+Process a TDVMCALL from the guest.  KVM forwards select TDVMCALL based
+on the Guest-Hypervisor Communication Interface (GHCI) specification;
+KVM bridges these requests to the userspace VMM with minimal changes,
+placing the inputs in the union and copying them back to the guest
+on re-entry.
+
+Flags are currently always zero, whereas ``nr`` contains the TDVMCALL
+number from register R11.  The remaining field of the union provide the
+inputs and outputs of the TDVMCALL.  Currently the following values of
+``nr`` are defined:
+
+ * ``TDVMCALL_GET_QUOTE``: the guest has requested to generate a TD-Quote
+   signed by a service hosting TD-Quoting Enclave operating on the host.
+   Parameters and return value are in the ``get_quote`` field of the union.
+   The ``gpa`` field and ``size`` specify the guest physical address
+   (without the shared bit set) and the size of a shared-memory buffer, in
+   which the TDX guest passes a TD Report.  The ``ret`` field represents
+   the return value of the GetQuote request.  When the request has been
+   queued successfully, the TDX guest can poll the status field in the
+   shared-memory area to check whether the Quote generation is completed or
+   not. When completed, the generated Quote is returned via the same buffer.
+
+ * ``TDVMCALL_GET_TD_VM_CALL_INFO``: the guest has requested the support
+   status of TDVMCALLs.  The output values for the given leaf should be
+   placed in fields from ``r11`` to ``r14`` of the ``get_tdvmcall_info``
+   field of the union.
+
+ * ``TDVMCALL_SETUP_EVENT_NOTIFY_INTERRUPT``: the guest has requested to
+   set up a notification interrupt for vector ``vector``.
+
+KVM may add support for more values in the future that may cause a userspace
+exit, even without calls to ``KVM_ENABLE_CAP`` or similar.  In this case,
+it will enter with output fields already valid; in the common case, the
+``unknown.ret`` field of the union will be ``TDVMCALL_STATUS_SUBFUNC_UNSUPPORTED``.
+Userspace need not do anything if it does not wish to support a TDVMCALL.
+::
+
 		/* Fix the size of the union. */
 		char padding[256];
 	};
@@ -7162,11 +7319,15 @@ primary storage for certain register types. Therefore, the kernel may use the
 values in kvm_run even if the corresponding bit in kvm_dirty_regs is not set.
 
 
+.. _cap_enable:
+
 6. Capabilities that can be enabled on vCPUs
 ============================================
 
 There are certain capabilities that change the behavior of the virtual CPU or
-the virtual machine when enabled. To enable them, please see section 4.37.
+the virtual machine when enabled. To enable them, please see
+:ref:`KVM_ENABLE_CAP`.
+
 Below you can find a list of capabilities and what their effect on the vCPU or
 the virtual machine is when enabling them.
 
@@ -7375,7 +7536,7 @@ KVM API and also from the guest.
           sets are supported
           (bitfields defined in arch/x86/include/uapi/asm/kvm.h).
 
-As described above in the kvm_sync_regs struct info in section 5 (kvm_run):
+As described above in the kvm_sync_regs struct info in section :ref:`kvm_run`,
 KVM_CAP_SYNC_REGS "allow[s] userspace to access certain guest registers
 without having to call SET/GET_*REGS". This reduces overhead by eliminating
 repeated ioctl calls for setting and/or getting register values. This is
@@ -7421,13 +7582,84 @@ Unused bitfields in the bitarrays must be set to zero.
 
 This capability connects the vcpu to an in-kernel XIVE device.
 
+6.76 KVM_CAP_HYPERV_SYNIC
+-------------------------
+
+:Architectures: x86
+:Target: vcpu
+
+This capability, if KVM_CHECK_EXTENSION indicates that it is
+available, means that the kernel has an implementation of the
+Hyper-V Synthetic interrupt controller(SynIC). Hyper-V SynIC is
+used to support Windows Hyper-V based guest paravirt drivers(VMBus).
+
+In order to use SynIC, it has to be activated by setting this
+capability via KVM_ENABLE_CAP ioctl on the vcpu fd. Note that this
+will disable the use of APIC hardware virtualization even if supported
+by the CPU, as it's incompatible with SynIC auto-EOI behavior.
+
+6.77 KVM_CAP_HYPERV_SYNIC2
+--------------------------
+
+:Architectures: x86
+:Target: vcpu
+
+This capability enables a newer version of Hyper-V Synthetic interrupt
+controller (SynIC).  The only difference with KVM_CAP_HYPERV_SYNIC is that KVM
+doesn't clear SynIC message and event flags pages when they are enabled by
+writing to the respective MSRs.
+
+6.78 KVM_CAP_HYPERV_DIRECT_TLBFLUSH
+-----------------------------------
+
+:Architectures: x86
+:Target: vcpu
+
+This capability indicates that KVM running on top of Hyper-V hypervisor
+enables Direct TLB flush for its guests meaning that TLB flush
+hypercalls are handled by Level 0 hypervisor (Hyper-V) bypassing KVM.
+Due to the different ABI for hypercall parameters between Hyper-V and
+KVM, enabling this capability effectively disables all hypercall
+handling by KVM (as some KVM hypercall may be mistakenly treated as TLB
+flush hypercalls by Hyper-V) so userspace should disable KVM identification
+in CPUID and only exposes Hyper-V identification. In this case, guest
+thinks it's running on Hyper-V and only use Hyper-V hypercalls.
+
+6.79 KVM_CAP_HYPERV_ENFORCE_CPUID
+---------------------------------
+
+:Architectures: x86
+:Target: vcpu
+
+When enabled, KVM will disable emulated Hyper-V features provided to the
+guest according to the bits Hyper-V CPUID feature leaves. Otherwise, all
+currently implemented Hyper-V features are provided unconditionally when
+Hyper-V identification is set in the HYPERV_CPUID_INTERFACE (0x40000001)
+leaf.
+
+6.80 KVM_CAP_ENFORCE_PV_FEATURE_CPUID
+-------------------------------------
+
+:Architectures: x86
+:Target: vcpu
+
+When enabled, KVM will disable paravirtual features provided to the
+guest according to the bits in the KVM_CPUID_FEATURES CPUID leaf
+(0x40000001). Otherwise, a guest may use the paravirtual features
+regardless of what has actually been exposed through the CPUID leaf.
+
+.. _KVM_CAP_DIRTY_LOG_RING:
+
+
+.. _cap_enable_vm:
+
 7. Capabilities that can be enabled on VMs
 ==========================================
 
 There are certain capabilities that change the behavior of the virtual
-machine when enabled. To enable them, please see section 4.37. Below
-you can find a list of capabilities and what their effect on the VM
-is when enabling them.
+machine when enabled. To enable them, please see section
+:ref:`KVM_ENABLE_CAP`. Below you can find a list of capabilities and
+what their effect on the VM is when enabling them.
 
 The following information is provided along with the description:
 
@@ -7652,6 +7884,7 @@ branch to guests' 0x200 interrupt vector.
 :Architectures: x86
 :Parameters: args[0] defines which exits are disabled
 :Returns: 0 on success, -EINVAL when args[0] contains invalid exits
+          or if any vCPUs have already been created
 
 Valid bits in args[0] are::
 
@@ -7659,6 +7892,7 @@ Valid bits in args[0] are::
   #define KVM_X86_DISABLE_EXITS_HLT              (1 << 1)
   #define KVM_X86_DISABLE_EXITS_PAUSE            (1 << 2)
   #define KVM_X86_DISABLE_EXITS_CSTATE           (1 << 3)
+  #define KVM_X86_DISABLE_EXITS_APERFMPERF       (1 << 4)
 
 Enabling this capability on a VM provides userspace with a way to no
 longer intercept some instructions for improved latency in some
@@ -7668,6 +7902,28 @@ just pass the KVM_CHECK_EXTENSION result to KVM_ENABLE_CAP to disable
 all such vmexits.
 
 Do not enable KVM_FEATURE_PV_UNHALT if you disable HLT exits.
+
+Virtualizing the ``IA32_APERF`` and ``IA32_MPERF`` MSRs requires more
+than just disabling APERF/MPERF exits. While both Intel and AMD
+document strict usage conditions for these MSRs--emphasizing that only
+the ratio of their deltas over a time interval (T0 to T1) is
+architecturally defined--simply passing through the MSRs can still
+produce an incorrect ratio.
+
+This erroneous ratio can occur if, between T0 and T1:
+
+1. The vCPU thread migrates between logical processors.
+2. Live migration or suspend/resume operations take place.
+3. Another task shares the vCPU's logical processor.
+4. C-states lower than C0 are emulated (e.g., via HLT interception).
+5. The guest TSC frequency doesn't match the host TSC frequency.
+
+Due to these complexities, KVM does not automatically associate this
+passthrough capability with the guest CPUID bit,
+``CPUID.6:ECX.APERFMPERF[bit 0]``. Userspace VMMs that deem this
+mechanism adequate for virtualizing the ``IA32_APERF`` and
+``IA32_MPERF`` MSRs must set the guest CPUID bit explicitly.
+
 
 7.14 KVM_CAP_S390_HPAGE_1M
 --------------------------
@@ -7880,6 +8136,11 @@ apply some other policy-based mitigation. When exiting to userspace, KVM sets
 KVM_RUN_X86_BUS_LOCK in vcpu-run->flags, and conditionally sets the exit_reason
 to KVM_EXIT_X86_BUS_LOCK.
 
+Due to differences in the underlying hardware implementation, the vCPU's RIP at
+the time of exit diverges between Intel and AMD.  On Intel hosts, RIP points at
+the next instruction, i.e. the exit is trap-like.  On AMD hosts, RIP points at
+the offending instruction, i.e. the exit is fault-like.
+
 Note! Detected bus locks may be coincident with other exits to userspace, i.e.
 KVM_RUN_X86_BUS_LOCK should be checked regardless of the primary exit reason if
 userspace wants to take action on all detected bus locks.
@@ -7898,10 +8159,10 @@ by POWER10 processor.
 7.24 KVM_CAP_VM_COPY_ENC_CONTEXT_FROM
 -------------------------------------
 
-Architectures: x86 SEV enabled
-Type: vm
-Parameters: args[0] is the fd of the source vm
-Returns: 0 on success; ENOTTY on error
+:Architectures: x86 SEV enabled
+:Type: vm
+:Parameters: args[0] is the fd of the source vm
+:Returns: 0 on success; ENOTTY on error
 
 This capability enables userspace to copy encryption context from the vm
 indicated by the fd to the vm this is called on.
@@ -7933,24 +8194,6 @@ by running an enclave in a VM, KVM prevents access to privileged attributes by
 default.
 
 See Documentation/arch/x86/sgx.rst for more details.
-
-7.26 KVM_CAP_PPC_RPT_INVALIDATE
--------------------------------
-
-:Capability: KVM_CAP_PPC_RPT_INVALIDATE
-:Architectures: ppc
-:Type: vm
-
-This capability indicates that the kernel is capable of handling
-H_RPT_INVALIDATE hcall.
-
-In order to enable the use of H_RPT_INVALIDATE in the guest,
-user space might have to advertise it for the guest. For example,
-IBM pSeries (sPAPR) guest starts using it if "hcall-rpt-invalidate" is
-present in the "ibm,hypertas-functions" device-tree property.
-
-This capability is enabled for hypervisors on platforms like POWER9
-that support radix MMU.
 
 7.27 KVM_CAP_EXIT_ON_EMULATION_FAILURE
 --------------------------------------
@@ -8009,24 +8252,9 @@ indicated by the fd to the VM this is called on.
 This is intended to support intra-host migration of VMs between userspace VMMs,
 upgrading the VMM process without interrupting the guest.
 
-7.30 KVM_CAP_PPC_AIL_MODE_3
--------------------------------
-
-:Capability: KVM_CAP_PPC_AIL_MODE_3
-:Architectures: ppc
-:Type: vm
-
-This capability indicates that the kernel supports the mode 3 setting for the
-"Address Translation Mode on Interrupt" aka "Alternate Interrupt Location"
-resource that is controlled with the H_SET_MODE hypercall.
-
-This capability allows a guest kernel to use a better-performance mode for
-handling interrupts and system calls.
-
 7.31 KVM_CAP_DISABLE_QUIRKS2
 ----------------------------
 
-:Capability: KVM_CAP_DISABLE_QUIRKS2
 :Parameters: args[0] - set of KVM quirks to disable
 :Architectures: x86
 :Type: vm
@@ -8107,6 +8335,50 @@ KVM_X86_QUIRK_SLOT_ZAP_ALL          By default, for KVM_X86_DEFAULT_VM VMs, KVM
                                     or moved memslot isn't reachable, i.e KVM
                                     _may_ invalidate only SPTEs related to the
                                     memslot.
+
+KVM_X86_QUIRK_STUFF_FEATURE_MSRS    By default, at vCPU creation, KVM sets the
+                                    vCPU's MSR_IA32_PERF_CAPABILITIES (0x345),
+                                    MSR_IA32_ARCH_CAPABILITIES (0x10a),
+                                    MSR_PLATFORM_INFO (0xce), and all VMX MSRs
+                                    (0x480..0x492) to the maximal capabilities
+                                    supported by KVM.  KVM also sets
+                                    MSR_IA32_UCODE_REV (0x8b) to an arbitrary
+                                    value (which is different for Intel vs.
+                                    AMD).  Lastly, when guest CPUID is set (by
+                                    userspace), KVM modifies select VMX MSR
+                                    fields to force consistency between guest
+                                    CPUID and L2's effective ISA.  When this
+                                    quirk is disabled, KVM zeroes the vCPU's MSR
+                                    values (with two exceptions, see below),
+                                    i.e. treats the feature MSRs like CPUID
+                                    leaves and gives userspace full control of
+                                    the vCPU model definition.  This quirk does
+                                    not affect VMX MSRs CR0/CR4_FIXED1 (0x487
+                                    and 0x489), as KVM does now allow them to
+                                    be set by userspace (KVM sets them based on
+                                    guest CPUID, for safety purposes).
+
+KVM_X86_QUIRK_IGNORE_GUEST_PAT      By default, on Intel platforms, KVM ignores
+                                    guest PAT and forces the effective memory
+                                    type to WB in EPT.  The quirk is not available
+                                    on Intel platforms which are incapable of
+                                    safely honoring guest PAT (i.e., without CPU
+                                    self-snoop, KVM always ignores guest PAT and
+                                    forces effective memory type to WB).  It is
+                                    also ignored on AMD platforms or, on Intel,
+                                    when a VM has non-coherent DMA devices
+                                    assigned; KVM always honors guest PAT in
+                                    such case. The quirk is needed to avoid
+                                    slowdowns on certain Intel Xeon platforms
+                                    (e.g. ICX, SPR) where self-snoop feature is
+                                    supported but UC is slow enough to cause
+                                    issues with some older guests that use
+                                    UC instead of WC to map the video RAM.
+                                    Userspace can disable the quirk to honor
+                                    guest PAT if it knows that there is no such
+                                    guest software, for example if it does not
+                                    expose a bochs graphics device (which is
+                                    known to have had a buggy driver).
 =================================== ============================================
 
 7.32 KVM_CAP_MAX_VCPU_ID
@@ -8159,27 +8431,6 @@ This capability is aimed to mitigate the threat that malicious VMs can
 cause CPU stuck (due to event windows don't open up) and make the CPU
 unavailable to host or other VMs.
 
-7.34 KVM_CAP_MEMORY_FAULT_INFO
-------------------------------
-
-:Architectures: x86
-:Returns: Informational only, -EINVAL on direct KVM_ENABLE_CAP.
-
-The presence of this capability indicates that KVM_RUN will fill
-kvm_run.memory_fault if KVM cannot resolve a guest page fault VM-Exit, e.g. if
-there is a valid memslot but no backing VMA for the corresponding host virtual
-address.
-
-The information in kvm_run.memory_fault is valid if and only if KVM_RUN returns
-an error with errno=EFAULT or errno=EHWPOISON *and* kvm_run.exit_reason is set
-to KVM_EXIT_MEMORY_FAULT.
-
-Note: Userspaces which attempt to resolve memory faults so that they can retry
-KVM_RUN are encouraged to guard against repeatedly receiving the same
-error/annotated fault.
-
-See KVM_EXIT_MEMORY_FAULT for more information.
-
 7.35 KVM_CAP_X86_APIC_BUS_CYCLES_NS
 -----------------------------------
 
@@ -8197,401 +8448,11 @@ by KVM_CHECK_EXTENSION.
 Note: Userspace is responsible for correctly configuring CPUID 0x15, a.k.a. the
 core crystal clock frequency, if a non-zero CPUID 0x15 is exposed to the guest.
 
-7.36 KVM_CAP_X86_GUEST_MODE
-------------------------------
-
-:Architectures: x86
-:Returns: Informational only, -EINVAL on direct KVM_ENABLE_CAP.
-
-The presence of this capability indicates that KVM_RUN will update the
-KVM_RUN_X86_GUEST_MODE bit in kvm_run.flags to indicate whether the
-vCPU was executing nested guest code when it exited.
-
-KVM exits with the register state of either the L1 or L2 guest
-depending on which executed at the time of an exit. Userspace must
-take care to differentiate between these cases.
-
-8. Other capabilities.
-======================
-
-This section lists capabilities that give information about other
-features of the KVM implementation.
-
-8.1 KVM_CAP_PPC_HWRNG
----------------------
-
-:Architectures: ppc
-
-This capability, if KVM_CHECK_EXTENSION indicates that it is
-available, means that the kernel has an implementation of the
-H_RANDOM hypercall backed by a hardware random-number generator.
-If present, the kernel H_RANDOM handler can be enabled for guest use
-with the KVM_CAP_PPC_ENABLE_HCALL capability.
-
-8.2 KVM_CAP_HYPERV_SYNIC
-------------------------
-
-:Architectures: x86
-
-This capability, if KVM_CHECK_EXTENSION indicates that it is
-available, means that the kernel has an implementation of the
-Hyper-V Synthetic interrupt controller(SynIC). Hyper-V SynIC is
-used to support Windows Hyper-V based guest paravirt drivers(VMBus).
-
-In order to use SynIC, it has to be activated by setting this
-capability via KVM_ENABLE_CAP ioctl on the vcpu fd. Note that this
-will disable the use of APIC hardware virtualization even if supported
-by the CPU, as it's incompatible with SynIC auto-EOI behavior.
-
-8.3 KVM_CAP_PPC_MMU_RADIX
--------------------------
-
-:Architectures: ppc
-
-This capability, if KVM_CHECK_EXTENSION indicates that it is
-available, means that the kernel can support guests using the
-radix MMU defined in Power ISA V3.00 (as implemented in the POWER9
-processor).
-
-8.4 KVM_CAP_PPC_MMU_HASH_V3
----------------------------
-
-:Architectures: ppc
-
-This capability, if KVM_CHECK_EXTENSION indicates that it is
-available, means that the kernel can support guests using the
-hashed page table MMU defined in Power ISA V3.00 (as implemented in
-the POWER9 processor), including in-memory segment tables.
-
-8.5 KVM_CAP_MIPS_VZ
--------------------
-
-:Architectures: mips
-
-This capability, if KVM_CHECK_EXTENSION on the main kvm handle indicates that
-it is available, means that full hardware assisted virtualization capabilities
-of the hardware are available for use through KVM. An appropriate
-KVM_VM_MIPS_* type must be passed to KVM_CREATE_VM to create a VM which
-utilises it.
-
-If KVM_CHECK_EXTENSION on a kvm VM handle indicates that this capability is
-available, it means that the VM is using full hardware assisted virtualization
-capabilities of the hardware. This is useful to check after creating a VM with
-KVM_VM_MIPS_DEFAULT.
-
-The value returned by KVM_CHECK_EXTENSION should be compared against known
-values (see below). All other values are reserved. This is to allow for the
-possibility of other hardware assisted virtualization implementations which
-may be incompatible with the MIPS VZ ASE.
-
-==  ==========================================================================
- 0  The trap & emulate implementation is in use to run guest code in user
-    mode. Guest virtual memory segments are rearranged to fit the guest in the
-    user mode address space.
-
- 1  The MIPS VZ ASE is in use, providing full hardware assisted
-    virtualization, including standard guest virtual memory segments.
-==  ==========================================================================
-
-8.6 KVM_CAP_MIPS_TE
--------------------
-
-:Architectures: mips
-
-This capability, if KVM_CHECK_EXTENSION on the main kvm handle indicates that
-it is available, means that the trap & emulate implementation is available to
-run guest code in user mode, even if KVM_CAP_MIPS_VZ indicates that hardware
-assisted virtualisation is also available. KVM_VM_MIPS_TE (0) must be passed
-to KVM_CREATE_VM to create a VM which utilises it.
-
-If KVM_CHECK_EXTENSION on a kvm VM handle indicates that this capability is
-available, it means that the VM is using trap & emulate.
-
-8.7 KVM_CAP_MIPS_64BIT
-----------------------
-
-:Architectures: mips
-
-This capability indicates the supported architecture type of the guest, i.e. the
-supported register and address width.
-
-The values returned when this capability is checked by KVM_CHECK_EXTENSION on a
-kvm VM handle correspond roughly to the CP0_Config.AT register field, and should
-be checked specifically against known values (see below). All other values are
-reserved.
-
-==  ========================================================================
- 0  MIPS32 or microMIPS32.
-    Both registers and addresses are 32-bits wide.
-    It will only be possible to run 32-bit guest code.
-
- 1  MIPS64 or microMIPS64 with access only to 32-bit compatibility segments.
-    Registers are 64-bits wide, but addresses are 32-bits wide.
-    64-bit guest code may run but cannot access MIPS64 memory segments.
-    It will also be possible to run 32-bit guest code.
-
- 2  MIPS64 or microMIPS64 with access to all address segments.
-    Both registers and addresses are 64-bits wide.
-    It will be possible to run 64-bit or 32-bit guest code.
-==  ========================================================================
-
-8.9 KVM_CAP_ARM_USER_IRQ
-------------------------
-
-:Architectures: arm64
-
-This capability, if KVM_CHECK_EXTENSION indicates that it is available, means
-that if userspace creates a VM without an in-kernel interrupt controller, it
-will be notified of changes to the output level of in-kernel emulated devices,
-which can generate virtual interrupts, presented to the VM.
-For such VMs, on every return to userspace, the kernel
-updates the vcpu's run->s.regs.device_irq_level field to represent the actual
-output level of the device.
-
-Whenever kvm detects a change in the device output level, kvm guarantees at
-least one return to userspace before running the VM.  This exit could either
-be a KVM_EXIT_INTR or any other exit event, like KVM_EXIT_MMIO. This way,
-userspace can always sample the device output level and re-compute the state of
-the userspace interrupt controller.  Userspace should always check the state
-of run->s.regs.device_irq_level on every kvm exit.
-The value in run->s.regs.device_irq_level can represent both level and edge
-triggered interrupt signals, depending on the device.  Edge triggered interrupt
-signals will exit to userspace with the bit in run->s.regs.device_irq_level
-set exactly once per edge signal.
-
-The field run->s.regs.device_irq_level is available independent of
-run->kvm_valid_regs or run->kvm_dirty_regs bits.
-
-If KVM_CAP_ARM_USER_IRQ is supported, the KVM_CHECK_EXTENSION ioctl returns a
-number larger than 0 indicating the version of this capability is implemented
-and thereby which bits in run->s.regs.device_irq_level can signal values.
-
-Currently the following bits are defined for the device_irq_level bitmap::
-
-  KVM_CAP_ARM_USER_IRQ >= 1:
-
-    KVM_ARM_DEV_EL1_VTIMER -  EL1 virtual timer
-    KVM_ARM_DEV_EL1_PTIMER -  EL1 physical timer
-    KVM_ARM_DEV_PMU        -  ARM PMU overflow interrupt signal
-
-Future versions of kvm may implement additional events. These will get
-indicated by returning a higher number from KVM_CHECK_EXTENSION and will be
-listed above.
-
-8.10 KVM_CAP_PPC_SMT_POSSIBLE
------------------------------
-
-:Architectures: ppc
-
-Querying this capability returns a bitmap indicating the possible
-virtual SMT modes that can be set using KVM_CAP_PPC_SMT.  If bit N
-(counting from the right) is set, then a virtual SMT mode of 2^N is
-available.
-
-8.11 KVM_CAP_HYPERV_SYNIC2
---------------------------
-
-:Architectures: x86
-
-This capability enables a newer version of Hyper-V Synthetic interrupt
-controller (SynIC).  The only difference with KVM_CAP_HYPERV_SYNIC is that KVM
-doesn't clear SynIC message and event flags pages when they are enabled by
-writing to the respective MSRs.
-
-8.12 KVM_CAP_HYPERV_VP_INDEX
-----------------------------
-
-:Architectures: x86
-
-This capability indicates that userspace can load HV_X64_MSR_VP_INDEX msr.  Its
-value is used to denote the target vcpu for a SynIC interrupt.  For
-compatibility, KVM initializes this msr to KVM's internal vcpu index.  When this
-capability is absent, userspace can still query this msr's value.
-
-8.13 KVM_CAP_S390_AIS_MIGRATION
--------------------------------
-
-:Architectures: s390
-:Parameters: none
-
-This capability indicates if the flic device will be able to get/set the
-AIS states for migration via the KVM_DEV_FLIC_AISM_ALL attribute and allows
-to discover this without having to create a flic device.
-
-8.14 KVM_CAP_S390_PSW
----------------------
-
-:Architectures: s390
-
-This capability indicates that the PSW is exposed via the kvm_run structure.
-
-8.15 KVM_CAP_S390_GMAP
-----------------------
-
-:Architectures: s390
-
-This capability indicates that the user space memory used as guest mapping can
-be anywhere in the user memory address space, as long as the memory slots are
-aligned and sized to a segment (1MB) boundary.
-
-8.16 KVM_CAP_S390_COW
----------------------
-
-:Architectures: s390
-
-This capability indicates that the user space memory used as guest mapping can
-use copy-on-write semantics as well as dirty pages tracking via read-only page
-tables.
-
-8.17 KVM_CAP_S390_BPB
----------------------
-
-:Architectures: s390
-
-This capability indicates that kvm will implement the interfaces to handle
-reset, migration and nested KVM for branch prediction blocking. The stfle
-facility 82 should not be provided to the guest without this capability.
-
-8.18 KVM_CAP_HYPERV_TLBFLUSH
-----------------------------
-
-:Architectures: x86
-
-This capability indicates that KVM supports paravirtualized Hyper-V TLB Flush
-hypercalls:
-HvFlushVirtualAddressSpace, HvFlushVirtualAddressSpaceEx,
-HvFlushVirtualAddressList, HvFlushVirtualAddressListEx.
-
-8.19 KVM_CAP_ARM_INJECT_SERROR_ESR
-----------------------------------
-
-:Architectures: arm64
-
-This capability indicates that userspace can specify (via the
-KVM_SET_VCPU_EVENTS ioctl) the syndrome value reported to the guest when it
-takes a virtual SError interrupt exception.
-If KVM advertises this capability, userspace can only specify the ISS field for
-the ESR syndrome. Other parts of the ESR, such as the EC are generated by the
-CPU when the exception is taken. If this virtual SError is taken to EL1 using
-AArch64, this value will be reported in the ISS field of ESR_ELx.
-
-See KVM_CAP_VCPU_EVENTS for more details.
-
-8.20 KVM_CAP_HYPERV_SEND_IPI
-----------------------------
-
-:Architectures: x86
-
-This capability indicates that KVM supports paravirtualized Hyper-V IPI send
-hypercalls:
-HvCallSendSyntheticClusterIpi, HvCallSendSyntheticClusterIpiEx.
-
-8.21 KVM_CAP_HYPERV_DIRECT_TLBFLUSH
------------------------------------
-
-:Architectures: x86
-
-This capability indicates that KVM running on top of Hyper-V hypervisor
-enables Direct TLB flush for its guests meaning that TLB flush
-hypercalls are handled by Level 0 hypervisor (Hyper-V) bypassing KVM.
-Due to the different ABI for hypercall parameters between Hyper-V and
-KVM, enabling this capability effectively disables all hypercall
-handling by KVM (as some KVM hypercall may be mistakenly treated as TLB
-flush hypercalls by Hyper-V) so userspace should disable KVM identification
-in CPUID and only exposes Hyper-V identification. In this case, guest
-thinks it's running on Hyper-V and only use Hyper-V hypercalls.
-
-8.22 KVM_CAP_S390_VCPU_RESETS
------------------------------
-
-:Architectures: s390
-
-This capability indicates that the KVM_S390_NORMAL_RESET and
-KVM_S390_CLEAR_RESET ioctls are available.
-
-8.23 KVM_CAP_S390_PROTECTED
----------------------------
-
-:Architectures: s390
-
-This capability indicates that the Ultravisor has been initialized and
-KVM can therefore start protected VMs.
-This capability governs the KVM_S390_PV_COMMAND ioctl and the
-KVM_MP_STATE_LOAD MP_STATE. KVM_SET_MP_STATE can fail for protected
-guests when the state change is invalid.
-
-8.24 KVM_CAP_STEAL_TIME
------------------------
-
-:Architectures: arm64, x86
-
-This capability indicates that KVM supports steal time accounting.
-When steal time accounting is supported it may be enabled with
-architecture-specific interfaces.  This capability and the architecture-
-specific interfaces must be consistent, i.e. if one says the feature
-is supported, than the other should as well and vice versa.  For arm64
-see Documentation/virt/kvm/devices/vcpu.rst "KVM_ARM_VCPU_PVTIME_CTRL".
-For x86 see Documentation/virt/kvm/x86/msr.rst "MSR_KVM_STEAL_TIME".
-
-8.25 KVM_CAP_S390_DIAG318
--------------------------
-
-:Architectures: s390
-
-This capability enables a guest to set information about its control program
-(i.e. guest kernel type and version). The information is helpful during
-system/firmware service events, providing additional data about the guest
-environments running on the machine.
-
-The information is associated with the DIAGNOSE 0x318 instruction, which sets
-an 8-byte value consisting of a one-byte Control Program Name Code (CPNC) and
-a 7-byte Control Program Version Code (CPVC). The CPNC determines what
-environment the control program is running in (e.g. Linux, z/VM...), and the
-CPVC is used for information specific to OS (e.g. Linux version, Linux
-distribution...)
-
-If this capability is available, then the CPNC and CPVC can be synchronized
-between KVM and userspace via the sync regs mechanism (KVM_SYNC_DIAG318).
-
-8.26 KVM_CAP_X86_USER_SPACE_MSR
--------------------------------
-
-:Architectures: x86
-
-This capability indicates that KVM supports deflection of MSR reads and
-writes to user space. It can be enabled on a VM level. If enabled, MSR
-accesses that would usually trigger a #GP by KVM into the guest will
-instead get bounced to user space through the KVM_EXIT_X86_RDMSR and
-KVM_EXIT_X86_WRMSR exit notifications.
-
-8.27 KVM_CAP_X86_MSR_FILTER
----------------------------
-
-:Architectures: x86
-
-This capability indicates that KVM supports that accesses to user defined MSRs
-may be rejected. With this capability exposed, KVM exports new VM ioctl
-KVM_X86_SET_MSR_FILTER which user space can call to specify bitmaps of MSR
-ranges that KVM should deny access to.
-
-In combination with KVM_CAP_X86_USER_SPACE_MSR, this allows user space to
-trap and emulate MSRs that are outside of the scope of KVM as well as
-limit the attack surface on KVM's MSR emulation code.
-
-8.28 KVM_CAP_ENFORCE_PV_FEATURE_CPUID
--------------------------------------
-
-Architectures: x86
-
-When enabled, KVM will disable paravirtual features provided to the
-guest according to the bits in the KVM_CPUID_FEATURES CPUID leaf
-(0x40000001). Otherwise, a guest may use the paravirtual features
-regardless of what has actually been exposed through the CPUID leaf.
-
-8.29 KVM_CAP_DIRTY_LOG_RING/KVM_CAP_DIRTY_LOG_RING_ACQ_REL
+7.36 KVM_CAP_DIRTY_LOG_RING/KVM_CAP_DIRTY_LOG_RING_ACQ_REL
 ----------------------------------------------------------
 
-:Architectures: x86, arm64
+:Architectures: x86, arm64, riscv
+:Type: vm
 :Parameters: args[0] - size of the dirty log ring
 
 KVM is capable of tracking dirty memory using ring buffers that are
@@ -8712,6 +8573,448 @@ command KVM_DEV_ARM_{VGIC_GRP_CTRL, ITS_RESTORE_TABLES} on KVM device
 vgic3 pending table through KVM_DEV_ARM_VGIC_{GRP_CTRL, SAVE_PENDING_TABLES}
 command on KVM device "kvm-arm-vgic-v3".
 
+7.37 KVM_CAP_PMU_CAPABILITY
+---------------------------
+
+:Architectures: x86
+:Type: vm
+:Parameters: arg[0] is bitmask of PMU virtualization capabilities.
+:Returns: 0 on success, -EINVAL when arg[0] contains invalid bits
+
+This capability alters PMU virtualization in KVM.
+
+Calling KVM_CHECK_EXTENSION for this capability returns a bitmask of
+PMU virtualization capabilities that can be adjusted on a VM.
+
+The argument to KVM_ENABLE_CAP is also a bitmask and selects specific
+PMU virtualization capabilities to be applied to the VM.  This can
+only be invoked on a VM prior to the creation of VCPUs.
+
+At this time, KVM_PMU_CAP_DISABLE is the only capability.  Setting
+this capability will disable PMU virtualization for that VM.  Usermode
+should adjust CPUID leaf 0xA to reflect that the PMU is disabled.
+
+7.38 KVM_CAP_VM_DISABLE_NX_HUGE_PAGES
+-------------------------------------
+
+:Architectures: x86
+:Type: vm
+:Parameters: arg[0] must be 0.
+:Returns: 0 on success, -EPERM if the userspace process does not
+          have CAP_SYS_BOOT, -EINVAL if args[0] is not 0 or any vCPUs have been
+          created.
+
+This capability disables the NX huge pages mitigation for iTLB MULTIHIT.
+
+The capability has no effect if the nx_huge_pages module parameter is not set.
+
+This capability may only be set before any vCPUs are created.
+
+7.39 KVM_CAP_ARM_EAGER_SPLIT_CHUNK_SIZE
+---------------------------------------
+
+:Architectures: arm64
+:Type: vm
+:Parameters: arg[0] is the new split chunk size.
+:Returns: 0 on success, -EINVAL if any memslot was already created.
+
+This capability sets the chunk size used in Eager Page Splitting.
+
+Eager Page Splitting improves the performance of dirty-logging (used
+in live migrations) when guest memory is backed by huge-pages.  It
+avoids splitting huge-pages (into PAGE_SIZE pages) on fault, by doing
+it eagerly when enabling dirty logging (with the
+KVM_MEM_LOG_DIRTY_PAGES flag for a memory region), or when using
+KVM_CLEAR_DIRTY_LOG.
+
+The chunk size specifies how many pages to break at a time, using a
+single allocation for each chunk. Bigger the chunk size, more pages
+need to be allocated ahead of time.
+
+The chunk size needs to be a valid block size. The list of acceptable
+block sizes is exposed in KVM_CAP_ARM_SUPPORTED_BLOCK_SIZES as a
+64-bit bitmap (each bit describing a block size). The default value is
+0, to disable the eager page splitting.
+
+7.40 KVM_CAP_EXIT_HYPERCALL
+---------------------------
+
+:Architectures: x86
+:Type: vm
+
+This capability, if enabled, will cause KVM to exit to userspace
+with KVM_EXIT_HYPERCALL exit reason to process some hypercalls.
+
+Calling KVM_CHECK_EXTENSION for this capability will return a bitmask
+of hypercalls that can be configured to exit to userspace.
+Right now, the only such hypercall is KVM_HC_MAP_GPA_RANGE.
+
+The argument to KVM_ENABLE_CAP is also a bitmask, and must be a subset
+of the result of KVM_CHECK_EXTENSION.  KVM will forward to userspace
+the hypercalls whose corresponding bit is in the argument, and return
+ENOSYS for the others.
+
+7.41 KVM_CAP_ARM_SYSTEM_SUSPEND
+-------------------------------
+
+:Architectures: arm64
+:Type: vm
+
+When enabled, KVM will exit to userspace with KVM_EXIT_SYSTEM_EVENT of
+type KVM_SYSTEM_EVENT_SUSPEND to process the guest suspend request.
+
+7.42 KVM_CAP_ARM_WRITABLE_IMP_ID_REGS
+-------------------------------------
+
+:Architectures: arm64
+:Target: VM
+:Parameters: None
+:Returns: 0 on success, -EINVAL if vCPUs have been created before enabling this
+          capability.
+
+This capability changes the behavior of the registers that identify a PE
+implementation of the Arm architecture: MIDR_EL1, REVIDR_EL1, and AIDR_EL1.
+By default, these registers are visible to userspace but treated as invariant.
+
+When this capability is enabled, KVM allows userspace to change the
+aforementioned registers before the first KVM_RUN. These registers are VM
+scoped, meaning that the same set of values are presented on all vCPUs in a
+given VM.
+
+7.43 KVM_CAP_RISCV_MP_STATE_RESET
+---------------------------------
+
+:Architectures: riscv
+:Type: VM
+:Parameters: None
+:Returns: 0 on success, -EINVAL if arg[0] is not zero
+
+When this capability is enabled, KVM resets the VCPU when setting
+MP_STATE_INIT_RECEIVED through IOCTL.  The original MP_STATE is preserved.
+
+7.43 KVM_CAP_ARM_CACHEABLE_PFNMAP_SUPPORTED
+-------------------------------------------
+
+:Architectures: arm64
+:Target: VM
+:Parameters: None
+
+This capability indicate to the userspace whether a PFNMAP memory region
+can be safely mapped as cacheable. This relies on the presence of
+force write back (FWB) feature support on the hardware.
+
+8. Other capabilities.
+======================
+
+This section lists capabilities that give information about other
+features of the KVM implementation.
+
+8.1 KVM_CAP_PPC_HWRNG
+---------------------
+
+:Architectures: ppc
+
+This capability, if KVM_CHECK_EXTENSION indicates that it is
+available, means that the kernel has an implementation of the
+H_RANDOM hypercall backed by a hardware random-number generator.
+If present, the kernel H_RANDOM handler can be enabled for guest use
+with the KVM_CAP_PPC_ENABLE_HCALL capability.
+
+8.3 KVM_CAP_PPC_MMU_RADIX
+-------------------------
+
+:Architectures: ppc
+
+This capability, if KVM_CHECK_EXTENSION indicates that it is
+available, means that the kernel can support guests using the
+radix MMU defined in Power ISA V3.00 (as implemented in the POWER9
+processor).
+
+8.4 KVM_CAP_PPC_MMU_HASH_V3
+---------------------------
+
+:Architectures: ppc
+
+This capability, if KVM_CHECK_EXTENSION indicates that it is
+available, means that the kernel can support guests using the
+hashed page table MMU defined in Power ISA V3.00 (as implemented in
+the POWER9 processor), including in-memory segment tables.
+
+8.5 KVM_CAP_MIPS_VZ
+-------------------
+
+:Architectures: mips
+
+This capability, if KVM_CHECK_EXTENSION on the main kvm handle indicates that
+it is available, means that full hardware assisted virtualization capabilities
+of the hardware are available for use through KVM. An appropriate
+KVM_VM_MIPS_* type must be passed to KVM_CREATE_VM to create a VM which
+utilises it.
+
+If KVM_CHECK_EXTENSION on a kvm VM handle indicates that this capability is
+available, it means that the VM is using full hardware assisted virtualization
+capabilities of the hardware. This is useful to check after creating a VM with
+KVM_VM_MIPS_DEFAULT.
+
+The value returned by KVM_CHECK_EXTENSION should be compared against known
+values (see below). All other values are reserved. This is to allow for the
+possibility of other hardware assisted virtualization implementations which
+may be incompatible with the MIPS VZ ASE.
+
+==  ==========================================================================
+ 0  The trap & emulate implementation is in use to run guest code in user
+    mode. Guest virtual memory segments are rearranged to fit the guest in the
+    user mode address space.
+
+ 1  The MIPS VZ ASE is in use, providing full hardware assisted
+    virtualization, including standard guest virtual memory segments.
+==  ==========================================================================
+
+8.7 KVM_CAP_MIPS_64BIT
+----------------------
+
+:Architectures: mips
+
+This capability indicates the supported architecture type of the guest, i.e. the
+supported register and address width.
+
+The values returned when this capability is checked by KVM_CHECK_EXTENSION on a
+kvm VM handle correspond roughly to the CP0_Config.AT register field, and should
+be checked specifically against known values (see below). All other values are
+reserved.
+
+==  ========================================================================
+ 0  MIPS32 or microMIPS32.
+    Both registers and addresses are 32-bits wide.
+    It will only be possible to run 32-bit guest code.
+
+ 1  MIPS64 or microMIPS64 with access only to 32-bit compatibility segments.
+    Registers are 64-bits wide, but addresses are 32-bits wide.
+    64-bit guest code may run but cannot access MIPS64 memory segments.
+    It will also be possible to run 32-bit guest code.
+
+ 2  MIPS64 or microMIPS64 with access to all address segments.
+    Both registers and addresses are 64-bits wide.
+    It will be possible to run 64-bit or 32-bit guest code.
+==  ========================================================================
+
+8.9 KVM_CAP_ARM_USER_IRQ
+------------------------
+
+:Architectures: arm64
+
+This capability, if KVM_CHECK_EXTENSION indicates that it is available, means
+that if userspace creates a VM without an in-kernel interrupt controller, it
+will be notified of changes to the output level of in-kernel emulated devices,
+which can generate virtual interrupts, presented to the VM.
+For such VMs, on every return to userspace, the kernel
+updates the vcpu's run->s.regs.device_irq_level field to represent the actual
+output level of the device.
+
+Whenever kvm detects a change in the device output level, kvm guarantees at
+least one return to userspace before running the VM.  This exit could either
+be a KVM_EXIT_INTR or any other exit event, like KVM_EXIT_MMIO. This way,
+userspace can always sample the device output level and re-compute the state of
+the userspace interrupt controller.  Userspace should always check the state
+of run->s.regs.device_irq_level on every kvm exit.
+The value in run->s.regs.device_irq_level can represent both level and edge
+triggered interrupt signals, depending on the device.  Edge triggered interrupt
+signals will exit to userspace with the bit in run->s.regs.device_irq_level
+set exactly once per edge signal.
+
+The field run->s.regs.device_irq_level is available independent of
+run->kvm_valid_regs or run->kvm_dirty_regs bits.
+
+If KVM_CAP_ARM_USER_IRQ is supported, the KVM_CHECK_EXTENSION ioctl returns a
+number larger than 0 indicating the version of this capability is implemented
+and thereby which bits in run->s.regs.device_irq_level can signal values.
+
+Currently the following bits are defined for the device_irq_level bitmap::
+
+  KVM_CAP_ARM_USER_IRQ >= 1:
+
+    KVM_ARM_DEV_EL1_VTIMER -  EL1 virtual timer
+    KVM_ARM_DEV_EL1_PTIMER -  EL1 physical timer
+    KVM_ARM_DEV_PMU        -  ARM PMU overflow interrupt signal
+
+Future versions of kvm may implement additional events. These will get
+indicated by returning a higher number from KVM_CHECK_EXTENSION and will be
+listed above.
+
+8.10 KVM_CAP_PPC_SMT_POSSIBLE
+-----------------------------
+
+:Architectures: ppc
+
+Querying this capability returns a bitmap indicating the possible
+virtual SMT modes that can be set using KVM_CAP_PPC_SMT.  If bit N
+(counting from the right) is set, then a virtual SMT mode of 2^N is
+available.
+
+8.12 KVM_CAP_HYPERV_VP_INDEX
+----------------------------
+
+:Architectures: x86
+
+This capability indicates that userspace can load HV_X64_MSR_VP_INDEX msr.  Its
+value is used to denote the target vcpu for a SynIC interrupt.  For
+compatibility, KVM initializes this msr to KVM's internal vcpu index.  When this
+capability is absent, userspace can still query this msr's value.
+
+8.13 KVM_CAP_S390_AIS_MIGRATION
+-------------------------------
+
+:Architectures: s390
+
+This capability indicates if the flic device will be able to get/set the
+AIS states for migration via the KVM_DEV_FLIC_AISM_ALL attribute and allows
+to discover this without having to create a flic device.
+
+8.14 KVM_CAP_S390_PSW
+---------------------
+
+:Architectures: s390
+
+This capability indicates that the PSW is exposed via the kvm_run structure.
+
+8.15 KVM_CAP_S390_GMAP
+----------------------
+
+:Architectures: s390
+
+This capability indicates that the user space memory used as guest mapping can
+be anywhere in the user memory address space, as long as the memory slots are
+aligned and sized to a segment (1MB) boundary.
+
+8.16 KVM_CAP_S390_COW
+---------------------
+
+:Architectures: s390
+
+This capability indicates that the user space memory used as guest mapping can
+use copy-on-write semantics as well as dirty pages tracking via read-only page
+tables.
+
+8.17 KVM_CAP_S390_BPB
+---------------------
+
+:Architectures: s390
+
+This capability indicates that kvm will implement the interfaces to handle
+reset, migration and nested KVM for branch prediction blocking. The stfle
+facility 82 should not be provided to the guest without this capability.
+
+8.18 KVM_CAP_HYPERV_TLBFLUSH
+----------------------------
+
+:Architectures: x86
+
+This capability indicates that KVM supports paravirtualized Hyper-V TLB Flush
+hypercalls:
+HvFlushVirtualAddressSpace, HvFlushVirtualAddressSpaceEx,
+HvFlushVirtualAddressList, HvFlushVirtualAddressListEx.
+
+8.19 KVM_CAP_ARM_INJECT_SERROR_ESR
+----------------------------------
+
+:Architectures: arm64
+
+This capability indicates that userspace can specify (via the
+KVM_SET_VCPU_EVENTS ioctl) the syndrome value reported to the guest when it
+takes a virtual SError interrupt exception.
+If KVM advertises this capability, userspace can only specify the ISS field for
+the ESR syndrome. Other parts of the ESR, such as the EC are generated by the
+CPU when the exception is taken. If this virtual SError is taken to EL1 using
+AArch64, this value will be reported in the ISS field of ESR_ELx.
+
+See KVM_CAP_VCPU_EVENTS for more details.
+
+8.20 KVM_CAP_HYPERV_SEND_IPI
+----------------------------
+
+:Architectures: x86
+
+This capability indicates that KVM supports paravirtualized Hyper-V IPI send
+hypercalls:
+HvCallSendSyntheticClusterIpi, HvCallSendSyntheticClusterIpiEx.
+
+8.22 KVM_CAP_S390_VCPU_RESETS
+-----------------------------
+
+:Architectures: s390
+
+This capability indicates that the KVM_S390_NORMAL_RESET and
+KVM_S390_CLEAR_RESET ioctls are available.
+
+8.23 KVM_CAP_S390_PROTECTED
+---------------------------
+
+:Architectures: s390
+
+This capability indicates that the Ultravisor has been initialized and
+KVM can therefore start protected VMs.
+This capability governs the KVM_S390_PV_COMMAND ioctl and the
+KVM_MP_STATE_LOAD MP_STATE. KVM_SET_MP_STATE can fail for protected
+guests when the state change is invalid.
+
+8.24 KVM_CAP_STEAL_TIME
+-----------------------
+
+:Architectures: arm64, x86
+
+This capability indicates that KVM supports steal time accounting.
+When steal time accounting is supported it may be enabled with
+architecture-specific interfaces.  This capability and the architecture-
+specific interfaces must be consistent, i.e. if one says the feature
+is supported, than the other should as well and vice versa.  For arm64
+see Documentation/virt/kvm/devices/vcpu.rst "KVM_ARM_VCPU_PVTIME_CTRL".
+For x86 see Documentation/virt/kvm/x86/msr.rst "MSR_KVM_STEAL_TIME".
+
+8.25 KVM_CAP_S390_DIAG318
+-------------------------
+
+:Architectures: s390
+
+This capability enables a guest to set information about its control program
+(i.e. guest kernel type and version). The information is helpful during
+system/firmware service events, providing additional data about the guest
+environments running on the machine.
+
+The information is associated with the DIAGNOSE 0x318 instruction, which sets
+an 8-byte value consisting of a one-byte Control Program Name Code (CPNC) and
+a 7-byte Control Program Version Code (CPVC). The CPNC determines what
+environment the control program is running in (e.g. Linux, z/VM...), and the
+CPVC is used for information specific to OS (e.g. Linux version, Linux
+distribution...)
+
+If this capability is available, then the CPNC and CPVC can be synchronized
+between KVM and userspace via the sync regs mechanism (KVM_SYNC_DIAG318).
+
+8.26 KVM_CAP_X86_USER_SPACE_MSR
+-------------------------------
+
+:Architectures: x86
+
+This capability indicates that KVM supports deflection of MSR reads and
+writes to user space. It can be enabled on a VM level. If enabled, MSR
+accesses that would usually trigger a #GP by KVM into the guest will
+instead get bounced to user space through the KVM_EXIT_X86_RDMSR and
+KVM_EXIT_X86_WRMSR exit notifications.
+
+8.27 KVM_CAP_X86_MSR_FILTER
+---------------------------
+
+:Architectures: x86
+
+This capability indicates that KVM supports that accesses to user defined MSRs
+may be rejected. With this capability exposed, KVM exports new VM ioctl
+KVM_X86_SET_MSR_FILTER which user space can call to specify bitmaps of MSR
+ranges that KVM should deny access to.
+
+In combination with KVM_CAP_X86_USER_SPACE_MSR, this allows user space to
+trap and emulate MSRs that are outside of the scope of KVM as well as
+limit the attack surface on KVM's MSR emulation code.
+
 8.30 KVM_CAP_XEN_HVM
 --------------------
 
@@ -8776,10 +9079,9 @@ clearing the PVCLOCK_TSC_STABLE_BIT flag in Xen pvclock sources. This will be
 done when the KVM_CAP_XEN_HVM ioctl sets the
 KVM_XEN_HVM_CONFIG_PVCLOCK_TSC_UNSTABLE flag.
 
-8.31 KVM_CAP_PPC_MULTITCE
--------------------------
+8.31 KVM_CAP_SPAPR_MULTITCE
+---------------------------
 
-:Capability: KVM_CAP_PPC_MULTITCE
 :Architectures: ppc
 :Type: vm
 
@@ -8811,72 +9113,9 @@ This capability indicates that the KVM virtual PTP service is
 supported in the host. A VMM can check whether the service is
 available to the guest on migration.
 
-8.33 KVM_CAP_HYPERV_ENFORCE_CPUID
----------------------------------
-
-Architectures: x86
-
-When enabled, KVM will disable emulated Hyper-V features provided to the
-guest according to the bits Hyper-V CPUID feature leaves. Otherwise, all
-currently implemented Hyper-V features are provided unconditionally when
-Hyper-V identification is set in the HYPERV_CPUID_INTERFACE (0x40000001)
-leaf.
-
-8.34 KVM_CAP_EXIT_HYPERCALL
----------------------------
-
-:Capability: KVM_CAP_EXIT_HYPERCALL
-:Architectures: x86
-:Type: vm
-
-This capability, if enabled, will cause KVM to exit to userspace
-with KVM_EXIT_HYPERCALL exit reason to process some hypercalls.
-
-Calling KVM_CHECK_EXTENSION for this capability will return a bitmask
-of hypercalls that can be configured to exit to userspace.
-Right now, the only such hypercall is KVM_HC_MAP_GPA_RANGE.
-
-The argument to KVM_ENABLE_CAP is also a bitmask, and must be a subset
-of the result of KVM_CHECK_EXTENSION.  KVM will forward to userspace
-the hypercalls whose corresponding bit is in the argument, and return
-ENOSYS for the others.
-
-8.35 KVM_CAP_PMU_CAPABILITY
----------------------------
-
-:Capability: KVM_CAP_PMU_CAPABILITY
-:Architectures: x86
-:Type: vm
-:Parameters: arg[0] is bitmask of PMU virtualization capabilities.
-:Returns: 0 on success, -EINVAL when arg[0] contains invalid bits
-
-This capability alters PMU virtualization in KVM.
-
-Calling KVM_CHECK_EXTENSION for this capability returns a bitmask of
-PMU virtualization capabilities that can be adjusted on a VM.
-
-The argument to KVM_ENABLE_CAP is also a bitmask and selects specific
-PMU virtualization capabilities to be applied to the VM.  This can
-only be invoked on a VM prior to the creation of VCPUs.
-
-At this time, KVM_PMU_CAP_DISABLE is the only capability.  Setting
-this capability will disable PMU virtualization for that VM.  Usermode
-should adjust CPUID leaf 0xA to reflect that the PMU is disabled.
-
-8.36 KVM_CAP_ARM_SYSTEM_SUSPEND
--------------------------------
-
-:Capability: KVM_CAP_ARM_SYSTEM_SUSPEND
-:Architectures: arm64
-:Type: vm
-
-When enabled, KVM will exit to userspace with KVM_EXIT_SYSTEM_EVENT of
-type KVM_SYSTEM_EVENT_SUSPEND to process the guest suspend request.
-
 8.37 KVM_CAP_S390_PROTECTED_DUMP
 --------------------------------
 
-:Capability: KVM_CAP_S390_PROTECTED_DUMP
 :Architectures: s390
 :Type: vm
 
@@ -8886,27 +9125,9 @@ PV guests. The `KVM_PV_DUMP` command is available for the
 dump related UV data. Also the vcpu ioctl `KVM_S390_PV_CPU_COMMAND` is
 available and supports the `KVM_PV_DUMP_CPU` subcommand.
 
-8.38 KVM_CAP_VM_DISABLE_NX_HUGE_PAGES
--------------------------------------
-
-:Capability: KVM_CAP_VM_DISABLE_NX_HUGE_PAGES
-:Architectures: x86
-:Type: vm
-:Parameters: arg[0] must be 0.
-:Returns: 0 on success, -EPERM if the userspace process does not
-          have CAP_SYS_BOOT, -EINVAL if args[0] is not 0 or any vCPUs have been
-          created.
-
-This capability disables the NX huge pages mitigation for iTLB MULTIHIT.
-
-The capability has no effect if the nx_huge_pages module parameter is not set.
-
-This capability may only be set before any vCPUs are created.
-
 8.39 KVM_CAP_S390_CPU_TOPOLOGY
 ------------------------------
 
-:Capability: KVM_CAP_S390_CPU_TOPOLOGY
 :Architectures: s390
 :Type: vm
 
@@ -8928,37 +9149,9 @@ structure.
 When getting the Modified Change Topology Report value, the attr->addr
 must point to a byte where the value will be stored or retrieved from.
 
-8.40 KVM_CAP_ARM_EAGER_SPLIT_CHUNK_SIZE
----------------------------------------
-
-:Capability: KVM_CAP_ARM_EAGER_SPLIT_CHUNK_SIZE
-:Architectures: arm64
-:Type: vm
-:Parameters: arg[0] is the new split chunk size.
-:Returns: 0 on success, -EINVAL if any memslot was already created.
-
-This capability sets the chunk size used in Eager Page Splitting.
-
-Eager Page Splitting improves the performance of dirty-logging (used
-in live migrations) when guest memory is backed by huge-pages.  It
-avoids splitting huge-pages (into PAGE_SIZE pages) on fault, by doing
-it eagerly when enabling dirty logging (with the
-KVM_MEM_LOG_DIRTY_PAGES flag for a memory region), or when using
-KVM_CLEAR_DIRTY_LOG.
-
-The chunk size specifies how many pages to break at a time, using a
-single allocation for each chunk. Bigger the chunk size, more pages
-need to be allocated ahead of time.
-
-The chunk size needs to be a valid block size. The list of acceptable
-block sizes is exposed in KVM_CAP_ARM_SUPPORTED_BLOCK_SIZES as a
-64-bit bitmap (each bit describing a block size). The default value is
-0, to disable the eager page splitting.
-
 8.41 KVM_CAP_VM_TYPES
 ---------------------
 
-:Capability: KVM_CAP_MEMORY_ATTRIBUTES
 :Architectures: x86
 :Type: system ioctl
 
@@ -8974,6 +9167,67 @@ Note, KVM_X86_SW_PROTECTED_VM is currently only for development and testing.
 Do not use KVM_X86_SW_PROTECTED_VM for "real" VMs, and especially not in
 production.  The behavior and effective ABI for software-protected VMs is
 unstable.
+
+8.42 KVM_CAP_PPC_RPT_INVALIDATE
+-------------------------------
+
+:Architectures: ppc
+
+This capability indicates that the kernel is capable of handling
+H_RPT_INVALIDATE hcall.
+
+In order to enable the use of H_RPT_INVALIDATE in the guest,
+user space might have to advertise it for the guest. For example,
+IBM pSeries (sPAPR) guest starts using it if "hcall-rpt-invalidate" is
+present in the "ibm,hypertas-functions" device-tree property.
+
+This capability is enabled for hypervisors on platforms like POWER9
+that support radix MMU.
+
+8.43 KVM_CAP_PPC_AIL_MODE_3
+---------------------------
+
+:Architectures: ppc
+
+This capability indicates that the kernel supports the mode 3 setting for the
+"Address Translation Mode on Interrupt" aka "Alternate Interrupt Location"
+resource that is controlled with the H_SET_MODE hypercall.
+
+This capability allows a guest kernel to use a better-performance mode for
+handling interrupts and system calls.
+
+8.44 KVM_CAP_MEMORY_FAULT_INFO
+------------------------------
+
+:Architectures: x86
+
+The presence of this capability indicates that KVM_RUN will fill
+kvm_run.memory_fault if KVM cannot resolve a guest page fault VM-Exit, e.g. if
+there is a valid memslot but no backing VMA for the corresponding host virtual
+address.
+
+The information in kvm_run.memory_fault is valid if and only if KVM_RUN returns
+an error with errno=EFAULT or errno=EHWPOISON *and* kvm_run.exit_reason is set
+to KVM_EXIT_MEMORY_FAULT.
+
+Note: Userspaces which attempt to resolve memory faults so that they can retry
+KVM_RUN are encouraged to guard against repeatedly receiving the same
+error/annotated fault.
+
+See KVM_EXIT_MEMORY_FAULT for more information.
+
+8.45 KVM_CAP_X86_GUEST_MODE
+---------------------------
+
+:Architectures: x86
+
+The presence of this capability indicates that KVM_RUN will update the
+KVM_RUN_X86_GUEST_MODE bit in kvm_run.flags to indicate whether the
+vCPU was executing nested guest code when it exited.
+
+KVM exits with the register state of either the L1 or L2 guest
+depending on which executed at the time of an exit. Userspace must
+take care to differentiate between these cases.
 
 9. Known KVM API problems
 =========================
@@ -9005,9 +9259,10 @@ the local APIC.
 
 The same is true for the ``KVM_FEATURE_PV_UNHALT`` paravirtualized feature.
 
-CPU[EAX=1]:ECX[24] (TSC_DEADLINE) is not reported by ``KVM_GET_SUPPORTED_CPUID``.
-It can be enabled if ``KVM_CAP_TSC_DEADLINE_TIMER`` is present and the kernel
-has enabled in-kernel emulation of the local APIC.
+On older versions of Linux, CPU[EAX=1]:ECX[24] (TSC_DEADLINE) is not reported by
+``KVM_GET_SUPPORTED_CPUID``, but it can be enabled if ``KVM_CAP_TSC_DEADLINE_TIMER``
+is present and the kernel has enabled in-kernel emulation of the local APIC.
+On newer versions, ``KVM_GET_SUPPORTED_CPUID`` does report the bit as available.
 
 CPU topology
 ~~~~~~~~~~~~

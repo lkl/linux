@@ -880,7 +880,7 @@ static int smbb_charger_probe(struct platform_device *pdev)
 	}
 
 	bat_cfg.drv_data = chg;
-	bat_cfg.of_node = pdev->dev.of_node;
+	bat_cfg.fwnode = dev_fwnode(&pdev->dev);
 	chg->bat_psy = devm_power_supply_register(&pdev->dev,
 						  &bat_psy_desc,
 						  &bat_cfg);
@@ -1017,10 +1017,10 @@ static const struct of_device_id smbb_charger_id_table[] = {
 MODULE_DEVICE_TABLE(of, smbb_charger_id_table);
 
 static struct platform_driver smbb_charger_driver = {
-	.probe	  = smbb_charger_probe,
-	.remove_new	 = smbb_charger_remove,
-	.driver	 = {
-		.name   = "qcom-smbb",
+	.probe = smbb_charger_probe,
+	.remove = smbb_charger_remove,
+	.driver = {
+		.name = "qcom-smbb",
 		.of_match_table = smbb_charger_id_table,
 	},
 };

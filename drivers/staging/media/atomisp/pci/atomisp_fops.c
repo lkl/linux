@@ -5,17 +5,6 @@
  * Copyright (c) 2010 Intel Corporation. All Rights Reserved.
  *
  * Copyright (c) 2010 Silicon Hive www.siliconhive.com.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- *
  */
 
 #include <linux/module.h>
@@ -245,9 +234,6 @@ static int atomisp_q_video_buffers_to_css(struct atomisp_sub_device *asd,
 	if (WARN_ON(css_pipe_id >= IA_CSS_PIPE_ID_NUM))
 		return -EINVAL;
 
-	if (pipe->stopping)
-		return -EINVAL;
-
 	space = ATOMISP_CSS_Q_DEPTH - atomisp_buffers_in_css(pipe);
 	while (space--) {
 		struct ia_css_frame *frame;
@@ -378,7 +364,7 @@ static void atomisp_buf_queue(struct vb2_buffer *vb)
 	mutex_lock(&asd->isp->mutex);
 
 	ret = atomisp_pipe_check(pipe, false);
-	if (ret || pipe->stopping) {
+	if (ret) {
 		spin_lock_irqsave(&pipe->irq_lock, irqflags);
 		atomisp_buffer_done(frame, VB2_BUF_STATE_ERROR);
 		spin_unlock_irqrestore(&pipe->irq_lock, irqflags);
@@ -441,8 +427,6 @@ const struct vb2_ops atomisp_vb2_ops = {
 	.buf_queue		= atomisp_buf_queue,
 	.start_streaming	= atomisp_start_streaming,
 	.stop_streaming		= atomisp_stop_streaming,
-	.wait_prepare		= vb2_ops_wait_prepare,
-	.wait_finish		= vb2_ops_wait_finish,
 };
 
 static void atomisp_dev_init_struct(struct atomisp_device *isp)

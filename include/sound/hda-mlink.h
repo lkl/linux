@@ -15,6 +15,7 @@ int hda_bus_ml_init(struct hdac_bus *bus);
 void hda_bus_ml_free(struct hdac_bus *bus);
 
 int hdac_bus_eml_get_count(struct hdac_bus *bus, bool alt, int elid);
+void hdac_bus_eml_enable_interrupt_unlocked(struct hdac_bus *bus, bool alt, int elid, bool enable);
 void hdac_bus_eml_enable_interrupt(struct hdac_bus *bus, bool alt, int elid, bool enable);
 bool hdac_bus_eml_check_interrupt(struct hdac_bus *bus, bool alt, int elid);
 
@@ -61,6 +62,12 @@ struct mutex *hdac_bus_eml_get_mutex(struct hdac_bus *bus, bool alt, int elid);
 
 int hdac_bus_eml_enable_offload(struct hdac_bus *bus, bool alt, int elid, bool enable);
 
+/* microphone privacy specific function supported by ACE3+ architecture */
+void hdac_bus_eml_set_mic_privacy_mask(struct hdac_bus *bus, bool alt, int elid,
+				       unsigned long mask);
+bool hdac_bus_eml_is_mic_privacy_changed(struct hdac_bus *bus, bool alt, int elid);
+bool hdac_bus_eml_get_mic_privacy_state(struct hdac_bus *bus, bool alt, int elid);
+
 #else
 
 static inline int
@@ -70,6 +77,9 @@ static inline void hda_bus_ml_free(struct hdac_bus *bus) { }
 
 static inline int
 hdac_bus_eml_get_count(struct hdac_bus *bus, bool alt, int elid) { return 0; }
+
+static inline void
+hdac_bus_eml_enable_interrupt_unlocked(struct hdac_bus *bus, bool alt, int elid, bool enable) { }
 
 static inline void
 hdac_bus_eml_enable_interrupt(struct hdac_bus *bus, bool alt, int elid, bool enable) { }
@@ -181,4 +191,23 @@ hdac_bus_eml_enable_offload(struct hdac_bus *bus, bool alt, int elid, bool enabl
 {
 	return 0;
 }
+
+static inline void
+hdac_bus_eml_set_mic_privacy_mask(struct hdac_bus *bus, bool alt, int elid,
+				  unsigned long mask)
+{
+}
+
+static inline bool
+hdac_bus_eml_is_mic_privacy_changed(struct hdac_bus *bus, bool alt, int elid)
+{
+	return false;
+}
+
+static inline bool
+hdac_bus_eml_get_mic_privacy_state(struct hdac_bus *bus, bool alt, int elid)
+{
+	return false;
+}
+
 #endif /* CONFIG_SND_SOC_SOF_HDA_MLINK */

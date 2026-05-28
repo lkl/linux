@@ -48,7 +48,7 @@ ieee80211_ibss_build_presp(struct ieee80211_sub_if_data *sdata,
 	struct ieee80211_mgmt *mgmt;
 	u8 *pos;
 	struct ieee80211_supported_band *sband;
-	u32 rate_flags, rates = 0, rates_added = 0;
+	u32 rates = 0, rates_added = 0;
 	struct beacon_data *presp;
 	int frame_len;
 
@@ -90,14 +90,11 @@ ieee80211_ibss_build_presp(struct ieee80211_sub_if_data *sdata,
 	pos += ifibss->ssid_len;
 
 	sband = local->hw.wiphy->bands[chandef->chan->band];
-	rate_flags = ieee80211_chandef_rate_flags(chandef);
 	rates_n = 0;
 	if (have_higher_than_11mbit)
 		*have_higher_than_11mbit = false;
 
 	for (i = 0; i < sband->n_bitrates; i++) {
-		if ((rate_flags & sband->bitrates[i].flags) != rate_flags)
-			continue;
 		if (sband->bitrates[i].bitrate > 110 &&
 		    have_higher_than_11mbit)
 			*have_higher_than_11mbit = true;
@@ -245,6 +242,7 @@ static void __ieee80211_sta_join_ibss(struct ieee80211_sub_if_data *sdata,
 		sdata->vif.cfg.ibss_creator = false;
 		sdata->vif.bss_conf.enable_beacon = false;
 		netif_carrier_off(sdata->dev);
+		synchronize_net();
 		ieee80211_bss_info_change_notify(sdata,
 						 BSS_CHANGED_IBSS |
 						 BSS_CHANGED_BEACON_ENABLED);
@@ -394,7 +392,6 @@ static void ieee80211_sta_join_ibss(struct ieee80211_sub_if_data *sdata,
 	const struct cfg80211_bss_ies *ies;
 	enum nl80211_channel_type chan_type;
 	u64 tsf;
-	u32 rate_flags;
 
 	lockdep_assert_wiphy(sdata->local->hw.wiphy);
 
@@ -428,7 +425,6 @@ static void ieee80211_sta_join_ibss(struct ieee80211_sub_if_data *sdata,
 	}
 
 	sband = sdata->local->hw.wiphy->bands[cbss->channel->band];
-	rate_flags = ieee80211_chandef_rate_flags(&sdata->u.ibss.chandef);
 
 	basic_rates = 0;
 
@@ -438,9 +434,6 @@ static void ieee80211_sta_join_ibss(struct ieee80211_sub_if_data *sdata,
 
 		for (j = 0; j < sband->n_bitrates; j++) {
 			int brate;
-			if ((rate_flags & sband->bitrates[j].flags)
-			    != rate_flags)
-				continue;
 
 			brate = DIV_ROUND_UP(sband->bitrates[j].bitrate, 5);
 			if (brate == rate) {
@@ -569,7 +562,7 @@ static struct sta_info *ieee80211_ibss_finish_sta(struct sta_info *sta)
 	if (!sta->sdata->u.ibss.control_port)
 		sta_info_pre_move_state(sta, IEEE80211_STA_AUTHORIZED);
 
-	rate_control_rate_init(sta);
+	rate_control_rate_init(&sta->deflink);
 
 	/* If it fails, maybe we raced another insertion? */
 	if (sta_info_insert_rcu(sta))
@@ -642,7 +635,7 @@ static int ieee80211_sta_active_ibss(struct ieee80211_sub_if_data *sdata)
 	rcu_read_lock();
 
 	list_for_each_entry_rcu(sta, &local->sta_list, list) {
-		unsigned long last_active = ieee80211_sta_last_active(sta);
+		unsigned long last_active = ieee80211_sta_last_active(sta, -1);
 
 		if (sta->sdata == sdata &&
 		    time_is_after_jiffies(last_active +
@@ -1068,11 +1061,12 @@ static void ieee80211_update_sta_info(struct ieee80211_sub_if_data *sdata,
 
 		/* Force rx_nss recalculation */
 		sta->sta.deflink.rx_nss = 0;
-		rate_control_rate_init(sta);
+		rate_control_rate_init(&sta->deflink);
 		if (sta->sta.deflink.rx_nss != rx_nss)
 			changed |= IEEE80211_RC_NSS_CHANGED;
 
-		drv_sta_rc_update(local, sdata, &sta->sta, changed);
+		drv_link_sta_rc_update(local, sdata, &sta->sta.deflink,
+				       changed);
 	}
 
 	rcu_read_unlock();
@@ -1234,7 +1228,7 @@ static void ieee80211_ibss_sta_expire(struct ieee80211_sub_if_data *sdata)
 	lockdep_assert_wiphy(local->hw.wiphy);
 
 	list_for_each_entry_safe(sta, tmp, &local->sta_list, list) {
-		unsigned long last_active = ieee80211_sta_last_active(sta);
+		unsigned long last_active = ieee80211_sta_last_active(sta, -1);
 
 		if (sdata != sta->sdata)
 			continue;
@@ -1679,7 +1673,7 @@ void ieee80211_ibss_work(struct ieee80211_sub_if_data *sdata)
 static void ieee80211_ibss_timer(struct timer_list *t)
 {
 	struct ieee80211_sub_if_data *sdata =
-		from_timer(sdata, t, u.ibss.timer);
+		timer_container_of(sdata, t, u.ibss.timer);
 
 	wiphy_work_queue(sdata->local->hw.wiphy, &sdata->work);
 }
@@ -1715,12 +1709,9 @@ int ieee80211_ibss_join(struct ieee80211_sub_if_data *sdata,
 			struct cfg80211_ibss_params *params)
 {
 	u64 changed = 0;
-	u32 rate_flags;
-	struct ieee80211_supported_band *sband;
 	enum ieee80211_chanctx_mode chanmode;
 	struct ieee80211_local *local = sdata->local;
 	int radar_detect_width = 0;
-	int i;
 	int ret;
 
 	lockdep_assert_wiphy(local->hw.wiphy);
@@ -1763,12 +1754,6 @@ int ieee80211_ibss_join(struct ieee80211_sub_if_data *sdata,
 	sdata->u.ibss.last_scan_completed = jiffies;
 
 	/* fix basic_rates if channel does not support these rates */
-	rate_flags = ieee80211_chandef_rate_flags(&params->chandef);
-	sband = local->hw.wiphy->bands[params->chandef.chan->band];
-	for (i = 0; i < sband->n_bitrates; i++) {
-		if ((rate_flags & sband->bitrates[i].flags) != rate_flags)
-			sdata->u.ibss.basic_rates &= ~BIT(i);
-	}
 	memcpy(sdata->vif.bss_conf.mcast_rate, params->mcast_rate,
 	       sizeof(params->mcast_rate));
 
@@ -1825,8 +1810,8 @@ int ieee80211_ibss_leave(struct ieee80211_sub_if_data *sdata)
 {
 	struct ieee80211_if_ibss *ifibss = &sdata->u.ibss;
 
-	ieee80211_ibss_disconnect(sdata);
 	ifibss->ssid_len = 0;
+	ieee80211_ibss_disconnect(sdata);
 	eth_zero_addr(ifibss->bssid);
 
 	/* remove beacon */
@@ -1842,7 +1827,7 @@ int ieee80211_ibss_leave(struct ieee80211_sub_if_data *sdata)
 
 	skb_queue_purge(&sdata->skb_queue);
 
-	del_timer_sync(&sdata->u.ibss.timer);
+	timer_delete_sync(&sdata->u.ibss.timer);
 
 	return 0;
 }

@@ -269,9 +269,7 @@ static void stop_streaming(struct vb2_queue *vq)
 }
 
 /*
- * The vb2 queue ops. Note that since q->lock is set we can use the standard
- * vb2_ops_wait_prepare/finish helper functions. If q->lock would be NULL,
- * then this driver would have to provide these ops.
+ * The vb2 queue ops.
  */
 static const struct vb2_ops skel_qops = {
 	.queue_setup		= queue_setup,
@@ -279,8 +277,6 @@ static const struct vb2_ops skel_qops = {
 	.buf_queue		= buffer_queue,
 	.start_streaming	= start_streaming,
 	.stop_streaming		= stop_streaming,
-	.wait_prepare		= vb2_ops_wait_prepare,
-	.wait_finish		= vb2_ops_wait_finish,
 };
 
 /*
@@ -474,7 +470,7 @@ static int skeleton_querystd(struct file *file, void *priv, v4l2_std_id *std)
 	return 0;
 }
 
-static int skeleton_s_dv_timings(struct file *file, void *_fh,
+static int skeleton_s_dv_timings(struct file *file, void *priv,
 				 struct v4l2_dv_timings *timings)
 {
 	struct skeleton *skel = video_drvdata(file);
@@ -513,7 +509,7 @@ static int skeleton_s_dv_timings(struct file *file, void *_fh,
 	return 0;
 }
 
-static int skeleton_g_dv_timings(struct file *file, void *_fh,
+static int skeleton_g_dv_timings(struct file *file, void *priv,
 				 struct v4l2_dv_timings *timings)
 {
 	struct skeleton *skel = video_drvdata(file);
@@ -526,7 +522,7 @@ static int skeleton_g_dv_timings(struct file *file, void *_fh,
 	return 0;
 }
 
-static int skeleton_enum_dv_timings(struct file *file, void *_fh,
+static int skeleton_enum_dv_timings(struct file *file, void *priv,
 				    struct v4l2_enum_dv_timings *timings)
 {
 	struct skeleton *skel = video_drvdata(file);
@@ -548,7 +544,7 @@ static int skeleton_enum_dv_timings(struct file *file, void *_fh,
  * can lock but that the DMA engine it is connected to cannot handle
  * pixelclocks above a certain frequency), then -ERANGE is returned.
  */
-static int skeleton_query_dv_timings(struct file *file, void *_fh,
+static int skeleton_query_dv_timings(struct file *file, void *priv,
 				     struct v4l2_dv_timings *timings)
 {
 	struct skeleton *skel = video_drvdata(file);
@@ -577,7 +573,7 @@ static int skeleton_query_dv_timings(struct file *file, void *_fh,
 	return 0;
 }
 
-static int skeleton_dv_timings_cap(struct file *file, void *fh,
+static int skeleton_dv_timings_cap(struct file *file, void *priv,
 				   struct v4l2_dv_timings_cap *cap)
 {
 	struct skeleton *skel = video_drvdata(file);

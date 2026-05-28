@@ -2,7 +2,7 @@
 //
 // ALSA SoC Texas Instruments TAS2563/TAS2781 Audio Smart Amplifier
 //
-// Copyright (C) 2022 - 2024 Texas Instruments Incorporated
+// Copyright (C) 2022 - 2025 Texas Instruments Incorporated
 // https://www.ti.com
 //
 // The TAS2563/TAS2781 driver implements a flexible and configurable
@@ -28,9 +28,12 @@
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/tas2781.h>
+#include <sound/tas2781-comlib-i2c.h>
 #include <sound/tlv.h>
+#include <sound/tas2x20-tlv.h>
 #include <sound/tas2563-tlv.h>
 #include <sound/tas2781-tlv.h>
+#include <sound/tas5825-tlv.h>
 #include <linux/unaligned.h>
 
 #define X2563_CL_STT_VAL(xreg, xval) \
@@ -78,7 +81,7 @@ static const struct bulk_reg_val tas2781_cali_start_reg[] = {
 	X2781_CL_STT_VAL(TAS2781_PRM_INT_MASK_REG, 0xfe, false),
 	X2781_CL_STT_VAL(TAS2781_PRM_CLK_CFG_REG, 0xdd, false),
 	X2781_CL_STT_VAL(TAS2781_PRM_RSVD_REG, 0x20, false),
-	X2781_CL_STT_VAL(TAS2781_PRM_TEST_57_REG, 0x14, false),
+	X2781_CL_STT_VAL(TAS2781_PRM_TEST_57_REG, 0x14, true),
 	X2781_CL_STT_VAL(TAS2781_PRM_TEST_62_REG, 0x45, true),
 	X2781_CL_STT_VAL(TAS2781_PRM_PVDD_UVLO_REG, 0x03, false),
 	X2781_CL_STT_VAL(TAS2781_PRM_CHNL_0_REG, 0xa8, false),
@@ -97,16 +100,38 @@ static const struct bulk_reg_val tas2781_cali_start_reg[] = {
 };
 
 static const struct i2c_device_id tasdevice_id[] = {
+	{ "tas2020", TAS2020 },
+	{ "tas2118", TAS2118 },
+	{ "tas2120", TAS2120 },
+	{ "tas2320", TAS2320 },
 	{ "tas2563", TAS2563 },
+	{ "tas2570", TAS2570 },
+	{ "tas2572", TAS2572 },
 	{ "tas2781", TAS2781 },
+	{ "tas5802", TAS5802 },
+	{ "tas5815", TAS5815 },
+	{ "tas5825", TAS5825 },
+	{ "tas5827", TAS5827 },
+	{ "tas5828", TAS5828 },
 	{}
 };
 MODULE_DEVICE_TABLE(i2c, tasdevice_id);
 
 #ifdef CONFIG_OF
 static const struct of_device_id tasdevice_of_match[] = {
+	{ .compatible = "ti,tas2020" },
+	{ .compatible = "ti,tas2118" },
+	{ .compatible = "ti,tas2120" },
+	{ .compatible = "ti,tas2320" },
 	{ .compatible = "ti,tas2563" },
+	{ .compatible = "ti,tas2570" },
+	{ .compatible = "ti,tas2572" },
 	{ .compatible = "ti,tas2781" },
+	{ .compatible = "ti,tas5802" },
+	{ .compatible = "ti,tas5815" },
+	{ .compatible = "ti,tas5825" },
+	{ .compatible = "ti,tas5827" },
+	{ .compatible = "ti,tas5828" },
 	{},
 };
 MODULE_DEVICE_TABLE(of, tasdevice_of_match);
@@ -349,13 +374,31 @@ static int calib_data_get(struct tasdevice_priv *tas_priv, int reg,
 	return rc;
 }
 
+static int partial_cali_data_update(int *reg, int j)
+{
+	switch (tas2781_cali_start_reg[j].reg) {
+	case 0:
+		return reg[0];
+	case TAS2781_PRM_PLT_FLAG_REG:
+		return reg[1];
+	case TAS2781_PRM_SINEGAIN_REG:
+		return reg[2];
+	case TAS2781_PRM_SINEGAIN2_REG:
+		return reg[3];
+	default:
+		return 0;
+	}
+}
+
 static void sngl_calib_start(struct tasdevice_priv *tas_priv, int i,
 	int *reg, unsigned char *dat)
 {
 	struct tasdevice *tasdev = tas_priv->tasdevice;
 	struct bulk_reg_val *p = tasdev[i].cali_data_backup;
+	struct bulk_reg_val *t = &tasdev[i].alp_cali_bckp;
 	const int sum = ARRAY_SIZE(tas2781_cali_start_reg);
-	int j;
+	unsigned char val[4];
+	int j, r;
 
 	if (p == NULL)
 		return;
@@ -370,30 +413,23 @@ static void sngl_calib_start(struct tasdevice_priv *tas_priv, int i,
 			tasdevice_dev_read(tas_priv, i, p[j].reg,
 				(int *)&p[j].val[0]);
 		} else {
-			switch (p[j].reg) {
-			case 0: {
-				if (!reg[0])
-					continue;
-				p[j].reg = reg[0];
+			if (!tas_priv->dspbin_typ) {
+				r = partial_cali_data_update(reg, j);
+				if (r)
+					p[j].reg = r;
 			}
-				break;
-			case TAS2781_PRM_PLT_FLAG_REG:
-			p[j].reg = reg[1];
-				break;
-			case TAS2781_PRM_SINEGAIN_REG:
-			p[j].reg = reg[2];
-				break;
-			case TAS2781_PRM_SINEGAIN2_REG:
-			p[j].reg = reg[3];
-				break;
-			}
-			tasdevice_dev_bulk_read(tas_priv, i, p[j].reg,
-				p[j].val, 4);
+
+			if (p[j].reg)
+				tasdevice_dev_bulk_read(tas_priv, i, p[j].reg,
+					p[j].val, 4);
 		}
 	}
 
+	if (tas_priv->dspbin_typ == TASDEV_ALPHA)
+		tasdevice_dev_bulk_read(tas_priv, i, t->reg, t->val, 4);
+
 	/* Update the setting for calibration */
-	for (j = 0; j < sum - 2; j++) {
+	for (j = 0; j < sum - 4; j++) {
 		if (p[j].val_len == 1) {
 			if (p[j].is_locked)
 				tasdevice_dev_write(tas_priv, i,
@@ -401,17 +437,33 @@ static void sngl_calib_start(struct tasdevice_priv *tas_priv, int i,
 					TAS2781_TEST_PAGE_UNLOCK);
 			tasdevice_dev_write(tas_priv, i, p[j].reg,
 				tas2781_cali_start_reg[j].val[0]);
-		} else {
-			if (!p[j].reg)
-				continue;
-			tasdevice_dev_bulk_write(tas_priv, i, p[j].reg,
-				(unsigned char *)
-				tas2781_cali_start_reg[j].val, 4);
 		}
 	}
 
-	tasdevice_dev_bulk_write(tas_priv, i, p[j].reg, &dat[1], 4);
-	tasdevice_dev_bulk_write(tas_priv, i, p[j + 1].reg, &dat[5], 4);
+	if (tas_priv->dspbin_typ == TASDEV_ALPHA) {
+		val[0] = 0x00;
+		val[1] = 0x00;
+		val[2] = 0x21;
+		val[3] = 0x8e;
+	} else {
+		val[0] = tas2781_cali_start_reg[j].val[0];
+		val[1] = tas2781_cali_start_reg[j].val[1];
+		val[2] = tas2781_cali_start_reg[j].val[2];
+		val[3] = tas2781_cali_start_reg[j].val[3];
+	}
+	tasdevice_dev_bulk_write(tas_priv, i, p[j].reg, val, 4);
+	tasdevice_dev_bulk_write(tas_priv, i, p[j + 1].reg,
+		(unsigned char *)tas2781_cali_start_reg[j + 1].val, 4);
+	tasdevice_dev_bulk_write(tas_priv, i, p[j + 2].reg, &dat[1], 4);
+	tasdevice_dev_bulk_write(tas_priv, i, p[j + 3].reg, &dat[5], 4);
+	if (tas_priv->dspbin_typ == TASDEV_ALPHA) {
+		val[0] = 0x00;
+		val[1] = 0x00;
+		val[2] = 0x2a;
+		val[3] = 0x0b;
+
+		tasdevice_dev_bulk_read(tas_priv, i, t->reg, val, 4);
+	}
 }
 
 static int tas2781_calib_start_put(struct snd_kcontrol *kcontrol,
@@ -452,14 +504,15 @@ static int tas2781_calib_start_put(struct snd_kcontrol *kcontrol,
 	return 1;
 }
 
-static void tas2781_calib_stop_put(struct tasdevice_priv *tas_priv)
+static void tas2781_calib_stop_put(struct tasdevice_priv *priv)
 {
 	const int sum = ARRAY_SIZE(tas2781_cali_start_reg);
 	int i, j;
 
-	for (i = 0; i < tas_priv->ndev; i++) {
-		struct tasdevice *tasdev = tas_priv->tasdevice;
+	for (i = 0; i < priv->ndev; i++) {
+		struct tasdevice *tasdev = priv->tasdevice;
 		struct bulk_reg_val *p = tasdev[i].cali_data_backup;
+		struct bulk_reg_val *t = &tasdev[i].alp_cali_bckp;
 
 		if (p == NULL)
 			continue;
@@ -467,18 +520,21 @@ static void tas2781_calib_stop_put(struct tasdevice_priv *tas_priv)
 		for (j = 0; j < sum; j++) {
 			if (p[j].val_len == 1) {
 				if (p[j].is_locked)
-					tasdevice_dev_write(tas_priv, i,
+					tasdevice_dev_write(priv, i,
 						TAS2781_TEST_UNLOCK_REG,
 						TAS2781_TEST_PAGE_UNLOCK);
-				tasdevice_dev_write(tas_priv, i, p[j].reg,
+				tasdevice_dev_write(priv, i, p[j].reg,
 					p[j].val[0]);
 			} else {
 				if (!p[j].reg)
 					continue;
-				tasdevice_dev_bulk_write(tas_priv, i, p[j].reg,
+				tasdevice_dev_bulk_write(priv, i, p[j].reg,
 					p[j].val, 4);
 			}
 		}
+
+		if (priv->dspbin_typ == TASDEV_ALPHA)
+			tasdevice_dev_bulk_write(priv, i, t->reg, t->val, 4);
 	}
 }
 
@@ -489,14 +545,11 @@ static int tas2563_calib_start_put(struct snd_kcontrol *kcontrol,
 	struct snd_soc_component *comp = snd_soc_kcontrol_component(kcontrol);
 	struct tasdevice_priv *tas_priv = snd_soc_component_get_drvdata(comp);
 	const int sum = ARRAY_SIZE(tas2563_cali_start_reg);
-	int rc = 1;
 	int i, j;
 
 	guard(mutex)(&tas_priv->codec_lock);
-	if (tas_priv->chip_id != TAS2563) {
-		rc = -1;
-		goto out;
-	}
+	if (tas_priv->chip_id != TAS2563)
+		return -1;
 
 	for (i = 0; i < tas_priv->ndev; i++) {
 		struct tasdevice *tasdev = tas_priv->tasdevice;
@@ -523,8 +576,8 @@ static int tas2563_calib_start_put(struct snd_kcontrol *kcontrol,
 					q[j].val, 4);
 		}
 	}
-out:
-	return rc;
+
+	return 1;
 }
 
 static void tas2563_calib_stop_put(struct tasdevice_priv *tas_priv)
@@ -576,7 +629,7 @@ static int tasdev_cali_data_put(struct snd_kcontrol *kcontrol,
 	struct cali_reg *p = &cali_data->cali_reg_array;
 	unsigned char *src = ucontrol->value.bytes.data;
 	unsigned char *dst = cali_data->data;
-	int rc = 1, i = 0;
+	int i = 0;
 	int j;
 
 	guard(mutex)(&priv->codec_lock);
@@ -593,19 +646,23 @@ static int tasdev_cali_data_put(struct snd_kcontrol *kcontrol,
 	i += 2;
 	priv->is_user_space_calidata = true;
 
-	p->r0_reg = TASDEVICE_REG(src[i], src[i + 1], src[i + 2]);
-	i += 3;
-	p->r0_low_reg = TASDEVICE_REG(src[i], src[i + 1], src[i + 2]);
-	i += 3;
-	p->invr0_reg = TASDEVICE_REG(src[i], src[i + 1], src[i + 2]);
-	i += 3;
-	p->pow_reg = TASDEVICE_REG(src[i], src[i + 1], src[i + 2]);
-	i += 3;
-	p->tlimit_reg = TASDEVICE_REG(src[i], src[i + 1], src[i + 2]);
-	i += 3;
+	if (priv->dspbin_typ == TASDEV_BASIC) {
+		p->r0_reg = TASDEVICE_REG(src[i], src[i + 1], src[i + 2]);
+		i += 3;
+		p->r0_low_reg = TASDEVICE_REG(src[i], src[i + 1], src[i + 2]);
+		i += 3;
+		p->invr0_reg = TASDEVICE_REG(src[i], src[i + 1], src[i + 2]);
+		i += 3;
+		p->pow_reg = TASDEVICE_REG(src[i], src[i + 1], src[i + 2]);
+		i += 3;
+		p->tlimit_reg = TASDEVICE_REG(src[i], src[i + 1], src[i + 2]);
+		i += 3;
+	} else {
+		i += 15;
+	}
 
 	memcpy(dst, &src[i], cali_data->total_sz);
-	return rc;
+	return 1;
 }
 
 static int tas2781_latch_reg_get(struct snd_kcontrol *kcontrol,
@@ -649,19 +706,23 @@ static int tasdev_tf_data_get(struct snd_kcontrol *kcontrol,
 	struct soc_bytes_ext *bytes_ext =
 		(struct soc_bytes_ext *) kcontrol->private_value;
 	unsigned char *dst = ucontrol->value.bytes.data;
-	unsigned int reg;
-	int rc = -1;
+	unsigned int reg = TAS2781_RUNTIME_RE_REG_TF;
 
-	if (tas_priv->chip_id == TAS2781)
+	if (tas_priv->chip_id == TAS2781) {
+		struct tasdevice_fw *tas_fmw = tas_priv->fmw;
+		struct fct_param_address *p = &(tas_fmw->fct_par_addr);
+
 		reg = TAS2781_RUNTIME_RE_REG_TF;
-	else
+		if (tas_priv->dspbin_typ)
+			reg = TASDEVICE_REG(p->tf_reg[0], p->tf_reg[1],
+				p->tf_reg[2]);
+	} else {
 		reg = TAS2563_RUNTIME_RE_REG_TF;
+	}
 
 	guard(mutex)(&tas_priv->codec_lock);
 	dst[0] = bytes_ext->max;
-	rc = calib_data_get(tas_priv, reg, &dst[1]);
-
-	return rc;
+	return calib_data_get(tas_priv, reg, &dst[1]);
 }
 
 static int tasdev_re_data_get(struct snd_kcontrol *kcontrol,
@@ -672,18 +733,22 @@ static int tasdev_re_data_get(struct snd_kcontrol *kcontrol,
 	struct soc_bytes_ext *bytes_ext =
 		(struct soc_bytes_ext *) kcontrol->private_value;
 	unsigned char *dst = ucontrol->value.bytes.data;
-	unsigned int reg;
-	int rc = -1;
+	unsigned int reg = TAS2781_RUNTIME_RE_REG;
 
-	if (tas_priv->chip_id == TAS2781)
-		reg = TAS2781_RUNTIME_RE_REG;
-	else
+	if (tas_priv->chip_id == TAS2781) {
+		struct tasdevice_fw *tas_fmw = tas_priv->fmw;
+		struct fct_param_address *p = &(tas_fmw->fct_par_addr);
+
+		if (tas_priv->dspbin_typ)
+			reg = TASDEVICE_REG(p->r0_reg[0], p->r0_reg[1],
+				p->r0_reg[2]);
+	} else {
 		reg = TAS2563_RUNTIME_RE_REG;
+	}
+
 	guard(mutex)(&tas_priv->codec_lock);
 	dst[0] = bytes_ext->max;
-	rc = calib_data_get(tas_priv, reg, &dst[1]);
-
-	return rc;
+	return calib_data_get(tas_priv, reg, &dst[1]);
 }
 
 static int tasdev_r0_data_get(struct snd_kcontrol *kcontrol,
@@ -696,7 +761,6 @@ static int tasdev_r0_data_get(struct snd_kcontrol *kcontrol,
 		(struct soc_bytes_ext *) kcontrol->private_value;
 	unsigned char *dst = ucontrol->value.bytes.data;
 	unsigned int reg;
-	int rc = -1;
 
 	guard(mutex)(&tas_priv->codec_lock);
 
@@ -707,9 +771,7 @@ static int tasdev_r0_data_get(struct snd_kcontrol *kcontrol,
 	else
 		return -1;
 	dst[0] = bytes_ext->max;
-	rc = calib_data_get(tas_priv, reg, &dst[1]);
-
-	return rc;
+	return calib_data_get(tas_priv, reg, &dst[1]);
 }
 
 static int tasdev_XMA1_data_get(struct snd_kcontrol *kcontrol,
@@ -717,17 +779,19 @@ static int tasdev_XMA1_data_get(struct snd_kcontrol *kcontrol,
 {
 	struct snd_soc_component *comp = snd_soc_kcontrol_component(kcontrol);
 	struct tasdevice_priv *tas_priv = snd_soc_component_get_drvdata(comp);
+	struct tasdevice_fw *tas_fmw = tas_priv->fmw;
+	struct fct_param_address *p = &(tas_fmw->fct_par_addr);
 	struct soc_bytes_ext *bytes_ext =
 		(struct soc_bytes_ext *) kcontrol->private_value;
 	unsigned char *dst = ucontrol->value.bytes.data;
 	unsigned int reg = TASDEVICE_XM_A1_REG;
-	int rc = -1;
+
+	if (tas_priv->dspbin_typ)
+		reg = TASDEVICE_REG(p->a1_reg[0], p->a1_reg[1], p->a1_reg[2]);
 
 	guard(mutex)(&tas_priv->codec_lock);
 	dst[0] = bytes_ext->max;
-	rc = calib_data_get(tas_priv, reg, &dst[1]);
-
-	return rc;
+	return calib_data_get(tas_priv, reg, &dst[1]);
 }
 
 static int tasdev_XMA2_data_get(struct snd_kcontrol *kcontrol,
@@ -735,17 +799,19 @@ static int tasdev_XMA2_data_get(struct snd_kcontrol *kcontrol,
 {
 	struct snd_soc_component *comp = snd_soc_kcontrol_component(kcontrol);
 	struct tasdevice_priv *tas_priv = snd_soc_component_get_drvdata(comp);
+	struct tasdevice_fw *tas_fmw = tas_priv->fmw;
+	struct fct_param_address *p = &(tas_fmw->fct_par_addr);
 	struct soc_bytes_ext *bytes_ext =
 		(struct soc_bytes_ext *) kcontrol->private_value;
 	unsigned char *dst = ucontrol->value.bytes.data;
 	unsigned int reg = TASDEVICE_XM_A2_REG;
-	int rc = -1;
+
+	if (tas_priv->dspbin_typ)
+		reg = TASDEVICE_REG(p->a2_reg[0], p->a2_reg[1], p->a2_reg[2]);
 
 	guard(mutex)(&tas_priv->codec_lock);
 	dst[0] = bytes_ext->max;
-	rc = calib_data_get(tas_priv, reg, &dst[1]);
-
-	return rc;
+	return calib_data_get(tas_priv, reg, &dst[1]);
 }
 
 static int tasdev_nop_get(
@@ -755,7 +821,7 @@ static int tasdev_nop_get(
 	return 0;
 }
 
-static int tas2563_digital_gain_get(
+static int tasdevice_digital_gain_get(
 	struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
@@ -781,15 +847,15 @@ static int tas2563_digital_gain_get(
 
 	while (r > 1 + l) {
 		mid = (l + r) / 2;
-		ar_mid = get_unaligned_be32(tas2563_dvc_table[mid]);
+		ar_mid = get_unaligned_be32(tas_dev->dvc_tlv_table[mid]);
 		if (target < ar_mid)
 			r = mid;
 		else
 			l = mid;
 	}
 
-	ar_l = get_unaligned_be32(tas2563_dvc_table[l]);
-	ar_r = get_unaligned_be32(tas2563_dvc_table[r]);
+	ar_l = get_unaligned_be32(tas_dev->dvc_tlv_table[l]);
+	ar_r = get_unaligned_be32(tas_dev->dvc_tlv_table[r]);
 
 	/* find out the member same as or closer to the current volume */
 	ucontrol->value.integer.value[0] =
@@ -799,7 +865,7 @@ out:
 	return 0;
 }
 
-static int tas2563_digital_gain_put(
+static int tasdevice_digital_gain_put(
 	struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
@@ -825,7 +891,7 @@ static int tas2563_digital_gain_put(
 	}
 
 	volrd = get_unaligned_be32(&data[0]);
-	volwr = get_unaligned_be32(tas2563_dvc_table[vol]);
+	volwr = get_unaligned_be32(tas_dev->dvc_tlv_table[vol]);
 
 	if (volrd == volwr) {
 		rc = 0;
@@ -834,7 +900,7 @@ static int tas2563_digital_gain_put(
 
 	for (i = 0; i < tas_dev->ndev; i++) {
 		ret = tasdevice_dev_bulk_write(tas_dev, i, reg,
-			(unsigned char *)tas2563_dvc_table[vol], 4);
+			(unsigned char *)tas_dev->dvc_tlv_table[vol], 4);
 		if (ret) {
 			dev_err(tas_dev->dev,
 				"%s, set digital vol error in dev %d\n",
@@ -850,11 +916,6 @@ out:
 	return rc;
 }
 
-static const struct snd_kcontrol_new tasdevice_snd_controls[] = {
-	SOC_SINGLE_BOOL_EXT("Speaker Force Firmware Load", 0,
-		tasdev_force_fwload_get, tasdev_force_fwload_put),
-};
-
 static const struct snd_kcontrol_new tasdevice_cali_controls[] = {
 	SOC_SINGLE_EXT("Calibration Stop", SND_SOC_NOPM, 0, 1, 0,
 		tasdev_nop_get, tasdev_calib_stop_put),
@@ -865,13 +926,32 @@ static const struct snd_kcontrol_new tasdevice_cali_controls[] = {
 	SND_SOC_BYTES_EXT("Amp XMA2 Data", 6, tasdev_XMA2_data_get, NULL),
 };
 
+static const struct snd_kcontrol_new tas2x20_snd_controls[] = {
+	SOC_SINGLE_RANGE_EXT_TLV("Speaker Analog Volume", TAS2X20_AMP_LEVEL,
+		0, 0, 42, 1, tas2781_amp_getvol,
+		tas2781_amp_putvol, tas2x20_amp_tlv),
+	SOC_SINGLE_RANGE_EXT_TLV("Speaker Digital Volume", TAS2X20_DVC_LEVEL,
+		0, 0, ARRAY_SIZE(tas2x20_dvc_table) - 1, 0,
+		tasdevice_digital_gain_get, tasdevice_digital_gain_put,
+		tas2x20_dvc_tlv),
+};
+
 static const struct snd_kcontrol_new tas2781_snd_controls[] = {
-	SOC_SINGLE_RANGE_EXT_TLV("Speaker Analog Gain", TAS2781_AMP_LEVEL,
+	SOC_SINGLE_RANGE_EXT_TLV("Speaker Analog Volume", TAS2781_AMP_LEVEL,
 		1, 0, 20, 0, tas2781_amp_getvol,
-		tas2781_amp_putvol, amp_vol_tlv),
-	SOC_SINGLE_RANGE_EXT_TLV("Speaker Digital Gain", TAS2781_DVC_LVL,
+		tas2781_amp_putvol, tas2781_amp_tlv),
+	SOC_SINGLE_RANGE_EXT_TLV("Speaker Digital Volume", TAS2781_DVC_LVL,
 		0, 0, 200, 1, tas2781_digital_getvol,
-		tas2781_digital_putvol, dvc_tlv),
+		tas2781_digital_putvol, tas2781_dvc_tlv),
+};
+
+static const struct snd_kcontrol_new tas5825_snd_controls[] = {
+	SOC_SINGLE_RANGE_EXT_TLV("Speaker Analog Volume", TAS5825_AMP_LEVEL,
+		0, 0, 31, 1, tas2781_amp_getvol,
+		tas2781_amp_putvol, tas5825_amp_tlv),
+	SOC_SINGLE_RANGE_EXT_TLV("Speaker Digital Volume", TAS5825_DVC_LEVEL,
+		0, 0, 254, 1, tas2781_amp_getvol,
+		tas2781_amp_putvol, tas5825_dvc_tlv),
 };
 
 static const struct snd_kcontrol_new tas2781_cali_controls[] = {
@@ -881,7 +961,7 @@ static const struct snd_kcontrol_new tas2781_cali_controls[] = {
 static const struct snd_kcontrol_new tas2563_snd_controls[] = {
 	SOC_SINGLE_RANGE_EXT_TLV("Speaker Digital Volume", TAS2563_DVC_LVL, 0,
 		0, ARRAY_SIZE(tas2563_dvc_table) - 1, 0,
-		tas2563_digital_gain_get, tas2563_digital_gain_put,
+		tasdevice_digital_gain_get, tasdevice_digital_gain_put,
 		tas2563_dvc_tlv),
 };
 
@@ -926,8 +1006,8 @@ static int tasdevice_info_chip_id(struct snd_kcontrol *kcontrol,
 {
 	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
 	uinfo->count = 1;
-	uinfo->value.integer.min = TAS2563;
-	uinfo->value.integer.max = TAS2781;
+	uinfo->value.integer.min = TAS2020;
+	uinfo->value.integer.max = TAS_OTHERS;
 
 	return 0;
 }
@@ -1115,42 +1195,36 @@ static int tasdevice_active_num_put(struct snd_kcontrol *kcontrol,
 	struct snd_soc_component *codec = snd_soc_kcontrol_component(kcontrol);
 	struct tasdevice_priv *tas_priv = snd_soc_component_get_drvdata(codec);
 	int dev_id = ucontrol->value.integer.value[0];
-	int max = tas_priv->ndev - 1, rc;
+	int max = tas_priv->ndev - 1;
 
 	dev_id = clamp(dev_id, 0, max);
 
 	guard(mutex)(&tas_priv->codec_lock);
-	rc = tasdev_chn_switch(tas_priv, dev_id);
-
-	return rc;
+	return tasdev_chn_switch(tas_priv, dev_id);
 }
 
 static int tasdevice_dsp_create_ctrls(struct tasdevice_priv *tas_priv)
 {
 	struct snd_kcontrol_new *dsp_ctrls;
-	char *active_dev_num, *chip_id;
+	char *active_dev_num, *chip_id, *fw_load;
 	char *conf_name, *prog_name;
-	int nr_controls = 4;
+	int nr_controls = 5;
 	int mix_index = 0;
-	int ret;
 
 	/* Alloc kcontrol via devm_kzalloc, which don't manually
 	 * free the kcontrol
 	 */
 	dsp_ctrls = devm_kcalloc(tas_priv->dev, nr_controls,
 		sizeof(dsp_ctrls[0]), GFP_KERNEL);
-	if (!dsp_ctrls) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	if (!dsp_ctrls)
+		return -ENOMEM;
 
 	/* Create mixer items for selecting the active Program and Config */
 	prog_name = devm_kstrdup(tas_priv->dev, "Speaker Program Id",
 		GFP_KERNEL);
-	if (!prog_name) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	if (!prog_name)
+		return -ENOMEM;
+
 	dsp_ctrls[mix_index].name = prog_name;
 	dsp_ctrls[mix_index].iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 	dsp_ctrls[mix_index].info = tasdevice_info_programs;
@@ -1160,10 +1234,9 @@ static int tasdevice_dsp_create_ctrls(struct tasdevice_priv *tas_priv)
 
 	conf_name = devm_kstrdup(tas_priv->dev, "Speaker Config Id",
 		GFP_KERNEL);
-	if (!conf_name) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	if (!conf_name)
+		return -ENOMEM;
+
 	dsp_ctrls[mix_index].name = conf_name;
 	dsp_ctrls[mix_index].iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 	dsp_ctrls[mix_index].info = tasdevice_info_configurations;
@@ -1173,10 +1246,9 @@ static int tasdevice_dsp_create_ctrls(struct tasdevice_priv *tas_priv)
 
 	active_dev_num = devm_kstrdup(tas_priv->dev, "Activate Tasdevice Num",
 		GFP_KERNEL);
-	if (!active_dev_num) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	if (!active_dev_num)
+		return -ENOMEM;
+
 	dsp_ctrls[mix_index].name = active_dev_num;
 	dsp_ctrls[mix_index].iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 	dsp_ctrls[mix_index].info = tasdevice_info_active_num;
@@ -1185,27 +1257,77 @@ static int tasdevice_dsp_create_ctrls(struct tasdevice_priv *tas_priv)
 	mix_index++;
 
 	chip_id = devm_kstrdup(tas_priv->dev, "Tasdevice Chip Id", GFP_KERNEL);
-	if (!chip_id) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	if (!chip_id)
+		return -ENOMEM;
+
 	dsp_ctrls[mix_index].name = chip_id;
 	dsp_ctrls[mix_index].iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 	dsp_ctrls[mix_index].info = tasdevice_info_chip_id;
 	dsp_ctrls[mix_index].get = tasdevice_get_chip_id;
 	mix_index++;
 
-	ret = snd_soc_add_component_controls(tas_priv->codec, dsp_ctrls,
-		nr_controls < mix_index ? nr_controls : mix_index);
+	fw_load = devm_kstrdup(tas_priv->dev, "Speaker Force Firmware Load",
+		GFP_KERNEL);
+	if (!fw_load)
+		return -ENOMEM;
 
-out:
-	return ret;
+	dsp_ctrls[mix_index].name = fw_load;
+	dsp_ctrls[mix_index].iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+	dsp_ctrls[mix_index].info = snd_soc_info_bool_ext;
+	dsp_ctrls[mix_index].put = tasdev_force_fwload_put;
+	dsp_ctrls[mix_index].get = tasdev_force_fwload_get;
+	dsp_ctrls[mix_index].private_value = 0UL;
+	mix_index++;
+
+	return snd_soc_add_component_controls(tas_priv->codec, dsp_ctrls,
+		nr_controls < mix_index ? nr_controls : mix_index);
+}
+
+static void cali_reg_update(struct bulk_reg_val *p,
+	struct fct_param_address *t)
+{
+	const int sum = ARRAY_SIZE(tas2781_cali_start_reg);
+	int reg, j;
+
+	for (j = 0; j < sum; j++) {
+		switch (tas2781_cali_start_reg[j].reg) {
+		case 0:
+			reg = TASDEVICE_REG(t->thr[0], t->thr[1], t->thr[2]);
+			break;
+		case TAS2781_PRM_PLT_FLAG_REG:
+			reg = TASDEVICE_REG(t->plt_flg[0], t->plt_flg[1],
+				t->plt_flg[2]);
+			break;
+		case TAS2781_PRM_SINEGAIN_REG:
+			reg = TASDEVICE_REG(t->sin_gn[0], t->sin_gn[1],
+				t->sin_gn[2]);
+			break;
+		case TAS2781_PRM_SINEGAIN2_REG:
+			reg = TASDEVICE_REG(t->sin_gn[0], t->sin_gn[1],
+				t->sin_gn[2]);
+			break;
+		default:
+			reg = 0;
+			break;
+		}
+		if (reg)
+			p[j].reg = reg;
+	}
+}
+
+static void alpa_cali_update(struct bulk_reg_val *p,
+	struct fct_param_address *t)
+{
+	p->is_locked = false;
+	p->reg = TASDEVICE_REG(t->thr2[0], t->thr2[1], t->thr2[2]);
+	p->val_len = 4;
 }
 
 static int tasdevice_create_cali_ctrls(struct tasdevice_priv *priv)
 {
 	struct calidata *cali_data = &priv->cali_data;
 	struct tasdevice *tasdev = priv->tasdevice;
+	struct tasdevice_fw *fmw = priv->fmw;
 	struct soc_bytes_ext *ext_cali_data;
 	struct snd_kcontrol_new *cali_ctrls;
 	unsigned int nctrls;
@@ -1221,14 +1343,25 @@ static int tasdevice_create_cali_ctrls(struct tasdevice_priv *priv)
 	}
 
 	if (priv->chip_id == TAS2781) {
+		struct fct_param_address *t = &(fmw->fct_par_addr);
+
 		cali_ctrls = (struct snd_kcontrol_new *)tas2781_cali_controls;
 		nctrls = ARRAY_SIZE(tas2781_cali_controls);
 		for (i = 0; i < priv->ndev; i++) {
-			tasdev[i].cali_data_backup =
+			struct bulk_reg_val *p;
+
+			p = tasdev[i].cali_data_backup =
 				kmemdup(tas2781_cali_start_reg,
 				sizeof(tas2781_cali_start_reg), GFP_KERNEL);
 			if (!tasdev[i].cali_data_backup)
 				return -ENOMEM;
+			if (priv->dspbin_typ) {
+				cali_reg_update(p, t);
+				if (priv->dspbin_typ == TASDEV_ALPHA) {
+					p = &tasdev[i].alp_cali_bckp;
+					alpa_cali_update(p, t);
+				}
+			}
 		}
 	} else {
 		cali_ctrls = (struct snd_kcontrol_new *)tas2563_cali_controls;
@@ -1290,8 +1423,6 @@ static int tasdevice_create_cali_ctrls(struct tasdevice_priv *priv)
 		(cali_data->cali_dat_sz_per_dev + 1) + 1 + 15 + 1;
 	priv->cali_data.total_sz = priv->ndev *
 		(cali_data->cali_dat_sz_per_dev + 1);
-	priv->cali_data.data = devm_kzalloc(priv->dev,
-		ext_cali_data->max, GFP_KERNEL);
 	cali_ctrls[i].name = cali_name;
 	cali_ctrls[i].iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 	cali_ctrls[i].info = snd_soc_bytes_info_ext;
@@ -1339,16 +1470,154 @@ static int tasdevice_create_cali_ctrls(struct tasdevice_priv *priv)
 		i++;
 	}
 
-	rc = snd_soc_add_component_controls(priv->codec, cali_ctrls,
+	return snd_soc_add_component_controls(priv->codec, cali_ctrls,
 		nctrls < i ? nctrls : i);
-
-	return rc;
 }
+
+#ifdef CONFIG_SND_SOC_TAS2781_ACOUST_I2C
+/*
+ * This debugfs node is a bridge to the acoustic tuning application
+ * tool which can tune the chips' acoustic effect.
+ *
+ * package structure for PPC3 communications:
+ *	Pkg len (1 byte)
+ *	Pkg id (1 byte, 'r' or 'w')
+ *	Dev id (1 byte, i2c address)
+ *	Book id (1 byte)
+ *	Page id (1 byte)
+ *	Reg id (1 byte)
+ *	switch (pkg id) {
+ *	case 'w':
+ *		1 byte, length of data to read
+ *	case 'r':
+ *		data payload (1~128 bytes)
+ *	}
+ */
+static ssize_t acoustic_ctl_read(struct file *file, char __user *to,
+	size_t count, loff_t *ppos)
+{
+	struct snd_soc_component *comp = file->private_data;
+	struct tasdevice_priv *tas_priv = snd_soc_component_get_drvdata(comp);
+	struct acoustic_data *p = &tas_priv->acou_data;
+	int ret = -1;
+
+	if (p->id == 'r' && p->len == count && count <= sizeof(*p))
+		ret = simple_read_from_buffer(to, count, ppos, p, p->len);
+	else
+		dev_err(tas_priv->dev, "Not ready for get.\n");
+	return ret;
+}
+
+static ssize_t acoustic_ctl_write(struct file *file,
+	const char __user *from, size_t count, loff_t *ppos)
+{
+	struct snd_soc_component *comp = file->private_data;
+	struct tasdevice_priv *priv = snd_soc_component_get_drvdata(comp);
+	struct acoustic_data *p = &priv->acou_data;
+	unsigned int max_pkg_len = sizeof(*p);
+	unsigned char *src;
+	int j, len, reg, val;
+	unsigned short chn;
+	int ret = -1;
+
+	if (count > sizeof(*p)) {
+		dev_err(priv->dev, "count(%u) is larger than max(%u).\n",
+			(unsigned int)count, max_pkg_len);
+		return ret;
+	}
+
+	src = memdup_user(from, count);
+	if (IS_ERR(src))
+		return PTR_ERR(src);
+
+	if (src[0] > max_pkg_len && src[0] != count) {
+		dev_err(priv->dev, "pkg(%u), max(%u), count(%u) mismatch.\n",
+			src[0], max_pkg_len, (unsigned int)count);
+		ret = 0;
+		goto exit;
+	}
+
+	switch (src[1]) {
+	case 'r':
+		/* length of data to read */
+		len = src[6];
+		break;
+	case 'w':
+		/* Skip 6 bytes for package type and register address */
+		len = src[0] - 6;
+		break;
+	default:
+		dev_err(priv->dev, "%s Wrong code %02x.\n", __func__, src[1]);
+		ret = 0;
+		goto exit;
+	}
+
+	if (len < 1) {
+		dev_err(priv->dev, "pkg fmt invalid %02x.\n", len);
+		ret = 0;
+		goto exit;
+	}
+
+	for (j = 0; j < priv->ndev; j++)
+		if (src[2] == priv->tasdevice[j].dev_addr) {
+			chn = j;
+			break;
+		}
+	if (j >= priv->ndev) {
+		dev_err(priv->dev, "no such device 0x%02x.\n", src[2]);
+		ret = 0;
+		goto exit;
+	}
+
+	reg = TASDEVICE_REG(src[3], src[4], src[5]);
+
+	guard(mutex)(&priv->codec_lock);
+
+	if (src[1] == 'w') {
+		if (len > 1)
+			ret = tasdevice_dev_bulk_write(priv, chn, reg,
+				 &src[6], len);
+		else
+			ret = tasdevice_dev_write(priv, chn, reg, src[6]);
+	} else {
+		struct acoustic_data *p = &priv->acou_data;
+
+		memcpy(p, src, 6);
+		if (len > 1) {
+			ret = tasdevice_dev_bulk_read(priv, chn, reg,
+				p->data, len);
+		} else {
+			ret = tasdevice_dev_read(priv, chn, reg, &val);
+			p->data[0] = val;
+		}
+		p->len = len + 6;
+	}
+
+	if (ret)
+		dev_err(priv->dev, "i2c communication error.\n");
+	else
+		ret = count;
+exit:
+	kfree(src);
+	return ret;
+}
+
+static const struct file_operations acoustic_ctl_fops = {
+	.open = simple_open,
+	.read = acoustic_ctl_read,
+	.write = acoustic_ctl_write,
+};
+#endif
 
 static void tasdevice_fw_ready(const struct firmware *fmw,
 	void *context)
 {
 	struct tasdevice_priv *tas_priv = context;
+#ifdef CONFIG_SND_SOC_TAS2781_ACOUST_I2C
+	struct snd_soc_component *comp = tas_priv->codec;
+	struct dentry *debugfs_root = comp->debugfs_root;
+	char *acoustic_debugfs_node;
+#endif
 	int ret = 0;
 	int i;
 
@@ -1369,6 +1638,16 @@ static void tasdevice_fw_ready(const struct firmware *fmw,
 	 * failing to load DSP firmware is NOT an error.
 	 */
 	tas_priv->fw_state = TASDEVICE_RCA_FW_OK;
+	/* There is no DSP firmware required for TAS2118/2X20/257X. */
+	switch (tas_priv->chip_id) {
+	case TAS2020:
+	case TAS2118:
+	case TAS2120:
+	case TAS2320:
+	case TAS2570:
+	case TAS2572:
+		goto out;
+	}
 	if (tas_priv->name_prefix)
 		scnprintf(tas_priv->coef_binaryname, 64, "%s-%s_coef.bin",
 			tas_priv->name_prefix, tas_priv->dev_name);
@@ -1390,46 +1669,76 @@ static void tasdevice_fw_ready(const struct firmware *fmw,
 		dev_err(tas_priv->dev, "dsp controls error\n");
 		goto out;
 	}
-
-	ret = tasdevice_create_cali_ctrls(tas_priv);
-	if (ret) {
-		dev_err(tas_priv->dev, "cali controls error\n");
-		goto out;
-	}
-
 	tas_priv->fw_state = TASDEVICE_DSP_FW_ALL_OK;
 
-	/* If calibrated data occurs error, dsp will still works with default
-	 * calibrated data inside algo.
+	/* There is no calibration required for
+	 * TAS5802/TAS5815/TAS5825/TAS5827/TAS5828.
 	 */
-	for (i = 0; i < tas_priv->ndev; i++) {
-		if (tas_priv->name_prefix)
-			scnprintf(tas_priv->cal_binaryname[i], 64,
-				"%s-%s_cal_0x%02x.bin", tas_priv->name_prefix,
-				tas_priv->dev_name,
-				tas_priv->tasdevice[i].dev_addr);
-		else
-			scnprintf(tas_priv->cal_binaryname[i], 64,
-				"%s_cal_0x%02x.bin", tas_priv->dev_name,
-				tas_priv->tasdevice[i].dev_addr);
-		ret = tas2781_load_calibration(tas_priv,
-			tas_priv->cal_binaryname[i], i);
-		if (ret != 0)
-			dev_err(tas_priv->dev,
-				"%s: load %s error, default will effect\n",
-				__func__, tas_priv->cal_binaryname[i]);
+	if (tas_priv->chip_id < TAS5802) {
+		ret = tasdevice_create_cali_ctrls(tas_priv);
+		if (ret) {
+			dev_err(tas_priv->dev, "cali controls error\n");
+			goto out;
+		}
+		/* If calibrated data occurs error, dsp will still works
+		 * with default calibrated data inside algo.
+		 */
+		for (i = 0; i < tas_priv->ndev; i++) {
+			if (tas_priv->name_prefix)
+				scnprintf(tas_priv->cal_binaryname[i], 64,
+					  "%s-%s_cal_0x%02x.bin",
+					  tas_priv->name_prefix,
+					  tas_priv->dev_name,
+					  tas_priv->tasdevice[i].dev_addr);
+			else
+				scnprintf(tas_priv->cal_binaryname[i], 64,
+					  "%s_cal_0x%02x.bin",
+					  tas_priv->dev_name,
+					  tas_priv->tasdevice[i].dev_addr);
+			ret = tas2781_load_calibration(tas_priv,
+				tas_priv->cal_binaryname[i], i);
+			if (ret != 0)
+				dev_err(tas_priv->dev,
+					"%s: load %s error, keep default.\n",
+					__func__, tas_priv->cal_binaryname[i]);
+		}
 	}
 
 	tasdevice_prmg_load(tas_priv, 0);
 	tas_priv->cur_prog = 0;
+
+	/* Init common setting for different audio profiles */
+	if (tas_priv->rcabin.init_profile_id >= 0)
+		tasdevice_select_cfg_blk(tas_priv,
+			tas_priv->rcabin.init_profile_id,
+			TASDEVICE_BIN_BLK_PRE_POWER_UP);
+
+#ifdef CONFIG_SND_SOC_TAS2781_ACOUST_I2C
+	if (tas_priv->name_prefix)
+		acoustic_debugfs_node = devm_kasprintf(tas_priv->dev,
+			GFP_KERNEL, "%s_acoustic_ctl", tas_priv->name_prefix);
+	else
+		acoustic_debugfs_node = devm_kstrdup(tas_priv->dev,
+			"acoustic_ctl", GFP_KERNEL);
+	debugfs_create_file(acoustic_debugfs_node, 0644, debugfs_root,
+		comp, &acoustic_ctl_fops);
+#endif
 out:
 	if (tas_priv->fw_state == TASDEVICE_RCA_FW_OK) {
-		/* If DSP FW fail, DSP kcontrol won't be created. */
-		tasdevice_dsp_remove(tas_priv);
+		switch (tas_priv->chip_id) {
+		case TAS2563:
+		case TAS2781:
+		case TAS5802:
+		case TAS5815:
+		case TAS5825:
+		case TAS5827:
+		case TAS5828:
+			/* If DSP FW fail, DSP kcontrol won't be created. */
+			tasdevice_dsp_remove(tas_priv);
+		}
 	}
 	mutex_unlock(&tas_priv->codec_lock);
-	if (fmw)
-		release_firmware(fmw);
+	release_firmware(fmw);
 }
 
 static int tasdevice_dapm_event(struct snd_soc_dapm_widget *w,
@@ -1488,7 +1797,6 @@ static int tasdevice_hw_params(struct snd_pcm_substream *substream,
 	unsigned int slot_width;
 	unsigned int fsrate;
 	int bclk_rate;
-	int rc = 0;
 
 	fsrate = params_rate(params);
 	switch (fsrate) {
@@ -1498,8 +1806,7 @@ static int tasdevice_hw_params(struct snd_pcm_substream *substream,
 	default:
 		dev_err(tas_priv->dev, "%s: incorrect sample rate = %u\n",
 			__func__, fsrate);
-		rc = -EINVAL;
-		goto out;
+		return -EINVAL;
 	}
 
 	slot_width = params_width(params);
@@ -1512,20 +1819,17 @@ static int tasdevice_hw_params(struct snd_pcm_substream *substream,
 	default:
 		dev_err(tas_priv->dev, "%s: incorrect slot width = %u\n",
 			__func__, slot_width);
-		rc = -EINVAL;
-		goto out;
+		return -EINVAL;
 	}
 
 	bclk_rate = snd_soc_params_to_bclk(params);
 	if (bclk_rate < 0) {
 		dev_err(tas_priv->dev, "%s: incorrect bclk rate = %d\n",
 			__func__, bclk_rate);
-		rc = bclk_rate;
-		goto out;
+		return bclk_rate;
 	}
 
-out:
-	return rc;
+	return 0;
 }
 
 static int tasdevice_set_dai_sysclk(struct snd_soc_dai *codec_dai,
@@ -1575,13 +1879,33 @@ static int tasdevice_codec_probe(struct snd_soc_component *codec)
 	int rc;
 
 	switch (tas_priv->chip_id) {
+	case TAS2020:
+	case TAS2118:
+	case TAS2120:
+	case TAS2320:
+	case TAS2570:
+	case TAS2572:
+		p = (struct snd_kcontrol_new *)tas2x20_snd_controls;
+		size = ARRAY_SIZE(tas2x20_snd_controls);
+		tas_priv->dvc_tlv_table = tas2x20_dvc_table;
+		break;
 	case TAS2781:
 		p = (struct snd_kcontrol_new *)tas2781_snd_controls;
 		size = ARRAY_SIZE(tas2781_snd_controls);
 		break;
+	case TAS5802:
+	case TAS5815:
+	case TAS5825:
+	case TAS5827:
+	case TAS5828:
+		p = (struct snd_kcontrol_new *)tas5825_snd_controls;
+		size = ARRAY_SIZE(tas5825_snd_controls);
+		break;
 	default:
 		p = (struct snd_kcontrol_new *)tas2563_snd_controls;
 		size = ARRAY_SIZE(tas2563_snd_controls);
+		tas_priv->dvc_tlv_table = tas2563_dvc_table;
+		break;
 	}
 
 	rc = snd_soc_add_component_controls(codec, p, size);
@@ -1621,8 +1945,6 @@ static const struct snd_soc_component_driver
 	soc_codec_driver_tasdevice = {
 	.probe			= tasdevice_codec_probe,
 	.remove			= tasdevice_codec_remove,
-	.controls		= tasdevice_snd_controls,
-	.num_controls		= ARRAY_SIZE(tasdevice_snd_controls),
 	.dapm_widgets		= tasdevice_dapm_widgets,
 	.num_dapm_widgets	= ARRAY_SIZE(tasdevice_dapm_widgets),
 	.dapm_routes		= tasdevice_audio_map,
@@ -1635,7 +1957,8 @@ static void tasdevice_parse_dt(struct tasdevice_priv *tas_priv)
 {
 	struct i2c_client *client = (struct i2c_client *)tas_priv->client;
 	unsigned int dev_addrs[TASDEVICE_MAX_CHANNELS];
-	int i, ndev = 0;
+	int ndev = 0;
+	int i, rc;
 
 	if (tas_priv->isacpi) {
 		ndev = device_property_read_u32_array(&client->dev,
@@ -1646,8 +1969,12 @@ static void tasdevice_parse_dt(struct tasdevice_priv *tas_priv)
 		} else {
 			ndev = (ndev < ARRAY_SIZE(dev_addrs))
 				? ndev : ARRAY_SIZE(dev_addrs);
-			ndev = device_property_read_u32_array(&client->dev,
+			rc = device_property_read_u32_array(&client->dev,
 				"ti,audio-slots", dev_addrs, ndev);
+			if (rc != 0) {
+				ndev = 1;
+				dev_addrs[0] = client->addr;
+			}
 		}
 
 		tas_priv->irq =
@@ -1682,7 +2009,6 @@ static void tasdevice_parse_dt(struct tasdevice_priv *tas_priv)
 
 static int tasdevice_i2c_probe(struct i2c_client *i2c)
 {
-	const struct i2c_device_id *id = i2c_match_id(tasdevice_id, i2c);
 	const struct acpi_device_id *acpi_id;
 	struct tasdevice_priv *tas_priv;
 	int ret;
@@ -1704,7 +2030,7 @@ static int tasdevice_i2c_probe(struct i2c_client *i2c)
 		tas_priv->chip_id = acpi_id->driver_data;
 		tas_priv->isacpi = true;
 	} else {
-		tas_priv->chip_id = id ? id->driver_data : 0;
+		tas_priv->chip_id = (uintptr_t)i2c_get_match_data(i2c);
 		tas_priv->isacpi = false;
 	}
 
@@ -1739,7 +2065,19 @@ static void tasdevice_i2c_remove(struct i2c_client *client)
 
 #ifdef CONFIG_ACPI
 static const struct acpi_device_id tasdevice_acpi_match[] = {
-	{ "TAS2781", TAS2781 },
+	{ "TXNW2020", TAS2020 },
+	{ "TXNW2118", TAS2118 },
+	{ "TXNW2120", TAS2120 },
+	{ "TXNW2320", TAS2320 },
+	{ "TXNW2563", TAS2563 },
+	{ "TXNW2570", TAS2570 },
+	{ "TXNW2572", TAS2572 },
+	{ "TXNW2781", TAS2781 },
+	{ "TXNW5802", TAS5802 },
+	{ "TXNW5815", TAS5815 },
+	{ "TXNW5825", TAS5825 },
+	{ "TXNW5827", TAS5827 },
+	{ "TXNW5828", TAS5828 },
 	{},
 };
 
@@ -1765,4 +2103,4 @@ MODULE_AUTHOR("Shenghao Ding <shenghao-ding@ti.com>");
 MODULE_AUTHOR("Kevin Lu <kevin-lu@ti.com>");
 MODULE_DESCRIPTION("ASoC TAS2781 Driver");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(SND_SOC_TAS2781_FMWLIB);
+MODULE_IMPORT_NS("SND_SOC_TAS2781_FMWLIB");

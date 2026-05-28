@@ -99,7 +99,6 @@ static const struct regmap_config serdes_am654_regmap_config = {
 	.reg_bits = 32,
 	.val_bits = 32,
 	.reg_stride = 4,
-	.fast_io = true,
 	.max_register = 0x1ffc,
 };
 
@@ -837,7 +836,7 @@ static void serdes_am654_remove(struct platform_device *pdev)
 
 static struct platform_driver serdes_am654_driver = {
 	.probe		= serdes_am654_probe,
-	.remove_new	= serdes_am654_remove,
+	.remove		= serdes_am654_remove,
 	.driver		= {
 		.name	= "phy-am654",
 		.of_match_table = serdes_am654_id_table,

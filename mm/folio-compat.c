@@ -28,12 +28,6 @@ void wait_on_page_writeback(struct page *page)
 }
 EXPORT_SYMBOL_GPL(wait_on_page_writeback);
 
-void wait_for_stable_page(struct page *page)
-{
-	return folio_wait_stable(page_folio(page));
-}
-EXPORT_SYMBOL_GPL(wait_for_stable_page);
-
 void mark_page_accessed(struct page *page)
 {
 	folio_mark_accessed(page_folio(page));
@@ -51,6 +45,12 @@ bool set_page_dirty(struct page *page)
 	return folio_mark_dirty(page_folio(page));
 }
 EXPORT_SYMBOL(set_page_dirty);
+
+int set_page_dirty_lock(struct page *page)
+{
+	return folio_mark_dirty_lock(page_folio(page));
+}
+EXPORT_SYMBOL(set_page_dirty_lock);
 
 bool clear_page_dirty_for_io(struct page *page)
 {
@@ -84,11 +84,3 @@ struct page *pagecache_get_page(struct address_space *mapping, pgoff_t index,
 	return folio_file_page(folio, index);
 }
 EXPORT_SYMBOL(pagecache_get_page);
-
-struct page *grab_cache_page_write_begin(struct address_space *mapping,
-					pgoff_t index)
-{
-	return pagecache_get_page(mapping, index, FGP_WRITEBEGIN,
-			mapping_gfp_mask(mapping));
-}
-EXPORT_SYMBOL(grab_cache_page_write_begin);

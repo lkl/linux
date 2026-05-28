@@ -25,6 +25,8 @@ enum codec_type {
 	CODEC_AK4458,
 	CODEC_AK4497,
 	CODEC_AK5552,
+	CODEC_CS42888,
+	CODEC_WM8524,
 };
 
 /*
@@ -185,6 +187,23 @@ static struct imx_akcodec_tdm_fs_mul ak5558_tdm_fs_mul[] = {
 	{ .min = 512,	.max = 512,	.mul = 1024 },
 };
 
+static struct imx_akcodec_fs_mul cs42888_fs_mul[] = {
+	{ .rmin = 8000,   .rmax = 48000,  .wmin = 256,  .wmax = 1024, },
+	{ .rmin = 64000,  .rmax = 96000,  .wmin = 128,  .wmax = 512, },
+	{ .rmin = 176400, .rmax = 192000, .wmin = 64,  .wmax = 256, },
+};
+
+static struct imx_akcodec_tdm_fs_mul cs42888_tdm_fs_mul[] = {
+	{ .min = 256,	.max = 256,	.mul = 256 },
+};
+
+static struct imx_akcodec_fs_mul wm8524_fs_mul[] = {
+	{ .rmin = 8000,   .rmax = 32000,  .wmin = 256,  .wmax = 1152, },
+	{ .rmin = 44100,  .rmax = 48000,  .wmin = 256,  .wmax = 768, },
+	{ .rmin = 88200,  .rmax = 96000,  .wmin = 128,  .wmax = 384, },
+	{ .rmin = 176400, .rmax = 192000, .wmin = 128,  .wmax = 192, },
+};
+
 static const u32 akcodec_rates[] = {
 	8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200,
 	96000, 176400, 192000, 352800, 384000, 705600, 768000,
@@ -208,6 +227,18 @@ static const u32 ak5558_channels[] = {
 
 static const u32 ak5558_tdm_channels[] = {
 	1, 2, 3, 4, 5, 6, 7, 8,
+};
+
+static const u32 cs42888_channels[] = {
+	1, 2, 4, 6, 8,
+};
+
+static const u32 cs42888_tdm_channels[] = {
+	1, 2, 3, 4, 5, 6, 7, 8,
+};
+
+static const u32 wm8524_channels[] = {
+	2,
 };
 
 static bool format_is_dsd(struct snd_pcm_hw_params *params)
@@ -241,6 +272,8 @@ static bool codec_is_akcodec(unsigned int type)
 	case CODEC_AK4497:
 	case CODEC_AK5558:
 	case CODEC_AK5552:
+	case CODEC_CS42888:
+	case CODEC_WM8524:
 		return true;
 	default:
 		break;
@@ -255,7 +288,7 @@ static unsigned long akcodec_get_mclk_rate(struct snd_pcm_substream *substream,
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct imx_card_data *data = snd_soc_card_get_drvdata(rtd->card);
 	const struct imx_card_plat_data *plat_data = data->plat_data;
-	struct dai_link_data *link_data = &data->link_data[rtd->num];
+	struct dai_link_data *link_data = &data->link_data[rtd->id];
 	unsigned int width = slots * slot_width;
 	unsigned int rate = params_rate(params);
 	int i;
@@ -293,7 +326,7 @@ static int imx_aif_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	struct snd_soc_card *card = rtd->card;
 	struct imx_card_data *data = snd_soc_card_get_drvdata(card);
-	struct dai_link_data *link_data = &data->link_data[rtd->num];
+	struct dai_link_data *link_data = &data->link_data[rtd->id];
 	struct imx_card_plat_data *plat_data = data->plat_data;
 	struct device *dev = card->dev;
 	struct snd_soc_dai *codec_dai;
@@ -340,13 +373,15 @@ static int imx_aif_hw_params(struct snd_pcm_substream *substream,
 			return ret;
 		}
 
-		ret = snd_soc_dai_set_tdm_slot(codec_dai,
-					       BIT(slots) - 1,
-					       BIT(slots) - 1,
-					       slots, slot_width);
-		if (ret && ret != -ENOTSUPP) {
-			dev_err(dev, "failed to set codec dai[%d] tdm slot: %d\n", i, ret);
-			return ret;
+		if (format_is_tdm(link_data)) {
+			ret = snd_soc_dai_set_tdm_slot(codec_dai,
+						       BIT(slots) - 1,
+						       BIT(slots) - 1,
+						       slots, slot_width);
+			if (ret && ret != -ENOTSUPP) {
+				dev_err(dev, "failed to set codec dai[%d] tdm slot: %d\n", i, ret);
+				return ret;
+			}
 		}
 	}
 
@@ -368,6 +403,11 @@ static int imx_aif_hw_params(struct snd_pcm_substream *substream,
 				     SND_SOC_CLOCK_OUT);
 	if (ret && ret != -ENOTSUPP) {
 		dev_err(dev, "failed to set cpui dai mclk1 rate (%lu): %d\n", mclk_freq, ret);
+		return ret;
+	}
+	ret = snd_soc_dai_set_sysclk(codec_dai, 0, mclk_freq, SND_SOC_CLOCK_IN);
+	if (ret && ret != -ENOTSUPP) {
+		dev_err(dev, "failed to set codec dai mclk rate (%lu): %d\n", mclk_freq, ret);
 		return ret;
 	}
 
@@ -408,7 +448,7 @@ static int imx_aif_startup(struct snd_pcm_substream *substream)
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_soc_card *card = rtd->card;
 	struct imx_card_data *data = snd_soc_card_get_drvdata(card);
-	struct dai_link_data *link_data = &data->link_data[rtd->num];
+	struct dai_link_data *link_data = &data->link_data[rtd->id];
 	static struct snd_pcm_hw_constraint_list constraint_rates;
 	static struct snd_pcm_hw_constraint_list constraint_channels;
 	int ret = 0;
@@ -450,9 +490,24 @@ static int imx_aif_startup(struct snd_pcm_substream *substream)
 	return ret;
 }
 
+static void imx_aif_shutdown(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *cpu_dai;
+	struct snd_soc_dai *codec_dai;
+	int i;
+
+	for_each_rtd_cpu_dais(rtd, i, cpu_dai)
+		snd_soc_dai_set_sysclk(cpu_dai, 0, 0, SND_SOC_CLOCK_OUT);
+
+	for_each_rtd_codec_dais(rtd, i, codec_dai)
+		snd_soc_dai_set_sysclk(codec_dai, 0, 0, SND_SOC_CLOCK_IN);
+}
+
 static const struct snd_soc_ops imx_aif_ops = {
 	.hw_params = imx_aif_hw_params,
 	.startup = imx_aif_startup,
+	.shutdown = imx_aif_shutdown,
 };
 
 static const struct snd_soc_ops imx_aif_ops_be = {
@@ -486,11 +541,11 @@ static int imx_card_parse_of(struct imx_card_data *data)
 	struct device_node *platform = NULL;
 	struct device_node *codec = NULL;
 	struct device_node *cpu = NULL;
-	struct device_node *np;
 	struct device *dev = card->dev;
 	struct snd_soc_dai_link *link;
 	struct dai_link_data *link_data;
 	struct of_phandle_args args;
+	bool playback_only, capture_only;
 	int ret, num_links;
 	u32 asrc_fmt = 0;
 	u32 width;
@@ -502,7 +557,7 @@ static int imx_card_parse_of(struct imx_card_data *data)
 	}
 
 	/* DAPM routes */
-	if (of_property_read_bool(dev->of_node, "audio-routing")) {
+	if (of_property_present(dev->of_node, "audio-routing")) {
 		ret = snd_soc_of_parse_audio_routing(card, "audio-routing");
 		if (ret)
 			return ret;
@@ -516,7 +571,7 @@ static int imx_card_parse_of(struct imx_card_data *data)
 	if (!card->dai_link)
 		return -ENOMEM;
 
-	data->link_data = devm_kcalloc(dev, num_links, sizeof(*link), GFP_KERNEL);
+	data->link_data = devm_kcalloc(dev, num_links, sizeof(*link_data), GFP_KERNEL);
 	if (!data->link_data)
 		return -ENOMEM;
 
@@ -524,11 +579,10 @@ static int imx_card_parse_of(struct imx_card_data *data)
 	link = card->dai_link;
 	link_data = data->link_data;
 
-	for_each_child_of_node(dev->of_node, np) {
+	for_each_child_of_node_scoped(dev->of_node, np) {
 		dlc = devm_kzalloc(dev, 2 * sizeof(*dlc), GFP_KERNEL);
 		if (!dlc) {
-			ret = -ENOMEM;
-			goto err_put_np;
+			return -ENOMEM;
 		}
 
 		link->cpus	= &dlc[0];
@@ -539,8 +593,8 @@ static int imx_card_parse_of(struct imx_card_data *data)
 
 		ret = of_property_read_string(np, "link-name", &link->name);
 		if (ret) {
-			dev_err(card->dev, "error getting codec dai_link name\n");
-			goto err_put_np;
+			return dev_err_probe(card->dev, ret,
+					     "error getting codec dai_link name\n");
 		}
 
 		cpu = of_get_child_by_name(np, "cpu");
@@ -604,6 +658,10 @@ static int imx_card_parse_of(struct imx_card_data *data)
 				plat_data->type = CODEC_AK5558;
 			else if (!strcmp(link->codecs->dai_name, "ak5552-aif"))
 				plat_data->type = CODEC_AK5552;
+			else if (!strcmp(link->codecs->dai_name, "cs42888"))
+				plat_data->type = CODEC_CS42888;
+			else if (!strcmp(link->codecs->dai_name, "wm8524-hifi"))
+				plat_data->type = CODEC_WM8524;
 
 		} else {
 			link->codecs	 = &snd_soc_dummy_dlc;
@@ -640,15 +698,22 @@ static int imx_card_parse_of(struct imx_card_data *data)
 			}
 		} else if (!strncmp(link->name, "HiFi-ASRC-BE", 12)) {
 			/* DPCM backend */
+			/*
+			 * No need to have link->platforms. alloced dlc[1] will be just wasted,
+			 * but it won't leak.
+			 */
 			link->no_pcm = 1;
-			link->platforms->of_node = NULL;
-			link->platforms->name = "snd-soc-dummy";
+			link->platforms = NULL;
 
 			link->be_hw_params_fixup = be_hw_params_fixup;
 			link->ops = &imx_aif_ops_be;
 		} else {
 			link->ops = &imx_aif_ops;
 		}
+
+		graph_util_parse_link_direction(np, &playback_only, &capture_only);
+		link->playback_only = playback_only;
+		link->capture_only = capture_only;
 
 		/* Get dai fmt */
 		ret = simple_util_parse_daifmt(dev, np, codec,
@@ -688,8 +753,7 @@ err:
 	of_node_put(cpu);
 	of_node_put(codec);
 	of_node_put(platform);
-err_put_np:
-	of_node_put(np);
+
 	return ret;
 }
 
@@ -738,6 +802,8 @@ static int imx_card_probe(struct platform_device *pdev)
 				data->dapm_routes[i].sink =
 					devm_kasprintf(&pdev->dev, GFP_KERNEL, "%d %s",
 						       i + 1, "Playback");
+				if (!data->dapm_routes[i].sink)
+					return -ENOMEM;
 				data->dapm_routes[i].source = "CPU-Playback";
 			}
 		}
@@ -755,11 +821,23 @@ static int imx_card_probe(struct platform_device *pdev)
 				data->dapm_routes[i].source =
 					devm_kasprintf(&pdev->dev, GFP_KERNEL, "%d %s",
 						       i + 1, "Capture");
+				if (!data->dapm_routes[i].source)
+					return -ENOMEM;
 				data->dapm_routes[i].sink = "CPU-Capture";
 			}
 		}
 		data->dapm_routes[i].sink = "ASRC-Capture";
 		data->dapm_routes[i].source = "CPU-Capture";
+		break;
+	case CODEC_CS42888:
+		data->dapm_routes[0].sink = "Playback";
+		data->dapm_routes[0].source = "CPU-Playback";
+		data->dapm_routes[1].sink = "CPU-Capture";
+		data->dapm_routes[1].source = "Capture";
+		break;
+	case CODEC_WM8524:
+		data->dapm_routes[0].sink = "Playback";
+		data->dapm_routes[0].source = "CPU-Playback";
 		break;
 	default:
 		break;
@@ -800,6 +878,22 @@ static int imx_card_probe(struct platform_device *pdev)
 			plat_data->support_tdm_channels = ak5558_tdm_channels;
 			plat_data->num_tdm_channels = ARRAY_SIZE(ak5558_tdm_channels);
 			break;
+		case CODEC_CS42888:
+			plat_data->fs_mul = cs42888_fs_mul;
+			plat_data->num_fs_mul = ARRAY_SIZE(cs42888_fs_mul);
+			plat_data->tdm_fs_mul = cs42888_tdm_fs_mul;
+			plat_data->num_tdm_fs_mul = ARRAY_SIZE(cs42888_tdm_fs_mul);
+			plat_data->support_channels = cs42888_channels;
+			plat_data->num_channels = ARRAY_SIZE(cs42888_channels);
+			plat_data->support_tdm_channels = cs42888_tdm_channels;
+			plat_data->num_tdm_channels = ARRAY_SIZE(cs42888_tdm_channels);
+			break;
+		case CODEC_WM8524:
+			plat_data->fs_mul = wm8524_fs_mul;
+			plat_data->num_fs_mul = ARRAY_SIZE(wm8524_fs_mul);
+			plat_data->support_channels = wm8524_channels;
+			plat_data->num_channels = ARRAY_SIZE(wm8524_channels);
+			break;
 		default:
 			break;
 		}
@@ -815,8 +909,8 @@ static int imx_card_probe(struct platform_device *pdev)
 		}
 		for_each_card_prelinks(&data->card, i, link) {
 			if (link->dynamic == 1 && link_be) {
-				link->dpcm_playback = link_be->dpcm_playback;
-				link->dpcm_capture = link_be->dpcm_capture;
+				link->playback_only = link_be->playback_only;
+				link->capture_only  = link_be->capture_only;
 			}
 		}
 	}

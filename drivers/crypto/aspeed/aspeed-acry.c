@@ -601,8 +601,6 @@ static struct aspeed_acry_alg aspeed_acry_akcipher_algs[] = {
 		.akcipher.base = {
 			.encrypt = aspeed_acry_rsa_enc,
 			.decrypt = aspeed_acry_rsa_dec,
-			.sign = aspeed_acry_rsa_dec,
-			.verify = aspeed_acry_rsa_enc,
 			.set_pub_key = aspeed_acry_rsa_set_pub_key,
 			.set_priv_key = aspeed_acry_rsa_set_priv_key,
 			.max_size = aspeed_acry_rsa_max_size,
@@ -789,7 +787,6 @@ static int aspeed_acry_probe(struct platform_device *pdev)
 err_engine_rsa_start:
 	crypto_engine_exit(acry_dev->crypt_engine_rsa);
 clk_exit:
-	clk_disable_unprepare(acry_dev->clk);
 
 	return rc;
 }
@@ -801,14 +798,13 @@ static void aspeed_acry_remove(struct platform_device *pdev)
 	aspeed_acry_unregister(acry_dev);
 	crypto_engine_exit(acry_dev->crypt_engine_rsa);
 	tasklet_kill(&acry_dev->done_task);
-	clk_disable_unprepare(acry_dev->clk);
 }
 
 MODULE_DEVICE_TABLE(of, aspeed_acry_of_matches);
 
 static struct platform_driver aspeed_acry_driver = {
 	.probe		= aspeed_acry_probe,
-	.remove_new	= aspeed_acry_remove,
+	.remove		= aspeed_acry_remove,
 	.driver		= {
 		.name   = KBUILD_MODNAME,
 		.of_match_table = aspeed_acry_of_matches,

@@ -32,6 +32,7 @@
 #include <linux/delay.h>
 #include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
+#include <linux/types.h>
 
 #define MMA8452_STATUS				0x00
 #define  MMA8452_STATUS_DRDY			(BIT(2) | BIT(1) | BIT(0))
@@ -115,7 +116,7 @@ struct mma8452_data {
 	/* Ensure correct alignment of time stamp when present */
 	struct {
 		__be16 channels[3];
-		s64 ts __aligned(8);
+		aligned_s64 ts;
 	} buffer;
 };
 
@@ -223,13 +224,10 @@ static int mma8452_set_runtime_pm_state(struct i2c_client *client, bool on)
 #ifdef CONFIG_PM
 	int ret;
 
-	if (on) {
+	if (on)
 		ret = pm_runtime_resume_and_get(&client->dev);
-	} else {
-		pm_runtime_mark_last_busy(&client->dev);
+	else
 		ret = pm_runtime_put_autosuspend(&client->dev);
-	}
-
 	if (ret < 0) {
 		dev_err(&client->dev,
 			"failed to change power state to %d\n", on);
@@ -496,14 +494,13 @@ static int mma8452_read_raw(struct iio_dev *indio_dev,
 
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
-		ret = iio_device_claim_direct_mode(indio_dev);
-		if (ret)
-			return ret;
+		if (!iio_device_claim_direct(indio_dev))
+			return -EBUSY;
 
 		mutex_lock(&data->lock);
 		ret = mma8452_read(data, buffer);
 		mutex_unlock(&data->lock);
-		iio_device_release_direct_mode(indio_dev);
+		iio_device_release_direct(indio_dev);
 		if (ret < 0)
 			return ret;
 
@@ -706,55 +703,45 @@ static int mma8452_set_hp_filter_frequency(struct mma8452_data *data,
 	return mma8452_change_config(data, MMA8452_HP_FILTER_CUTOFF, reg);
 }
 
-static int mma8452_write_raw(struct iio_dev *indio_dev,
+static int __mma8452_write_raw(struct iio_dev *indio_dev,
 			     struct iio_chan_spec const *chan,
 			     int val, int val2, long mask)
 {
 	struct mma8452_data *data = iio_priv(indio_dev);
-	int i, ret;
-
-	ret = iio_device_claim_direct_mode(indio_dev);
-	if (ret)
-		return ret;
+	int i, j, ret;
 
 	switch (mask) {
 	case IIO_CHAN_INFO_SAMP_FREQ:
 		i = mma8452_get_samp_freq_index(data, val, val2);
-		if (i < 0) {
-			ret = i;
-			break;
-		}
+		if (i < 0)
+			return i;
+
 		data->ctrl_reg1 &= ~MMA8452_CTRL_DR_MASK;
 		data->ctrl_reg1 |= i << MMA8452_CTRL_DR_SHIFT;
 
 		data->sleep_val = mma8452_calculate_sleep(data);
 
-		ret = mma8452_change_config(data, MMA8452_CTRL_REG1,
-					    data->ctrl_reg1);
-		break;
+		return mma8452_change_config(data, MMA8452_CTRL_REG1,
+					     data->ctrl_reg1);
+
 	case IIO_CHAN_INFO_SCALE:
 		i = mma8452_get_scale_index(data, val, val2);
-		if (i < 0) {
-			ret = i;
-			break;
-		}
+		if (i < 0)
+			return  i;
 
 		data->data_cfg &= ~MMA8452_DATA_CFG_FS_MASK;
 		data->data_cfg |= i;
 
-		ret = mma8452_change_config(data, MMA8452_DATA_CFG,
-					    data->data_cfg);
-		break;
-	case IIO_CHAN_INFO_CALIBBIAS:
-		if (val < -128 || val > 127) {
-			ret = -EINVAL;
-			break;
-		}
+		return mma8452_change_config(data, MMA8452_DATA_CFG,
+					     data->data_cfg);
 
-		ret = mma8452_change_config(data,
-					    MMA8452_OFF_X + chan->scan_index,
-					    val);
-		break;
+	case IIO_CHAN_INFO_CALIBBIAS:
+		if (val < -128 || val > 127)
+			return -EINVAL;
+
+		return mma8452_change_config(data,
+					     MMA8452_OFF_X + chan->scan_index,
+					     val);
 
 	case IIO_CHAN_INFO_HIGH_PASS_FILTER_3DB_FREQUENCY:
 		if (val == 0 && val2 == 0) {
@@ -763,29 +750,38 @@ static int mma8452_write_raw(struct iio_dev *indio_dev,
 			data->data_cfg |= MMA8452_DATA_CFG_HPF_MASK;
 			ret = mma8452_set_hp_filter_frequency(data, val, val2);
 			if (ret < 0)
-				break;
+				return ret;
 		}
 
-		ret = mma8452_change_config(data, MMA8452_DATA_CFG,
+		return mma8452_change_config(data, MMA8452_DATA_CFG,
 					     data->data_cfg);
-		break;
 
 	case IIO_CHAN_INFO_OVERSAMPLING_RATIO:
-		ret = mma8452_get_odr_index(data);
+		j = mma8452_get_odr_index(data);
 
 		for (i = 0; i < ARRAY_SIZE(mma8452_os_ratio); i++) {
-			if (mma8452_os_ratio[i][ret] == val) {
-				ret = mma8452_set_power_mode(data, i);
-				break;
-			}
+			if (mma8452_os_ratio[i][j] == val)
+				return mma8452_set_power_mode(data, i);
 		}
-		break;
-	default:
-		ret = -EINVAL;
-		break;
-	}
 
-	iio_device_release_direct_mode(indio_dev);
+		return -EINVAL;
+
+	default:
+		return -EINVAL;
+	}
+}
+
+static int mma8452_write_raw(struct iio_dev *indio_dev,
+			     struct iio_chan_spec const *chan,
+			     int val, int val2, long mask)
+{
+	int ret;
+
+	if (!iio_device_claim_direct(indio_dev))
+		return -EBUSY;
+
+	ret = __mma8452_write_raw(indio_dev, chan, val, val2, mask);
+	iio_device_release_direct(indio_dev);
 	return ret;
 }
 
@@ -973,7 +969,7 @@ static int mma8452_write_event_config(struct iio_dev *indio_dev,
 				      const struct iio_chan_spec *chan,
 				      enum iio_event_type type,
 				      enum iio_event_direction dir,
-				      int state)
+				      bool state)
 {
 	struct mma8452_data *data = iio_priv(indio_dev);
 	int val, ret;
@@ -1104,8 +1100,9 @@ static irqreturn_t mma8452_trigger_handler(int irq, void *p)
 	if (ret < 0)
 		goto done;
 
-	iio_push_to_buffers_with_timestamp(indio_dev, &data->buffer,
-					   iio_get_time_ns(indio_dev));
+	iio_push_to_buffers_with_ts(indio_dev, &data->buffer,
+				    sizeof(data->buffer),
+				    iio_get_time_ns(indio_dev));
 
 done:
 	iio_trigger_notify_done(indio_dev->trig);

@@ -630,7 +630,7 @@ static const struct pinfunction ipq5018_functions[] = {
 	MSM_PIN_FUNCTION(eud_gpio),
 	MSM_PIN_FUNCTION(gcc_plltest),
 	MSM_PIN_FUNCTION(gcc_tlmm),
-	MSM_PIN_FUNCTION(gpio),
+	MSM_GPIO_PIN_FUNCTION(gpio),
 	MSM_PIN_FUNCTION(led0),
 	MSM_PIN_FUNCTION(led2),
 	MSM_PIN_FUNCTION(mac0),
@@ -754,7 +754,6 @@ static struct platform_driver ipq5018_pinctrl_driver = {
 		.of_match_table = ipq5018_pinctrl_of_match,
 	},
 	.probe = ipq5018_pinctrl_probe,
-	.remove_new = msm_pinctrl_remove,
 };
 
 static int __init ipq5018_pinctrl_init(void)

@@ -159,7 +159,7 @@ static const struct exynos_drm_crtc_ops vidi_crtc_ops = {
 
 static void vidi_fake_vblank_timer(struct timer_list *t)
 {
-	struct vidi_context *ctx = from_timer(ctx, t, timer);
+	struct vidi_context *ctx = timer_container_of(ctx, t, timer);
 
 	if (drm_crtc_handle_vblank(&ctx->crtc->base))
 		mod_timer(&ctx->timer,
@@ -312,9 +312,6 @@ static int vidi_get_modes(struct drm_connector *connector)
 	else
 		drm_edid = drm_edid_alloc(fake_edid_info, sizeof(fake_edid_info));
 
-	if (!drm_edid)
-		return 0;
-
 	drm_edid_connector_update(connector, drm_edid);
 
 	count = drm_edid_connector_add_modes(connector);
@@ -427,7 +424,7 @@ static void vidi_unbind(struct device *dev, struct device *master, void *data)
 {
 	struct vidi_context *ctx = dev_get_drvdata(dev);
 
-	del_timer_sync(&ctx->timer);
+	timer_delete_sync(&ctx->timer);
 }
 
 static const struct component_ops vidi_component_ops = {
@@ -467,7 +464,7 @@ static void vidi_remove(struct platform_device *pdev)
 
 struct platform_driver vidi_driver = {
 	.probe		= vidi_probe,
-	.remove_new	= vidi_remove,
+	.remove		= vidi_remove,
 	.driver		= {
 		.name	= "exynos-drm-vidi",
 		.dev_groups = vidi_groups,

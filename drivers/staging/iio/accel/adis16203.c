@@ -294,7 +294,7 @@ static int adis16203_probe(struct spi_device *spi)
 
 static const struct of_device_id adis16203_of_match[] = {
 	{ .compatible = "adi,adis16203" },
-	{ },
+	{ }
 };
 
 MODULE_DEVICE_TABLE(of, adis16203_of_match);
@@ -312,4 +312,4 @@ MODULE_AUTHOR("Barry Song <21cnbao@gmail.com>");
 MODULE_DESCRIPTION("Analog Devices ADIS16203 Programmable 360 Degrees Inclinometer");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("spi:adis16203");
-MODULE_IMPORT_NS(IIO_ADISLIB);
+MODULE_IMPORT_NS("IIO_ADISLIB");

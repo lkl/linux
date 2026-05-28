@@ -268,7 +268,7 @@ static int acpi_pci_link_get_current(struct acpi_pci_link *link)
 
 	link->irq.active = irq;
 
-	acpi_handle_debug(handle, "Link at IRQ %d \n", link->irq.active);
+	acpi_handle_debug(handle, "Link at IRQ %d\n", link->irq.active);
 
       end:
 	return result;
@@ -714,8 +714,8 @@ static int acpi_pci_link_add(struct acpi_device *device,
 		return -ENOMEM;
 
 	link->device = device;
-	strcpy(acpi_device_name(device), ACPI_PCI_LINK_DEVICE_NAME);
-	strcpy(acpi_device_class(device), ACPI_PCI_LINK_CLASS);
+	strscpy(acpi_device_name(device), ACPI_PCI_LINK_DEVICE_NAME);
+	strscpy(acpi_device_class(device), ACPI_PCI_LINK_CLASS);
 	device->driver_data = link;
 
 	mutex_lock(&acpi_link_lock);

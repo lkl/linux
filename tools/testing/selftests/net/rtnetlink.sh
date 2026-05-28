@@ -21,14 +21,17 @@ ALL_TESTS="
 	kci_test_vrf
 	kci_test_encap
 	kci_test_macsec
-	kci_test_macsec_offload
+	kci_test_macsec_vlan
 	kci_test_ipsec
 	kci_test_ipsec_offload
 	kci_test_fdb_get
+	kci_test_fdb_del
 	kci_test_neigh_get
 	kci_test_bridge_parent_id
 	kci_test_address_proto
 	kci_test_enslave_bonding
+	kci_test_mngtmpaddr
+	kci_test_operstate
 "
 
 devdummy="test-dummy0"
@@ -44,6 +47,7 @@ check_err()
 	if [ $ret -eq 0 ]; then
 		ret=$1
 	fi
+	[ -n "$2" ] && echo "$2"
 }
 
 # same but inverted -- used when command must fail for test to pass
@@ -289,6 +293,17 @@ kci_test_route_get()
 	end_test "PASS: route get"
 }
 
+check_addr_not_exist()
+{
+	dev=$1
+	addr=$2
+	if ip addr show dev $dev | grep -q $addr; then
+		return 1
+	else
+		return 0
+	fi
+}
+
 kci_test_addrlft()
 {
 	for i in $(seq 10 100) ;do
@@ -296,9 +311,10 @@ kci_test_addrlft()
 		run_cmd ip addr add 10.23.11.$i/32 dev "$devdummy" preferred_lft $lft valid_lft $((lft+1))
 	done
 
-	sleep 5
-	run_cmd_grep_fail "10.23.11." ip addr show dev "$devdummy"
-	if [ $? -eq 0 ]; then
+	slowwait 5 check_addr_not_exist "$devdummy" "10.23.11."
+	if [ $? -eq 1 ]; then
+		# troubleshoot the reason for our failure
+		run_cmd ip addr show dev "$devdummy"
 		check_err 1
 		end_test "FAIL: preferred_lft addresses remaining"
 		return
@@ -309,6 +325,11 @@ kci_test_addrlft()
 
 kci_test_promote_secondaries()
 {
+	run_cmd ifconfig "$devdummy"
+	if [ $ret -ne 0 ]; then
+		end_test "SKIP: ifconfig not installed"
+		return $ksft_skip
+	fi
 	promote=$(sysctl -n net.ipv4.conf.$devdummy.promote_secondaries)
 
 	sysctl -q net.ipv4.conf.$devdummy.promote_secondaries=1
@@ -505,7 +526,7 @@ kci_test_encap_fou()
 	run_cmd_fail ip -netns "$testns" fou del port 9999
 	run_cmd ip -netns "$testns" fou del port 7777
 	if [ $ret -ne 0 ]; then
-		end_test "FAIL: fou"s
+		end_test "FAIL: fou"
 		return 1
 	fi
 
@@ -559,71 +580,39 @@ kci_test_macsec()
 	end_test "PASS: macsec"
 }
 
-kci_test_macsec_offload()
+# Test __dev_set_rx_mode call from dev_uc_add under addr_list_lock spinlock.
+# Make sure __dev_set_promiscuity is not grabbing (sleeping) netdev instance
+# lock.
+# https://lore.kernel.org/netdev/2aff4342b0f5b1539c02ffd8df4c7e58dd9746e7.camel@nvidia.com/
+kci_test_macsec_vlan()
 {
-	sysfsd=/sys/kernel/debug/netdevsim/netdevsim0/ports/0/
-	sysfsnet=/sys/bus/netdevsim/devices/netdevsim0/net/
-	probed=false
+	msname="test_macsec1"
+	vlanname="test_vlan1"
 	local ret=0
 	run_cmd_grep "^Usage: ip macsec" ip macsec help
 	if [ $? -ne 0 ]; then
 		end_test "SKIP: macsec: iproute2 too old"
 		return $ksft_skip
 	fi
-
-	if ! mount | grep -q debugfs; then
-		mount -t debugfs none /sys/kernel/debug/ &> /dev/null
-	fi
-
-	# setup netdevsim since dummydev doesn't have offload support
-	if [ ! -w /sys/bus/netdevsim/new_device ] ; then
-		run_cmd modprobe -q netdevsim
-
-		if [ $ret -ne 0 ]; then
-			end_test "SKIP: macsec_offload can't load netdevsim"
-			return $ksft_skip
-		fi
-		probed=true
-	fi
-
-	echo "0" > /sys/bus/netdevsim/new_device
-	while [ ! -d $sysfsnet ] ; do :; done
-	udevadm settle
-	dev=`ls $sysfsnet`
-
-	ip link set $dev up
-	if [ ! -d $sysfsd ] ; then
-		end_test "FAIL: macsec_offload can't create device $dev"
+	run_cmd ip link add link "$devdummy" "$msname" type macsec port 42 encrypt on
+	if [ $ret -ne 0 ];then
+		end_test "FAIL: can't add macsec interface, skipping test"
 		return 1
 	fi
-	run_cmd_grep 'macsec-hw-offload: on' ethtool -k $dev
-	if [ $? -eq 1 ] ; then
-		end_test "FAIL: macsec_offload netdevsim doesn't support MACsec offload"
+
+	run_cmd ip link set dev "$msname" up
+	ip link add link "$msname" name "$vlanname" type vlan id 1
+	ip link set dev "$vlanname" address 00:11:22:33:44:88
+	ip link set dev "$vlanname" up
+	run_cmd ip link del dev "$vlanname"
+	run_cmd ip link del dev "$msname"
+
+	if [ $ret -ne 0 ];then
+		end_test "FAIL: macsec_vlan"
 		return 1
 	fi
-	run_cmd ip link add link $dev kci_macsec1 type macsec port 4 offload mac
-	run_cmd ip link add link $dev kci_macsec2 type macsec address "aa:bb:cc:dd:ee:ff" port 5 offload mac
-	run_cmd ip link add link $dev kci_macsec3 type macsec sci abbacdde01020304 offload mac
-	run_cmd_fail ip link add link $dev kci_macsec4 type macsec port 8 offload mac
 
-	msname=kci_macsec1
-	run_cmd ip macsec add "$msname" tx sa 0 pn 1024 on key 01 12345678901234567890123456789012
-	run_cmd ip macsec add "$msname" rx port 1234 address "1c:ed:de:ad:be:ef"
-	run_cmd ip macsec add "$msname" rx port 1234 address "1c:ed:de:ad:be:ef" sa 0 pn 1 on \
-		key 00 0123456789abcdef0123456789abcdef
-	run_cmd_fail ip macsec add "$msname" rx port 1235 address "1c:ed:de:ad:be:ef"
-	# clean up any leftovers
-	for msdev in kci_macsec{1,2,3,4} ; do
-	    ip link del $msdev 2> /dev/null
-	done
-	echo 0 > /sys/bus/netdevsim/del_device
-	$probed && rmmod netdevsim
-
-	if [ $ret -ne 0 ]; then
-		end_test "FAIL: macsec_offload"
-		return 1
-	fi
-	end_test "PASS: macsec_offload"
+	end_test "PASS: macsec_vlan"
 }
 
 #-------------------------------------------------------------------
@@ -738,6 +727,11 @@ kci_test_ipsec_offload()
 	sysfsf=$sysfsd/ipsec
 	sysfsnet=/sys/bus/netdevsim/devices/netdevsim0/net/
 	probed=false
+	esp4_offload_probed_default=false
+
+	if lsmod | grep -q esp4_offload; then
+		esp4_offload_probed_default=true
+	fi
 
 	if ! mount | grep -q debugfs; then
 		mount -t debugfs none /sys/kernel/debug/ &> /dev/null
@@ -809,10 +803,10 @@ kci_test_ipsec_offload()
 	# does driver have correct offload info
 	run_cmd diff $sysfsf - << EOF
 SA count=2 tx=3
-sa[0] tx ipaddr=0x00000000 00000000 00000000 00000000
+sa[0] tx ipaddr=$dstip
 sa[0]    spi=0x00000009 proto=0x32 salt=0x61626364 crypt=1
 sa[0]    key=0x34333231 38373635 32313039 36353433
-sa[1] rx ipaddr=0x00000000 00000000 00000000 037ba8c0
+sa[1] rx ipaddr=$srcip
 sa[1]    spi=0x00000009 proto=0x32 salt=0x61626364 crypt=1
 sa[1]    key=0x34333231 38373635 32313039 36353433
 EOF
@@ -831,6 +825,7 @@ EOF
 	fi
 
 	# clean up any leftovers
+	! "$esp4_offload_probed_default" && lsmod | grep -q esp4_offload && rmmod esp4_offload
 	echo 0 > /sys/bus/netdevsim/del_device
 	$probed && rmmod netdevsim
 
@@ -1065,6 +1060,45 @@ kci_test_fdb_get()
 	end_test "PASS: bridge fdb get"
 }
 
+kci_test_fdb_del()
+{
+	local test_mac=de:ad:be:ef:13:37
+	local dummydev="dummy1"
+	local brdev="test-br0"
+	local ret=0
+
+	run_cmd_grep 'bridge fdb get' bridge fdb help
+	if [ $? -ne 0 ]; then
+		end_test "SKIP: fdb del tests: iproute2 too old"
+		return $ksft_skip
+	fi
+
+	setup_ns testns
+	if [ $? -ne 0 ]; then
+		end_test "SKIP fdb del tests: cannot add net namespace $testns"
+		return $ksft_skip
+	fi
+	IP="ip -netns $testns"
+	BRIDGE="bridge -netns $testns"
+	run_cmd $IP link add $dummydev type dummy
+	run_cmd $IP link add name $brdev type bridge vlan_filtering 1
+	run_cmd $IP link set dev $dummydev master $brdev
+	run_cmd $BRIDGE fdb add $test_mac dev $dummydev master static vlan 1
+	run_cmd $BRIDGE vlan del vid 1 dev $dummydev
+	run_cmd $BRIDGE fdb get $test_mac br $brdev vlan 1
+	run_cmd $BRIDGE fdb del $test_mac dev $dummydev master vlan 1
+	run_cmd_fail $BRIDGE fdb get $test_mac br $brdev vlan 1
+
+	ip netns del $testns &>/dev/null
+
+	if [ $ret -ne 0 ]; then
+		end_test "FAIL: bridge fdb del"
+		return 1
+	fi
+
+	end_test "PASS: bridge fdb del"
+}
+
 kci_test_neigh_get()
 {
 	dstmac=de:ad:be:ef:13:37
@@ -1174,6 +1208,12 @@ do_test_address_proto()
 	local ret=0
 	local err
 
+	run_cmd_grep 'proto' ip address help
+	if [ $? -ne 0 ];then
+		end_test "SKIP: addr proto ${what}: iproute2 too old"
+		return $ksft_skip
+	fi
+
 	ip address add dev "$devdummy" "$addr3"
 	check_err $?
 	proto=$(address_get_proto "$addr3")
@@ -1267,6 +1307,132 @@ kci_test_enslave_bonding()
 	ip netns del "$testns"
 }
 
+# Called to validate the addresses on $IFNAME:
+#
+# 1. Every `temporary` address must have a matching `mngtmpaddr`
+# 2. Every `mngtmpaddr` address must have some un`deprecated` `temporary`
+#
+# If the mngtmpaddr or tempaddr checking failed, return 0 and stop slowwait
+validate_mngtmpaddr()
+{
+	local dev=$1
+	local prefix=""
+	local addr_list=$(ip -j -n $testns addr show dev ${dev})
+	local temp_addrs=$(echo ${addr_list} | \
+		jq -r '.[].addr_info[] | select(.temporary == true) | .local')
+	local mng_prefixes=$(echo ${addr_list} | \
+		jq -r '.[].addr_info[] | select(.mngtmpaddr == true) | .local' | \
+		cut -d: -f1-4 | tr '\n' ' ')
+	local undep_prefixes=$(echo ${addr_list} | \
+		jq -r '.[].addr_info[] | select(.temporary == true and .deprecated != true) | .local' | \
+		cut -d: -f1-4 | tr '\n' ' ')
+
+	# 1. All temporary addresses (temp and dep) must have a matching mngtmpaddr
+	for address in ${temp_addrs}; do
+		prefix=$(echo ${address} | cut -d: -f1-4)
+		if [[ ! " ${mng_prefixes} " =~ " $prefix " ]]; then
+			check_err 1 "FAIL: Temporary $address with no matching mngtmpaddr!";
+			return 0
+		fi
+	done
+
+	# 2. All mngtmpaddr addresses must have a temporary address (not dep)
+	for prefix in ${mng_prefixes}; do
+		if [[ ! " ${undep_prefixes} " =~ " $prefix " ]]; then
+			check_err 1 "FAIL: No undeprecated temporary in $prefix!";
+			return 0
+		fi
+	done
+
+	return 1
+}
+
+kci_test_mngtmpaddr()
+{
+	local ret=0
+
+	setup_ns testns
+	if [ $? -ne 0 ]; then
+		end_test "SKIP mngtmpaddr tests: cannot add net namespace $testns"
+		return $ksft_skip
+	fi
+
+	# 1. Create a dummy Ethernet interface
+	run_cmd ip -n $testns link add ${devdummy} type dummy
+	run_cmd ip -n $testns link set ${devdummy} up
+	run_cmd ip netns exec $testns sysctl -w net.ipv6.conf.${devdummy}.use_tempaddr=1
+	run_cmd ip netns exec $testns sysctl -w net.ipv6.conf.${devdummy}.temp_prefered_lft=10
+	run_cmd ip netns exec $testns sysctl -w net.ipv6.conf.${devdummy}.temp_valid_lft=25
+	run_cmd ip netns exec $testns sysctl -w net.ipv6.conf.${devdummy}.max_desync_factor=1
+
+	# 2. Create several mngtmpaddr addresses on that interface.
+	# with temp_*_lft configured to be pretty short (10 and 35 seconds
+	# for prefer/valid respectively)
+	for i in $(seq 1 9); do
+		run_cmd ip -n $testns addr add 2001:db8:7e57:${i}::1/64 mngtmpaddr dev ${devdummy}
+	done
+
+	# 3. Confirm that a preferred temporary address exists for each mngtmpaddr
+	# address at all times, polling once per second for 30 seconds.
+	slowwait 30 validate_mngtmpaddr ${devdummy}
+
+	# 4. Delete each mngtmpaddr address, one at a time (alternating between
+	# deleting and merely un-mngtmpaddr-ing), and confirm that the other
+	# mngtmpaddr addresses still have preferred temporaries.
+	for i in $(seq 1 9); do
+		(( $i % 4 == 0 )) && mng_flag="mngtmpaddr" || mng_flag=""
+		if (( $i % 2 == 0 )); then
+			run_cmd ip -n $testns addr del 2001:db8:7e57:${i}::1/64 $mng_flag dev ${devdummy}
+		else
+			run_cmd ip -n $testns addr change 2001:db8:7e57:${i}::1/64 dev ${devdummy}
+		fi
+		# the temp addr should be deleted
+		validate_mngtmpaddr ${devdummy}
+	done
+
+	if [ $ret -ne 0 ]; then
+		end_test "FAIL: mngtmpaddr add/remove incorrect"
+	else
+		end_test "PASS: mngtmpaddr add/remove correctly"
+	fi
+
+	ip netns del "$testns"
+	return $ret
+}
+
+kci_test_operstate()
+{
+	local ret=0
+
+	# Check that it is possible to set operational state during device
+	# creation and that it is preserved when the administrative state of
+	# the device is toggled.
+	run_cmd ip link add name vx0 up state up type vxlan id 10010 dstport 4789
+	run_cmd_grep "state UP" ip link show dev vx0
+	run_cmd ip link set dev vx0 down
+	run_cmd_grep "state DOWN" ip link show dev vx0
+	run_cmd ip link set dev vx0 up
+	run_cmd_grep "state UP" ip link show dev vx0
+
+	run_cmd ip link del dev vx0
+
+	# Check that it is possible to set the operational state of the device
+	# after creation.
+	run_cmd ip link add name vx0 up type vxlan id 10010 dstport 4789
+	run_cmd_grep "state UNKNOWN" ip link show dev vx0
+	run_cmd ip link set dev vx0 state up
+	run_cmd_grep "state UP" ip link show dev vx0
+
+	run_cmd ip link del dev vx0
+
+	if [ "$ret" -ne 0 ]; then
+		end_test "FAIL: operstate"
+		return 1
+	fi
+
+	end_test "PASS: operstate"
+}
+
 kci_test_rtnl()
 {
 	local current_test
@@ -1299,6 +1465,8 @@ usage: ${0##*/} OPTS
         -p          Pause after every failing test before cleanup (for debugging)
 EOF
 }
+
+require_command jq
 
 #check for needed privileges
 if [ "$(id -u)" -ne 0 ];then

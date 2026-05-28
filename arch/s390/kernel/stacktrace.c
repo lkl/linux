@@ -9,6 +9,7 @@
 #include <linux/stacktrace.h>
 #include <linux/uaccess.h>
 #include <linux/compat.h>
+#include <asm/asm-offsets.h>
 #include <asm/stacktrace.h>
 #include <asm/unwind.h>
 #include <asm/kprobes.h>
@@ -151,7 +152,7 @@ void arch_stack_walk_user_common(stack_trace_consume_fn consume_entry, void *coo
 				break;
 		}
 		if (!store_ip(consume_entry, cookie, entry, perf, ip))
-			return;
+			break;
 		first = false;
 	}
 	pagefault_enable();

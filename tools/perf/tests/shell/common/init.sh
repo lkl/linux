@@ -11,8 +11,8 @@
 #
 
 
-. ../common/settings.sh
-. ../common/patterns.sh
+. "$(dirname $0)/../common/settings.sh"
+. "$(dirname $0)/../common/patterns.sh"
 
 THIS_TEST_NAME=`basename $0 .sh`
 
@@ -46,10 +46,13 @@ print_results()
 print_overall_results()
 {
 	RETVAL="$1"; shift
+	TASK_COMMENT="$*"
+	test -n "$TASK_COMMENT" && TASK_COMMENT=":: $TASK_COMMENT"
+
 	if [ $RETVAL -eq 0 ]; then
 		_echo "$MALLPASS## [ PASS ] ##$MEND $TEST_NAME :: $THIS_TEST_NAME SUMMARY"
 	else
-		_echo "$MALLFAIL## [ FAIL ] ##$MEND $TEST_NAME :: $THIS_TEST_NAME SUMMARY :: $RETVAL failures found"
+		_echo "$MALLFAIL## [ FAIL ] ##$MEND $TEST_NAME :: $THIS_TEST_NAME SUMMARY :: $RETVAL failures found $TASK_COMMENT"
 	fi
 	return $RETVAL
 }
@@ -85,7 +88,7 @@ consider_skipping()
 	# the runmode of a testcase needs to be at least the current suite's runmode
 	if [ $PERFTOOL_TESTSUITE_RUNMODE -lt $TESTCASE_RUNMODE ]; then
 		print_overall_skipped
-		exit 0
+		exit 2
 	fi
 }
 

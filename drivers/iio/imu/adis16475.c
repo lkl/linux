@@ -1930,7 +1930,6 @@ static int adis16475_config_irq_pin(struct adis16475 *st)
 	return 0;
 }
 
-
 static int adis16475_probe(struct spi_device *spi)
 {
 	struct iio_dev *indio_dev;
@@ -2058,7 +2057,7 @@ static const struct of_device_id adis16475_of_match[] = {
 		.data = &adis16475_chip_info[ADIS16577_2] },
 	{ .compatible = "adi,adis16577-3",
 		.data = &adis16475_chip_info[ADIS16577_3] },
-	{ },
+	{ }
 };
 MODULE_DEVICE_TABLE(of, adis16475_of_match);
 
@@ -2107,4 +2106,4 @@ module_spi_driver(adis16475_driver);
 MODULE_AUTHOR("Nuno Sa <nuno.sa@analog.com>");
 MODULE_DESCRIPTION("Analog Devices ADIS16475 IMU driver");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(IIO_ADISLIB);
+MODULE_IMPORT_NS("IIO_ADISLIB");

@@ -1081,14 +1081,14 @@ static int tsl2772_write_interrupt_config(struct iio_dev *indio_dev,
 					  const struct iio_chan_spec *chan,
 					  enum iio_event_type type,
 					  enum iio_event_direction dir,
-					  int val)
+					  bool val)
 {
 	struct tsl2772_chip *chip = iio_priv(indio_dev);
 
 	if (chan->type == IIO_INTENSITY)
-		chip->settings.als_interrupt_en = val ? true : false;
+		chip->settings.als_interrupt_en = val;
 	else
-		chip->settings.prox_interrupt_en = val ? true : false;
+		chip->settings.prox_interrupt_en = val;
 
 	return tsl2772_invoke_change(indio_dev);
 }
@@ -1899,7 +1899,7 @@ static const struct i2c_device_id tsl2772_idtable[] = {
 	{ "tsl2772", tsl2772 },
 	{ "tmd2772", tmd2772 },
 	{ "apds9930", apds9930 },
-	{}
+	{ }
 };
 
 MODULE_DEVICE_TABLE(i2c, tsl2772_idtable);
@@ -1916,7 +1916,7 @@ static const struct of_device_id tsl2772_of_match[] = {
 	{ .compatible = "amstaos,tsl2772" },
 	{ .compatible = "amstaos,tmd2772" },
 	{ .compatible = "avago,apds9930" },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(of, tsl2772_of_match);
 

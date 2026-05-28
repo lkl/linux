@@ -3,7 +3,7 @@
 # Makefile for arch/parisc/kernel
 #
 
-extra-y		:= vmlinux.lds
+always-$(KBUILD_BUILTIN)		:= vmlinux.lds
 
 obj-y		:= head.o cache.o pacache.o setup.o pdt.o traps.o time.o irq.o \
 		   syscall.o entry.o sys_parisc.o firmware.o \
@@ -38,6 +38,7 @@ obj-$(CONFIG_GENERIC_ARCH_TOPOLOGY)	+= topology.o
 obj-$(CONFIG_FUNCTION_TRACER)		+= ftrace.o
 obj-$(CONFIG_FUNCTION_GRAPH_TRACER)	+= ftrace.o
 obj-$(CONFIG_JUMP_LABEL)		+= jump_label.o
+obj-$(CONFIG_PERF_EVENTS)		+= perf_event.o perf_regs.o
 obj-$(CONFIG_KGDB)			+= kgdb.o
 obj-$(CONFIG_KPROBES)			+= kprobes.o
 obj-$(CONFIG_KEXEC_CORE)		+= kexec.o relocate_kernel.o

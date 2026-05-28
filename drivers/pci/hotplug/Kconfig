@@ -97,7 +97,7 @@ config HOTPLUG_PCI_CPCI_ZT5550
 	tristate "Ziatech ZT5550 CompactPCI Hotplug driver"
 	depends on HOTPLUG_PCI_CPCI && X86
 	help
-	  Say Y here if you have an Performance Technologies (formerly Intel,
+	  Say Y here if you have a Performance Technologies (formerly Intel,
 	  formerly just Ziatech) Ziatech ZT5550 CompactPCI system card.
 
 	  To compile this driver as a module, choose M here: the
@@ -115,6 +115,16 @@ config HOTPLUG_PCI_CPCI_GENERIC
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called cpcihp_generic.
+
+	  When in doubt, say N.
+
+config HOTPLUG_PCI_OCTEONEP
+	bool "Marvell OCTEON PCI Hotplug driver"
+	depends on HOTPLUG_PCI
+	help
+	  Say Y here if you have an OCTEON PCIe device with a hotplug
+	  controller. This driver enables the non-controller functions of the
+	  device to be registered as hotplug slots.
 
 	  When in doubt, say N.
 

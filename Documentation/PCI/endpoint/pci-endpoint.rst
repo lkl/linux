@@ -57,11 +57,10 @@ by the PCI controller driver.
    The PCI controller driver can then create a new EPC device by invoking
    devm_pci_epc_create()/pci_epc_create().
 
-* devm_pci_epc_destroy()/pci_epc_destroy()
+* pci_epc_destroy()
 
-   The PCI controller driver can destroy the EPC device created by either
-   devm_pci_epc_create() or pci_epc_create() using devm_pci_epc_destroy() or
-   pci_epc_destroy().
+   The PCI controller driver can destroy the EPC device created by
+   pci_epc_create() using pci_epc_destroy().
 
 * pci_epc_linkup()
 
@@ -117,6 +116,35 @@ by the PCI endpoint function driver.
    The PCI endpoint function driver should use pci_epc_mem_free_addr() to
    free the memory space allocated using pci_epc_mem_alloc_addr().
 
+* pci_epc_map_addr()
+
+  A PCI endpoint function driver should use pci_epc_map_addr() to map to a RC
+  PCI address the CPU address of local memory obtained with
+  pci_epc_mem_alloc_addr().
+
+* pci_epc_unmap_addr()
+
+  A PCI endpoint function driver should use pci_epc_unmap_addr() to unmap the
+  CPU address of local memory mapped to a RC address with pci_epc_map_addr().
+
+* pci_epc_mem_map()
+
+  A PCI endpoint controller may impose constraints on the RC PCI addresses that
+  can be mapped. The function pci_epc_mem_map() allows endpoint function
+  drivers to allocate and map controller memory while handling such
+  constraints. This function will determine the size of the memory that must be
+  allocated with pci_epc_mem_alloc_addr() for successfully mapping a RC PCI
+  address range. This function will also indicate the size of the PCI address
+  range that was actually mapped, which can be less than the requested size, as
+  well as the offset into the allocated memory to use for accessing the mapped
+  RC PCI address range.
+
+* pci_epc_mem_unmap()
+
+  A PCI endpoint function driver can use pci_epc_mem_unmap() to unmap and free
+  controller memory that was allocated and mapped using pci_epc_mem_map().
+
+
 Other EPC APIs
 ~~~~~~~~~~~~~~
 
@@ -169,8 +197,8 @@ by the PCI endpoint function driver.
 * pci_epf_register_driver()
 
    The PCI Endpoint Function driver should implement the following ops:
-	 * bind: ops to perform when a EPC device has been bound to EPF device
-	 * unbind: ops to perform when a binding has been lost between a EPC
+	 * bind: ops to perform when an EPC device has been bound to EPF device
+	 * unbind: ops to perform when a binding has been lost between an EPC
 	   device and EPF device
 	 * add_cfs: optional ops to create function specific configfs
 	   attributes
@@ -223,7 +251,7 @@ pci-ep-cfs.c can be used as reference for using these APIs.
 * pci_epf_bind()
 
    pci_epf_bind() should be invoked when the EPF device has been bound to
-   a EPC device.
+   an EPC device.
 
 * pci_epf_unbind()
 

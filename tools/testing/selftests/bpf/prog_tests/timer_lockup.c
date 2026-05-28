@@ -5,6 +5,7 @@
 #include <test_progs.h>
 #include <pthread.h>
 #include <network_helpers.h>
+#include <sys/sysinfo.h>
 
 #include "timer_lockup.skel.h"
 
@@ -52,7 +53,16 @@ void test_timer_lockup(void)
 	pthread_t thrds[2];
 	void *ret;
 
+	if (get_nprocs() < 2) {
+		test__skip();
+		return;
+	}
+
 	skel = timer_lockup__open_and_load();
+	if (!skel && errno == EOPNOTSUPP) {
+		test__skip();
+		return;
+	}
 	if (!ASSERT_OK_PTR(skel, "timer_lockup__open_and_load"))
 		return;
 

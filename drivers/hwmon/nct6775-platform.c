@@ -167,7 +167,8 @@ static inline int nct6775_asuswmi_write(u8 bank, u8 reg, u8 val)
 
 static inline int nct6775_asuswmi_read(u8 bank, u8 reg, u8 *val)
 {
-	u32 ret, tmp = 0;
+	u32 tmp = 0;
+	int ret;
 
 	ret = nct6775_asuswmi_evaluate_method(ASUSWMI_METHODID_RHWM, bank,
 					      reg, 0, &tmp);
@@ -1350,6 +1351,8 @@ static const char * const asus_msi_boards[] = {
 	"Pro H610M-CT D4",
 	"Pro H610T D4",
 	"Pro Q670M-C",
+	"Pro WS 600M-CL",
+	"Pro WS 665-ACE",
 	"Pro WS W680-ACE",
 	"Pro WS W680-ACE IPMI",
 	"Pro WS W790-ACE",
@@ -1620,7 +1623,7 @@ static void __exit sensors_nct6775_platform_exit(void)
 MODULE_AUTHOR("Guenter Roeck <linux@roeck-us.net>");
 MODULE_DESCRIPTION("Platform driver for NCT6775F and compatible chips");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(HWMON_NCT6775);
+MODULE_IMPORT_NS("HWMON_NCT6775");
 
 module_init(sensors_nct6775_platform_init);
 module_exit(sensors_nct6775_platform_exit);

@@ -164,6 +164,8 @@ struct cachestat_range;
 #include <linux/pkt_sched.h>
 #include <linux/io_uring.h>
 #include <linux/sched.h>
+#define __UAPI_DEF_XATTR 1
+#include <linux/xattr.h>
 
 struct user_msghdr {
 	void		__user *msg_name;	/* ptr to socket address structure */

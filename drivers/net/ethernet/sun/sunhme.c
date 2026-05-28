@@ -451,7 +451,7 @@ static void happy_meal_tcvr_write(struct happy_meal *hp,
 /* Auto negotiation.  The scheme is very simple.  We have a timer routine
  * that keeps watching the auto negotiation process as it progresses.
  * The DP83840 is first told to start doing it's thing, we set up the time
- * and place the timer state machine in it's initial state.
+ * and place the timer state machine in its initial state.
  *
  * Here the timer peeks at the DP83840 status registers at each click to see
  * if the auto negotiation has completed, we assume here that the DP83840 PHY
@@ -721,7 +721,7 @@ force_link:
 
 static void happy_meal_timer(struct timer_list *t)
 {
-	struct happy_meal *hp = from_timer(hp, t, happy_timer);
+	struct happy_meal *hp = timer_container_of(hp, t, happy_timer);
 	void __iomem *tregs = hp->tcvregs;
 	int restart_timer = 0;
 
@@ -1265,7 +1265,7 @@ static int happy_meal_init(struct happy_meal *hp)
 	u32 regtmp, rxcfg;
 
 	/* If auto-negotiation timer is running, kill it. */
-	del_timer(&hp->happy_timer);
+	timer_delete(&hp->happy_timer);
 
 	HMD("happy_flags[%08x]\n", hp->happy_flags);
 	if (!(hp->happy_flags & HFLAG_INIT)) {
@@ -1922,7 +1922,7 @@ static int happy_meal_close(struct net_device *dev)
 	happy_meal_clean_rings(hp);
 
 	/* If auto-negotiation timer is running, kill it. */
-	del_timer(&hp->happy_timer);
+	timer_delete(&hp->happy_timer);
 
 	spin_unlock_irq(&hp->happy_lock);
 
@@ -2184,7 +2184,7 @@ static int hme_set_link_ksettings(struct net_device *dev,
 
 	/* Ok, do it to it. */
 	spin_lock_irq(&hp->happy_lock);
-	del_timer(&hp->happy_timer);
+	timer_delete(&hp->happy_timer);
 	happy_meal_begin_auto_negotiation(hp, hp->tcvregs, cmd);
 	spin_unlock_irq(&hp->happy_lock);
 

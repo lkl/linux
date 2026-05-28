@@ -5,7 +5,7 @@
  * Copyright 2008 Johannes Berg <johannes@sipsolutions.net>
  * Copyright 2013-2014  Intel Mobile Communications GmbH
  * Copyright 2016	Intel Deutschland GmbH
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  */
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -272,11 +272,18 @@ cfg80211_gen_new_ie(const u8 *ie, size_t ielen,
 {
 	const struct element *non_inherit_elem, *parent, *sub;
 	u8 *pos = new_ie;
-	u8 id, ext_id;
+	const u8 *mbssid_index_ie;
+	u8 id, ext_id, bssid_index = 255;
 	unsigned int match_len;
 
 	non_inherit_elem = cfg80211_find_ext_elem(WLAN_EID_EXT_NON_INHERITANCE,
 						  subie, subie_len);
+
+	mbssid_index_ie = cfg80211_find_ie(WLAN_EID_MULTI_BSSID_IDX, subie,
+					   subie_len);
+	if (mbssid_index_ie && mbssid_index_ie[1] > 0 &&
+	    mbssid_index_ie[2] > 0 && mbssid_index_ie[2] <= 46)
+		bssid_index = mbssid_index_ie[2];
 
 	/* We copy the elements one by one from the parent to the generated
 	 * elements.
@@ -313,6 +320,24 @@ cfg80211_gen_new_ie(const u8 *ie, size_t ielen,
 							   new_ie_len))
 				return 0;
 
+			continue;
+		}
+
+		/* For ML probe response, match the MLE in the frame body with
+		 * MLD id being 'bssid_index'
+		 */
+		if (parent->id == WLAN_EID_EXTENSION && parent->datalen > 1 &&
+		    parent->data[0] == WLAN_EID_EXT_EHT_MULTI_LINK &&
+		    bssid_index == ieee80211_mle_get_mld_id(parent->data + 1)) {
+			if (!cfg80211_copy_elem_with_frags(parent,
+							   ie, ielen,
+							   &pos, new_ie,
+							   new_ie_len))
+				return 0;
+
+			/* Continue here to prevent processing the MLE in
+			 * sub-element, which AP MLD should not carry
+			 */
 			continue;
 		}
 
@@ -704,7 +729,7 @@ cfg80211_parse_colocated_ap_iter(void *_data, u8 type,
 					   bss_params)))
 		return RNR_ITER_CONTINUE;
 
-	entry = kzalloc(sizeof(*entry) + IEEE80211_MAX_SSID_LEN, GFP_ATOMIC);
+	entry = kzalloc(sizeof(*entry), GFP_ATOMIC);
 	if (!entry)
 		return RNR_ITER_ERROR;
 
@@ -713,6 +738,17 @@ cfg80211_parse_colocated_ap_iter(void *_data, u8 type,
 
 	if (!cfg80211_parse_ap_info(entry, tbtt_info, tbtt_info_len,
 				    data->ssid_elem, data->s_ssid_tmp)) {
+		struct cfg80211_colocated_ap *tmp;
+
+		/* Don't add duplicate BSSIDs on the same channel. */
+		list_for_each_entry(tmp, &data->ap_list, list) {
+			if (ether_addr_equal(tmp->bssid, entry->bssid) &&
+			    tmp->center_freq == entry->center_freq) {
+				kfree(entry);
+				return RNR_ITER_CONTINUE;
+			}
+		}
+
 		data->n_coloc++;
 		list_add_tail(&entry->list, &data->ap_list);
 	} else {
@@ -746,9 +782,9 @@ cfg80211_parse_colocated_ap(const struct cfg80211_bss_ies *ies,
 }
 EXPORT_SYMBOL_IF_CFG80211_KUNIT(cfg80211_parse_colocated_ap);
 
-static  void cfg80211_scan_req_add_chan(struct cfg80211_scan_request *request,
-					struct ieee80211_channel *chan,
-					bool add_to_6ghz)
+static void cfg80211_scan_req_add_chan(struct cfg80211_scan_request *request,
+				       struct ieee80211_channel *chan,
+				       bool add_to_6ghz)
 {
 	int i;
 	u32 n_channels = request->n_channels;
@@ -763,12 +799,11 @@ static  void cfg80211_scan_req_add_chan(struct cfg80211_scan_request *request,
 		}
 	}
 
+	request->n_channels++;
 	request->channels[n_channels] = chan;
 	if (add_to_6ghz)
 		request->scan_6ghz_params[request->n_6ghz_params].channel_idx =
 			n_channels;
-
-	request->n_channels++;
 }
 
 static bool cfg80211_find_ssid_match(struct cfg80211_colocated_ap *ap,
@@ -803,30 +838,32 @@ static bool cfg80211_find_ssid_match(struct cfg80211_colocated_ap *ap,
 	return false;
 }
 
-static int cfg80211_scan_6ghz(struct cfg80211_registered_device *rdev)
+static int cfg80211_scan_6ghz(struct cfg80211_registered_device *rdev,
+			      bool first_part)
 {
 	u8 i;
 	struct cfg80211_colocated_ap *ap;
 	int n_channels, count = 0, err;
-	struct cfg80211_scan_request *request, *rdev_req = rdev->scan_req;
+	struct cfg80211_scan_request_int *request, *rdev_req = rdev->scan_req;
 	LIST_HEAD(coloc_ap_list);
 	bool need_scan_psc = true;
 	const struct ieee80211_sband_iftype_data *iftd;
 	size_t size, offs_ssids, offs_6ghz_params, offs_ies;
 
-	rdev_req->scan_6ghz = true;
+	rdev_req->req.scan_6ghz = true;
+	rdev_req->req.first_part = first_part;
 
 	if (!rdev->wiphy.bands[NL80211_BAND_6GHZ])
 		return -EOPNOTSUPP;
 
 	iftd = ieee80211_get_sband_iftype_data(rdev->wiphy.bands[NL80211_BAND_6GHZ],
-					       rdev_req->wdev->iftype);
+					       rdev_req->req.wdev->iftype);
 	if (!iftd || !iftd->he_cap.has_he)
 		return -EOPNOTSUPP;
 
 	n_channels = rdev->wiphy.bands[NL80211_BAND_6GHZ]->n_channels;
 
-	if (rdev_req->flags & NL80211_SCAN_FLAG_COLOCATED_6GHZ) {
+	if (rdev_req->req.flags & NL80211_SCAN_FLAG_COLOCATED_6GHZ) {
 		struct cfg80211_internal_bss *intbss;
 
 		spin_lock_bh(&rdev->bss_lock);
@@ -848,8 +885,8 @@ static int cfg80211_scan_6ghz(struct cfg80211_registered_device *rdev)
 			 * This is relevant for ML probe requests when the lower
 			 * band APs have not been discovered.
 			 */
-			if (is_broadcast_ether_addr(rdev_req->bssid) ||
-			    !ether_addr_equal(rdev_req->bssid, res->bssid) ||
+			if (is_broadcast_ether_addr(rdev_req->req.bssid) ||
+			    !ether_addr_equal(rdev_req->req.bssid, res->bssid) ||
 			    res->channel->band != NL80211_BAND_6GHZ)
 				continue;
 
@@ -858,9 +895,7 @@ static int cfg80211_scan_6ghz(struct cfg80211_registered_device *rdev)
 			if (ret)
 				continue;
 
-			entry = kzalloc(sizeof(*entry) + IEEE80211_MAX_SSID_LEN,
-					GFP_ATOMIC);
-
+			entry = kzalloc(sizeof(*entry), GFP_ATOMIC);
 			if (!entry)
 				continue;
 
@@ -878,13 +913,13 @@ static int cfg80211_scan_6ghz(struct cfg80211_registered_device *rdev)
 		spin_unlock_bh(&rdev->bss_lock);
 	}
 
-	size = struct_size(request, channels, n_channels);
+	size = struct_size(request, req.channels, n_channels);
 	offs_ssids = size;
-	size += sizeof(*request->ssids) * rdev_req->n_ssids;
+	size += sizeof(*request->req.ssids) * rdev_req->req.n_ssids;
 	offs_6ghz_params = size;
-	size += sizeof(*request->scan_6ghz_params) * count;
+	size += sizeof(*request->req.scan_6ghz_params) * count;
 	offs_ies = size;
-	size += rdev_req->ie_len;
+	size += rdev_req->req.ie_len;
 
 	request = kzalloc(size, GFP_KERNEL);
 	if (!request) {
@@ -893,26 +928,26 @@ static int cfg80211_scan_6ghz(struct cfg80211_registered_device *rdev)
 	}
 
 	*request = *rdev_req;
-	request->n_channels = 0;
-	request->n_6ghz_params = 0;
-	if (rdev_req->n_ssids) {
+	request->req.n_channels = 0;
+	request->req.n_6ghz_params = 0;
+	if (rdev_req->req.n_ssids) {
 		/*
 		 * Add the ssids from the parent scan request to the new
 		 * scan request, so the driver would be able to use them
 		 * in its probe requests to discover hidden APs on PSC
 		 * channels.
 		 */
-		request->ssids = (void *)request + offs_ssids;
-		memcpy(request->ssids, rdev_req->ssids,
-		       sizeof(*request->ssids) * request->n_ssids);
+		request->req.ssids = (void *)request + offs_ssids;
+		memcpy(request->req.ssids, rdev_req->req.ssids,
+		       sizeof(*request->req.ssids) * request->req.n_ssids);
 	}
-	request->scan_6ghz_params = (void *)request + offs_6ghz_params;
+	request->req.scan_6ghz_params = (void *)request + offs_6ghz_params;
 
-	if (rdev_req->ie_len) {
+	if (rdev_req->req.ie_len) {
 		void *ie = (void *)request + offs_ies;
 
-		memcpy(ie, rdev_req->ie, rdev_req->ie_len);
-		request->ie = ie;
+		memcpy(ie, rdev_req->req.ie, rdev_req->req.ie_len);
+		request->req.ie = ie;
 	}
 
 	/*
@@ -920,10 +955,12 @@ static int cfg80211_scan_6ghz(struct cfg80211_registered_device *rdev)
 	 * and at least one of the reported co-located APs with same SSID
 	 * indicating that all APs in the same ESS are co-located
 	 */
-	if (count && request->n_ssids == 1 && request->ssids[0].ssid_len) {
+	if (count &&
+	    request->req.n_ssids == 1 &&
+	    request->req.ssids[0].ssid_len) {
 		list_for_each_entry(ap, &coloc_ap_list, list) {
 			if (ap->colocated_ess &&
-			    cfg80211_find_ssid_match(ap, request)) {
+			    cfg80211_find_ssid_match(ap, &request->req)) {
 				need_scan_psc = false;
 				break;
 			}
@@ -935,50 +972,52 @@ static int cfg80211_scan_6ghz(struct cfg80211_registered_device *rdev)
 	 * regardless of the collocated APs (PSC channels or all channels
 	 * in case that NL80211_SCAN_FLAG_COLOCATED_6GHZ is not set)
 	 */
-	for (i = 0; i < rdev_req->n_channels; i++) {
-		if (rdev_req->channels[i]->band == NL80211_BAND_6GHZ &&
+	for (i = 0; i < rdev_req->req.n_channels; i++) {
+		if (rdev_req->req.channels[i]->band == NL80211_BAND_6GHZ &&
 		    ((need_scan_psc &&
-		      cfg80211_channel_is_psc(rdev_req->channels[i])) ||
-		     !(rdev_req->flags & NL80211_SCAN_FLAG_COLOCATED_6GHZ))) {
-			cfg80211_scan_req_add_chan(request,
-						   rdev_req->channels[i],
+		      cfg80211_channel_is_psc(rdev_req->req.channels[i])) ||
+		     !(rdev_req->req.flags & NL80211_SCAN_FLAG_COLOCATED_6GHZ))) {
+			cfg80211_scan_req_add_chan(&request->req,
+						   rdev_req->req.channels[i],
 						   false);
 		}
 	}
 
-	if (!(rdev_req->flags & NL80211_SCAN_FLAG_COLOCATED_6GHZ))
+	if (!(rdev_req->req.flags & NL80211_SCAN_FLAG_COLOCATED_6GHZ))
 		goto skip;
 
 	list_for_each_entry(ap, &coloc_ap_list, list) {
 		bool found = false;
 		struct cfg80211_scan_6ghz_params *scan_6ghz_params =
-			&request->scan_6ghz_params[request->n_6ghz_params];
+			&request->req.scan_6ghz_params[request->req.n_6ghz_params];
 		struct ieee80211_channel *chan =
 			ieee80211_get_channel(&rdev->wiphy, ap->center_freq);
 
-		if (!chan || chan->flags & IEEE80211_CHAN_DISABLED)
+		if (!chan || chan->flags & IEEE80211_CHAN_DISABLED ||
+		    !cfg80211_wdev_channel_allowed(rdev_req->req.wdev, chan))
 			continue;
 
-		for (i = 0; i < rdev_req->n_channels; i++) {
-			if (rdev_req->channels[i] == chan)
+		for (i = 0; i < rdev_req->req.n_channels; i++) {
+			if (rdev_req->req.channels[i] == chan)
 				found = true;
 		}
 
 		if (!found)
 			continue;
 
-		if (request->n_ssids > 0 &&
-		    !cfg80211_find_ssid_match(ap, request))
+		if (request->req.n_ssids > 0 &&
+		    !cfg80211_find_ssid_match(ap, &request->req))
 			continue;
 
-		if (!is_broadcast_ether_addr(request->bssid) &&
-		    !ether_addr_equal(request->bssid, ap->bssid))
+		if (!is_broadcast_ether_addr(request->req.bssid) &&
+		    !ether_addr_equal(request->req.bssid, ap->bssid))
 			continue;
 
-		if (!request->n_ssids && ap->multi_bss && !ap->transmitted_bssid)
+		if (!request->req.n_ssids && ap->multi_bss &&
+		    !ap->transmitted_bssid)
 			continue;
 
-		cfg80211_scan_req_add_chan(request, chan, true);
+		cfg80211_scan_req_add_chan(&request->req, chan, true);
 		memcpy(scan_6ghz_params->bssid, ap->bssid, ETH_ALEN);
 		scan_6ghz_params->short_ssid = ap->short_ssid;
 		scan_6ghz_params->short_ssid_valid = ap->short_ssid_valid;
@@ -994,14 +1033,14 @@ static int cfg80211_scan_6ghz(struct cfg80211_registered_device *rdev)
 		if (cfg80211_channel_is_psc(chan) && !need_scan_psc)
 			scan_6ghz_params->psc_no_listen = true;
 
-		request->n_6ghz_params++;
+		request->req.n_6ghz_params++;
 	}
 
 skip:
 	cfg80211_free_coloc_ap_list(&coloc_ap_list);
 
-	if (request->n_channels) {
-		struct cfg80211_scan_request *old = rdev->int_scan_req;
+	if (request->req.n_channels) {
+		struct cfg80211_scan_request_int *old = rdev->int_scan_req;
 
 		rdev->int_scan_req = request;
 
@@ -1009,7 +1048,7 @@ skip:
 		 * If this scan follows a previous scan, save the scan start
 		 * info from the first part of the scan
 		 */
-		if (old)
+		if (!first_part && !WARN_ON(!old))
 			rdev->int_scan_req->info = old->info;
 
 		err = rdev_scan(rdev, request);
@@ -1029,35 +1068,39 @@ skip:
 
 int cfg80211_scan(struct cfg80211_registered_device *rdev)
 {
-	struct cfg80211_scan_request *request;
-	struct cfg80211_scan_request *rdev_req = rdev->scan_req;
+	struct cfg80211_scan_request_int *request;
+	struct cfg80211_scan_request_int *rdev_req = rdev->scan_req;
 	u32 n_channels = 0, idx, i;
 
-	if (!(rdev->wiphy.flags & WIPHY_FLAG_SPLIT_SCAN_6GHZ))
+	if (!(rdev->wiphy.flags & WIPHY_FLAG_SPLIT_SCAN_6GHZ)) {
+		rdev_req->req.first_part = true;
 		return rdev_scan(rdev, rdev_req);
+	}
 
-	for (i = 0; i < rdev_req->n_channels; i++) {
-		if (rdev_req->channels[i]->band != NL80211_BAND_6GHZ)
+	for (i = 0; i < rdev_req->req.n_channels; i++) {
+		if (rdev_req->req.channels[i]->band != NL80211_BAND_6GHZ)
 			n_channels++;
 	}
 
 	if (!n_channels)
-		return cfg80211_scan_6ghz(rdev);
+		return cfg80211_scan_6ghz(rdev, true);
 
-	request = kzalloc(struct_size(request, channels, n_channels),
+	request = kzalloc(struct_size(request, req.channels, n_channels),
 			  GFP_KERNEL);
 	if (!request)
 		return -ENOMEM;
 
 	*request = *rdev_req;
-	request->n_channels = n_channels;
+	request->req.n_channels = n_channels;
 
-	for (i = idx = 0; i < rdev_req->n_channels; i++) {
-		if (rdev_req->channels[i]->band != NL80211_BAND_6GHZ)
-			request->channels[idx++] = rdev_req->channels[i];
+	for (i = idx = 0; i < rdev_req->req.n_channels; i++) {
+		if (rdev_req->req.channels[i]->band != NL80211_BAND_6GHZ)
+			request->req.channels[idx++] =
+				rdev_req->req.channels[i];
 	}
 
-	rdev_req->scan_6ghz = false;
+	rdev_req->req.scan_6ghz = false;
+	rdev_req->req.first_part = true;
 	rdev->int_scan_req = request;
 	return rdev_scan(rdev, request);
 }
@@ -1065,7 +1108,7 @@ int cfg80211_scan(struct cfg80211_registered_device *rdev)
 void ___cfg80211_scan_done(struct cfg80211_registered_device *rdev,
 			   bool send_message)
 {
-	struct cfg80211_scan_request *request, *rdev_req;
+	struct cfg80211_scan_request_int *request, *rdev_req;
 	struct wireless_dev *wdev;
 	struct sk_buff *msg;
 #ifdef CONFIG_CFG80211_WEXT
@@ -1084,13 +1127,13 @@ void ___cfg80211_scan_done(struct cfg80211_registered_device *rdev,
 	if (!rdev_req)
 		return;
 
-	wdev = rdev_req->wdev;
+	wdev = rdev_req->req.wdev;
 	request = rdev->int_scan_req ? rdev->int_scan_req : rdev_req;
 
 	if (wdev_running(wdev) &&
 	    (rdev->wiphy.flags & WIPHY_FLAG_SPLIT_SCAN_6GHZ) &&
-	    !rdev_req->scan_6ghz && !request->info.aborted &&
-	    !cfg80211_scan_6ghz(rdev))
+	    !rdev_req->req.scan_6ghz && !request->info.aborted &&
+	    !cfg80211_scan_6ghz(rdev, false))
 		return;
 
 	/*
@@ -1102,10 +1145,10 @@ void ___cfg80211_scan_done(struct cfg80211_registered_device *rdev,
 		cfg80211_sme_scan_done(wdev->netdev);
 
 	if (!request->info.aborted &&
-	    request->flags & NL80211_SCAN_FLAG_FLUSH) {
+	    request->req.flags & NL80211_SCAN_FLAG_FLUSH) {
 		/* flush entries from previous scans */
 		spin_lock_bh(&rdev->bss_lock);
-		__cfg80211_bss_expire(rdev, request->scan_start);
+		__cfg80211_bss_expire(rdev, request->req.scan_start);
 		spin_unlock_bh(&rdev->bss_lock);
 	}
 
@@ -1141,13 +1184,16 @@ void __cfg80211_scan_done(struct wiphy *wiphy, struct wiphy_work *wk)
 void cfg80211_scan_done(struct cfg80211_scan_request *request,
 			struct cfg80211_scan_info *info)
 {
-	struct cfg80211_scan_info old_info = request->info;
+	struct cfg80211_scan_request_int *intreq =
+		container_of(request, struct cfg80211_scan_request_int, req);
+	struct cfg80211_registered_device *rdev = wiphy_to_rdev(request->wiphy);
+	struct cfg80211_scan_info old_info = intreq->info;
 
-	trace_cfg80211_scan_done(request, info);
-	WARN_ON(request != wiphy_to_rdev(request->wiphy)->scan_req &&
-		request != wiphy_to_rdev(request->wiphy)->int_scan_req);
+	trace_cfg80211_scan_done(intreq, info);
+	WARN_ON(intreq != rdev->scan_req &&
+		intreq != rdev->int_scan_req);
 
-	request->info = *info;
+	intreq->info = *info;
 
 	/*
 	 * In case the scan is split, the scan_start_tsf and tsf_bssid should
@@ -1155,14 +1201,13 @@ void cfg80211_scan_done(struct cfg80211_scan_request *request,
 	 * be non zero.
 	 */
 	if (request->scan_6ghz && old_info.scan_start_tsf) {
-		request->info.scan_start_tsf = old_info.scan_start_tsf;
-		memcpy(request->info.tsf_bssid, old_info.tsf_bssid,
-		       sizeof(request->info.tsf_bssid));
+		intreq->info.scan_start_tsf = old_info.scan_start_tsf;
+		memcpy(intreq->info.tsf_bssid, old_info.tsf_bssid,
+		       sizeof(intreq->info.tsf_bssid));
 	}
 
-	request->notified = true;
-	wiphy_work_queue(request->wiphy,
-			 &wiphy_to_rdev(request->wiphy)->scan_done_wk);
+	intreq->notified = true;
+	wiphy_work_queue(request->wiphy, &rdev->scan_done_wk);
 }
 EXPORT_SYMBOL(cfg80211_scan_done);
 
@@ -1237,7 +1282,8 @@ void cfg80211_sched_scan_results_wk(struct work_struct *work)
 	rdev = container_of(work, struct cfg80211_registered_device,
 			   sched_scan_res_wk);
 
-	wiphy_lock(&rdev->wiphy);
+	guard(wiphy)(&rdev->wiphy);
+
 	list_for_each_entry_safe(req, tmp, &rdev->sched_scan_req_list, list) {
 		if (req->report_results) {
 			req->report_results = false;
@@ -1252,7 +1298,6 @@ void cfg80211_sched_scan_results_wk(struct work_struct *work)
 						NL80211_CMD_SCHED_SCAN_RESULTS);
 		}
 	}
-	wiphy_unlock(&rdev->wiphy);
 }
 
 void cfg80211_sched_scan_results(struct wiphy *wiphy, u64 reqid)
@@ -1287,9 +1332,9 @@ EXPORT_SYMBOL(cfg80211_sched_scan_stopped_locked);
 
 void cfg80211_sched_scan_stopped(struct wiphy *wiphy, u64 reqid)
 {
-	wiphy_lock(wiphy);
+	guard(wiphy)(wiphy);
+
 	cfg80211_sched_scan_stopped_locked(wiphy, reqid);
-	wiphy_unlock(wiphy);
 }
 EXPORT_SYMBOL(cfg80211_sched_scan_stopped);
 
@@ -1331,7 +1376,7 @@ void cfg80211_bss_age(struct cfg80211_registered_device *rdev,
                       unsigned long age_secs)
 {
 	struct cfg80211_internal_bss *bss;
-	unsigned long age_jiffies = msecs_to_jiffies(age_secs * MSEC_PER_SEC);
+	unsigned long age_jiffies = secs_to_jiffies(age_secs);
 
 	spin_lock_bh(&rdev->bss_lock);
 	list_for_each_entry(bss, &rdev->bss_list, list)
@@ -1771,6 +1816,9 @@ static void cfg80211_update_hidden_bsses(struct cfg80211_internal_bss *known,
 		WARN_ON(ies != old_ies);
 
 		rcu_assign_pointer(bss->pub.beacon_ies, new_ies);
+
+		bss->ts = known->ts;
+		bss->pub.ts_boottime = known->pub.ts_boottime;
 	}
 }
 
@@ -1837,6 +1885,10 @@ cfg80211_update_known_bss(struct cfg80211_registered_device *rdev,
 {
 	lockdep_assert_held(&rdev->bss_lock);
 
+	/* Update time stamps */
+	known->ts = new->ts;
+	known->pub.ts_boottime = new->pub.ts_boottime;
+
 	/* Update IEs */
 	if (rcu_access_pointer(new->pub.proberesp_ies)) {
 		const struct cfg80211_bss_ies *old;
@@ -1871,7 +1923,8 @@ cfg80211_update_known_bss(struct cfg80211_registered_device *rdev,
 			 */
 
 			f = rcu_access_pointer(new->pub.beacon_ies);
-			kfree_rcu((struct cfg80211_bss_ies *)f, rcu_head);
+			if (!new->pub.hidden_beacon_bss)
+				kfree_rcu((struct cfg80211_bss_ies *)f, rcu_head);
 			return false;
 		}
 
@@ -1899,8 +1952,6 @@ cfg80211_update_known_bss(struct cfg80211_registered_device *rdev,
 	if (signal_valid)
 		known->pub.signal = new->pub.signal;
 	known->pub.capability = new->pub.capability;
-	known->ts = new->ts;
-	known->ts_boottime = new->ts_boottime;
 	known->parent_tsf = new->parent_tsf;
 	known->pub.chains = new->pub.chains;
 	memcpy(known->pub.chain_signal, new->pub.chain_signal,
@@ -2186,6 +2237,7 @@ cfg80211_get_6ghz_power_type(const u8 *elems, size_t elems_len)
 		return IEEE80211_REG_LPI_AP;
 	case IEEE80211_6GHZ_CTRL_REG_SP_AP:
 	case IEEE80211_6GHZ_CTRL_REG_INDOOR_SP_AP:
+	case IEEE80211_6GHZ_CTRL_REG_INDOOR_SP_AP_OLD:
 		return IEEE80211_REG_SP_AP;
 	case IEEE80211_6GHZ_CTRL_REG_VLP_AP:
 		return IEEE80211_REG_VLP_AP;
@@ -2257,7 +2309,7 @@ cfg80211_inform_single_bss_data(struct wiphy *wiphy,
 		tmp.pub.signal = 0;
 	tmp.pub.beacon_interval = data->beacon_interval;
 	tmp.pub.capability = data->capability;
-	tmp.ts_boottime = drv_data->boottime_ns;
+	tmp.pub.ts_boottime = drv_data->boottime_ns;
 	tmp.parent_tsf = drv_data->parent_tsf;
 	ether_addr_copy(tmp.parent_bssid, drv_data->parent_bssid);
 	tmp.pub.chains = drv_data->chains;
@@ -2647,7 +2699,7 @@ cfg80211_defrag_mle(const struct element *mle, const u8 *ie, size_t ielen,
 	/* Required length for first defragmentation */
 	buf_len = mle->datalen - 1;
 	for_each_element(elem, mle->data + mle->datalen,
-			 ielen - sizeof(*mle) + mle->datalen) {
+			 ie + ielen - mle->data - mle->datalen) {
 		if (elem->id != WLAN_EID_FRAGMENT)
 			break;
 
@@ -3216,6 +3268,7 @@ cfg80211_inform_bss_frame_data(struct wiphy *wiphy,
 	const u8 *ie;
 	size_t ielen;
 	u64 tsf;
+	size_t s1g_optional_len;
 
 	if (WARN_ON(!mgmt))
 		return NULL;
@@ -3230,12 +3283,11 @@ cfg80211_inform_bss_frame_data(struct wiphy *wiphy,
 
 	if (ieee80211_is_s1g_beacon(mgmt->frame_control)) {
 		ext = (void *) mgmt;
-		if (ieee80211_is_s1g_short_beacon(mgmt->frame_control))
-			min_hdr_len = offsetof(struct ieee80211_ext,
-					       u.s1g_short_beacon.variable);
-		else
-			min_hdr_len = offsetof(struct ieee80211_ext,
-					       u.s1g_beacon.variable);
+		s1g_optional_len =
+			ieee80211_s1g_optional_len(ext->frame_control);
+		min_hdr_len =
+			offsetof(struct ieee80211_ext, u.s1g_beacon.variable) +
+			s1g_optional_len;
 	} else {
 		/* same for beacons */
 		min_hdr_len = offsetof(struct ieee80211_mgmt,
@@ -3251,11 +3303,7 @@ cfg80211_inform_bss_frame_data(struct wiphy *wiphy,
 		const struct ieee80211_s1g_bcn_compat_ie *compat;
 		const struct element *elem;
 
-		if (ieee80211_is_s1g_short_beacon(mgmt->frame_control))
-			ie = ext->u.s1g_short_beacon.variable;
-		else
-			ie = ext->u.s1g_beacon.variable;
-
+		ie = ext->u.s1g_beacon.variable + s1g_optional_len;
 		elem = cfg80211_find_elem(WLAN_EID_S1G_BCN_COMPAT, ie, ielen);
 		if (!elem)
 			return NULL;
@@ -3466,7 +3514,7 @@ int cfg80211_wext_siwscan(struct net_device *dev,
 	struct cfg80211_registered_device *rdev;
 	struct wiphy *wiphy;
 	struct iw_scan_req *wreq = NULL;
-	struct cfg80211_scan_request *creq;
+	struct cfg80211_scan_request_int *creq;
 	int i, err, n_channels = 0;
 	enum nl80211_band band;
 
@@ -3496,19 +3544,20 @@ int cfg80211_wext_siwscan(struct net_device *dev,
 		n_channels = ieee80211_get_num_supported_channels(wiphy);
 	}
 
-	creq = kzalloc(struct_size(creq, channels, n_channels) +
+	creq = kzalloc(struct_size(creq, req.channels, n_channels) +
 		       sizeof(struct cfg80211_ssid),
 		       GFP_ATOMIC);
 	if (!creq)
 		return -ENOMEM;
 
-	creq->wiphy = wiphy;
-	creq->wdev = dev->ieee80211_ptr;
+	creq->req.wiphy = wiphy;
+	creq->req.wdev = dev->ieee80211_ptr;
 	/* SSIDs come after channels */
-	creq->ssids = (void *)creq + struct_size(creq, channels, n_channels);
-	creq->n_channels = n_channels;
-	creq->n_ssids = 1;
-	creq->scan_start = jiffies;
+	creq->req.ssids = (void *)creq +
+			  struct_size(creq, req.channels, n_channels);
+	creq->req.n_channels = n_channels;
+	creq->req.n_ssids = 1;
+	creq->req.scan_start = jiffies;
 
 	/* translate "Scan on frequencies" request */
 	i = 0;
@@ -3519,9 +3568,12 @@ int cfg80211_wext_siwscan(struct net_device *dev,
 			continue;
 
 		for (j = 0; j < wiphy->bands[band]->n_channels; j++) {
+			struct ieee80211_channel *chan;
+
 			/* ignore disabled channels */
-			if (wiphy->bands[band]->channels[j].flags &
-						IEEE80211_CHAN_DISABLED)
+			chan = &wiphy->bands[band]->channels[j];
+			if (chan->flags & IEEE80211_CHAN_DISABLED ||
+			    !cfg80211_wdev_channel_allowed(creq->req.wdev, chan))
 				continue;
 
 			/* If we have a wireless request structure and the
@@ -3544,7 +3596,8 @@ int cfg80211_wext_siwscan(struct net_device *dev,
 			}
 
 		wext_freq_found:
-			creq->channels[i] = &wiphy->bands[band]->channels[j];
+			creq->req.channels[i] =
+				&wiphy->bands[band]->channels[j];
 			i++;
 		wext_freq_not_found: ;
 		}
@@ -3555,50 +3608,49 @@ int cfg80211_wext_siwscan(struct net_device *dev,
 		goto out;
 	}
 
-	/* Set real number of channels specified in creq->channels[] */
-	creq->n_channels = i;
+	/* Set real number of channels specified in creq->req.channels[] */
+	creq->req.n_channels = i;
 
 	/* translate "Scan for SSID" request */
 	if (wreq) {
 		if (wrqu->data.flags & IW_SCAN_THIS_ESSID) {
-			if (wreq->essid_len > IEEE80211_MAX_SSID_LEN) {
-				err = -EINVAL;
-				goto out;
-			}
-			memcpy(creq->ssids[0].ssid, wreq->essid, wreq->essid_len);
-			creq->ssids[0].ssid_len = wreq->essid_len;
+			if (wreq->essid_len > IEEE80211_MAX_SSID_LEN)
+				return -EINVAL;
+			memcpy(creq->req.ssids[0].ssid, wreq->essid,
+			       wreq->essid_len);
+			creq->req.ssids[0].ssid_len = wreq->essid_len;
 		}
 		if (wreq->scan_type == IW_SCAN_TYPE_PASSIVE) {
-			creq->ssids = NULL;
-			creq->n_ssids = 0;
+			creq->req.ssids = NULL;
+			creq->req.n_ssids = 0;
 		}
 	}
 
 	for (i = 0; i < NUM_NL80211_BANDS; i++)
 		if (wiphy->bands[i])
-			creq->rates[i] = (1 << wiphy->bands[i]->n_bitrates) - 1;
+			creq->req.rates[i] =
+				(1 << wiphy->bands[i]->n_bitrates) - 1;
 
-	eth_broadcast_addr(creq->bssid);
+	eth_broadcast_addr(creq->req.bssid);
 
-	wiphy_lock(&rdev->wiphy);
-
-	rdev->scan_req = creq;
-	err = rdev_scan(rdev, creq);
-	if (err) {
-		rdev->scan_req = NULL;
-		/* creq will be freed below */
-	} else {
-		nl80211_send_scan_start(rdev, dev->ieee80211_ptr);
-		/* creq now owned by driver */
-		creq = NULL;
-		dev_hold(dev);
+	scoped_guard(wiphy, &rdev->wiphy) {
+		rdev->scan_req = creq;
+		err = rdev_scan(rdev, creq);
+		if (err) {
+			rdev->scan_req = NULL;
+			/* creq will be freed below */
+		} else {
+			nl80211_send_scan_start(rdev, dev->ieee80211_ptr);
+			/* creq now owned by driver */
+			creq = NULL;
+			dev_hold(dev);
+		}
 	}
-	wiphy_unlock(&rdev->wiphy);
+
  out:
 	kfree(creq);
 	return err;
 }
-EXPORT_WEXT_HANDLER(cfg80211_wext_siwscan);
 
 static char *ieee80211_scan_add_ies(struct iw_request_info *info,
 				    const struct cfg80211_bss_ies *ies,
@@ -3970,5 +4022,4 @@ int cfg80211_wext_giwscan(struct net_device *dev,
 
 	return res;
 }
-EXPORT_WEXT_HANDLER(cfg80211_wext_giwscan);
 #endif

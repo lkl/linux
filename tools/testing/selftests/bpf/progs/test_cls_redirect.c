@@ -15,13 +15,14 @@
 #include <linux/ipv6.h>
 #include <linux/pkt_cls.h>
 #include <linux/tcp.h>
-#include <linux/udp.h>
+#include <netinet/udp.h>
 
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
 #include "bpf_compiler.h"
 #include "test_cls_redirect.h"
+#include "bpf_misc.h"
 
 #pragma GCC diagnostic ignored "-Waddress-of-packed-member"
 
@@ -30,9 +31,6 @@
 #else
 #define INLINING __always_inline
 #endif
-
-#define offsetofend(TYPE, MEMBER) \
-	(offsetof(TYPE, MEMBER) + sizeof((((TYPE *)0)->MEMBER)))
 
 #define IP_OFFSET_MASK (0x1FFF)
 #define IP_MF (0x2000)
@@ -129,7 +127,7 @@ typedef uint8_t *net_ptr __attribute__((align_value(8)));
 typedef struct buf {
 	struct __sk_buff *skb;
 	net_ptr head;
-	/* NB: tail musn't have alignment other than 1, otherwise
+	/* NB: tail mustn't have alignment other than 1, otherwise
 	* LLVM will go and eliminate code, e.g. when checking packet lengths.
 	*/
 	uint8_t *const tail;

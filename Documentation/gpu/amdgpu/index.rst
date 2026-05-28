@@ -7,13 +7,18 @@ Next (GCN), Radeon DNA (RDNA), and Compute DNA (CDNA) architectures.
 
 .. toctree::
 
-   module-parameters
    driver-core
+   amd-hardware-list-info
+   module-parameters
+   gc/index
    display/index
+   userq
    flashing
    xgmi
    ras
    thermal
    driver-misc
    debugging
+   debugfs
+   process-isolation
    amdgpu-glossary

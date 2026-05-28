@@ -202,12 +202,13 @@ static int x86__annotate_init(struct arch *arch, char *cpuid)
 		if (x86__cpuid_parse(arch, cpuid))
 			err = SYMBOL_ANNOTATE_ERRNO__ARCH_INIT_CPUID_PARSING;
 	}
-
+	arch->e_machine = EM_X86_64;
+	arch->e_flags = 0;
 	arch->initialized = true;
 	return err;
 }
 
-#ifdef HAVE_DWARF_SUPPORT
+#ifdef HAVE_LIBDW_SUPPORT
 static void update_insn_state_x86(struct type_state *state,
 				  struct data_loc_info *dloc, Dwarf_Die *cu_die,
 				  struct disasm_line *dl)
@@ -300,7 +301,7 @@ static void update_insn_state_x86(struct type_state *state,
 			 * as a pointer.
 			 */
 			tsr->type = type_die;
-			tsr->kind = TSR_KIND_POINTER;
+			tsr->kind = TSR_KIND_PERCPU_POINTER;
 			tsr->ok = true;
 
 			pr_debug_dtp("add [%x] percpu %#"PRIx64" -> reg%d",
@@ -409,7 +410,7 @@ static void update_insn_state_x86(struct type_state *state,
 
 retry:
 		/* Check stack variables with offset */
-		if (sreg == fbreg) {
+		if (sreg == fbreg || sreg == state->stack_reg) {
 			struct type_state_stack *stack;
 			int offset = src->offset - fboff;
 
@@ -432,8 +433,13 @@ retry:
 				return;
 			}
 
-			pr_debug_dtp("mov [%x] -%#x(stack) -> reg%d",
-				     insn_offset, -offset, dst->reg1);
+			if (sreg == fbreg) {
+				pr_debug_dtp("mov [%x] -%#x(stack) -> reg%d",
+					     insn_offset, -offset, dst->reg1);
+			} else {
+				pr_debug_dtp("mov [%x] %#x(reg%d) -> reg%d",
+					     insn_offset, offset, sreg, dst->reg1);
+			}
 			pr_debug_type_name(&tsr->type, tsr->kind);
 		}
 		/* And then dereference the pointer if it has one */
@@ -515,7 +521,7 @@ retry:
 		}
 		/* And then dereference the calculated pointer if it has one */
 		else if (has_reg_type(state, sreg) && state->regs[sreg].ok &&
-			 state->regs[sreg].kind == TSR_KIND_POINTER &&
+			 state->regs[sreg].kind == TSR_KIND_PERCPU_POINTER &&
 			 die_get_member_type(&state->regs[sreg].type,
 					     src->offset, &type_die)) {
 			tsr->type = type_die;
@@ -560,7 +566,7 @@ retry:
 			return;
 
 		/* Check stack variables with offset */
-		if (dst->reg1 == fbreg) {
+		if (dst->reg1 == fbreg || dst->reg1 == state->stack_reg) {
 			struct type_state_stack *stack;
 			int offset = dst->offset - fboff;
 
@@ -583,8 +589,13 @@ retry:
 						    &tsr->type);
 			}
 
-			pr_debug_dtp("mov [%x] reg%d -> -%#x(stack)",
-				     insn_offset, src->reg1, -offset);
+			if (dst->reg1 == fbreg) {
+				pr_debug_dtp("mov [%x] reg%d -> -%#x(stack)",
+					     insn_offset, src->reg1, -offset);
+			} else {
+				pr_debug_dtp("mov [%x] reg%d -> %#x(reg%d)",
+					     insn_offset, src->reg1, offset, dst->reg1);
+			}
 			pr_debug_type_name(&tsr->type, tsr->kind);
 		}
 		/*

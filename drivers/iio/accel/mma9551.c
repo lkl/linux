@@ -4,11 +4,11 @@
  * Copyright (c) 2014, Intel Corporation.
  */
 
-#include <linux/module.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
+#include <linux/mod_devicetable.h>
+#include <linux/module.h>
 #include <linux/slab.h>
-#include <linux/acpi.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/iio/iio.h>
@@ -17,8 +17,6 @@
 #include <linux/pm_runtime.h>
 #include "mma9551_core.h"
 
-#define MMA9551_DRV_NAME		"mma9551"
-#define MMA9551_IRQ_NAME		"mma9551_event"
 #define MMA9551_GPIO_COUNT		4
 
 /* Tilt application (inclination in IIO terms). */
@@ -45,7 +43,7 @@ enum mma9551_tilt_axis {
 struct mma9551_data {
 	struct i2c_client *client;
 	struct mutex mutex;
-	int event_enabled[3];
+	bool event_enabled[3];
 	int irqs[MMA9551_GPIO_COUNT];
 };
 
@@ -162,7 +160,7 @@ static int mma9551_read_event_config(struct iio_dev *indio_dev,
 
 static int mma9551_config_incli_event(struct iio_dev *indio_dev,
 				      enum iio_modifier axis,
-				      int state)
+				      bool state)
 {
 	struct mma9551_data *data = iio_priv(indio_dev);
 	enum mma9551_tilt_axis mma_axis;
@@ -174,7 +172,7 @@ static int mma9551_config_incli_event(struct iio_dev *indio_dev,
 	if (data->event_enabled[mma_axis] == state)
 		return 0;
 
-	if (state == 0) {
+	if (!state) {
 		ret = mma9551_gpio_config(data->client,
 					  (enum mma9551_gpio_pin)mma_axis,
 					  MMA9551_APPID_NONE, 0, 0);
@@ -225,7 +223,7 @@ static int mma9551_write_event_config(struct iio_dev *indio_dev,
 				      const struct iio_chan_spec *chan,
 				      enum iio_event_type type,
 				      enum iio_event_direction dir,
-				      int state)
+				      bool state)
 {
 	struct mma9551_data *data = iio_priv(indio_dev);
 	int ret;
@@ -422,7 +420,7 @@ static int mma9551_gpio_probe(struct iio_dev *indio_dev)
 		ret = devm_request_threaded_irq(dev, data->irqs[i],
 				NULL, mma9551_event_handler,
 				IRQF_TRIGGER_RISING | IRQF_ONESHOT,
-				MMA9551_IRQ_NAME, indio_dev);
+				"mma9551_event", indio_dev);
 		if (ret < 0) {
 			dev_err(dev, "request irq %d failed\n", data->irqs[i]);
 			return ret;
@@ -433,17 +431,6 @@ static int mma9551_gpio_probe(struct iio_dev *indio_dev)
 	}
 
 	return 0;
-}
-
-static const char *mma9551_match_acpi_device(struct device *dev)
-{
-	const struct acpi_device_id *id;
-
-	id = acpi_match_device(dev->driver->acpi_match_table, dev);
-	if (!id)
-		return NULL;
-
-	return dev_name(dev);
 }
 
 static int mma9551_probe(struct i2c_client *client)
@@ -464,8 +451,8 @@ static int mma9551_probe(struct i2c_client *client)
 
 	if (id)
 		name = id->name;
-	else if (ACPI_HANDLE(&client->dev))
-		name = mma9551_match_acpi_device(&client->dev);
+	else
+		name = iio_get_acpi_device_name(&client->dev);
 
 	ret = mma9551_init(data);
 	if (ret < 0)
@@ -589,21 +576,21 @@ static const struct dev_pm_ops mma9551_pm_ops = {
 
 static const struct acpi_device_id mma9551_acpi_match[] = {
 	{"MMA9551", 0},
-	{},
+	{ }
 };
 
 MODULE_DEVICE_TABLE(acpi, mma9551_acpi_match);
 
 static const struct i2c_device_id mma9551_id[] = {
 	{ "mma9551" },
-	{}
+	{ }
 };
 
 MODULE_DEVICE_TABLE(i2c, mma9551_id);
 
 static struct i2c_driver mma9551_driver = {
 	.driver = {
-		   .name = MMA9551_DRV_NAME,
+		   .name = "mma9551",
 		   .acpi_match_table = mma9551_acpi_match,
 		   .pm = pm_ptr(&mma9551_pm_ops),
 	},
@@ -618,4 +605,4 @@ MODULE_AUTHOR("Irina Tirdea <irina.tirdea@intel.com>");
 MODULE_AUTHOR("Vlad Dogaru <vlad.dogaru@intel.com>");
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("MMA9551L motion-sensing platform driver");
-MODULE_IMPORT_NS(IIO_MMA9551);
+MODULE_IMPORT_NS("IIO_MMA9551");

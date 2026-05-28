@@ -571,6 +571,9 @@ void sja1105_get_ethtool_stats(struct dsa_switch *ds, int port, u64 *data)
 		max_ctr = __MAX_SJA1105PQRS_PORT_COUNTER;
 
 	for (i = 0; i < max_ctr; i++) {
+		if (!strlen(sja1105_port_counters[i].name))
+			continue;
+
 		rc = sja1105_port_counter_read(priv, port, i, &data[k++]);
 		if (rc) {
 			dev_err(ds->dev,
@@ -586,7 +589,6 @@ void sja1105_get_strings(struct dsa_switch *ds, int port,
 {
 	struct sja1105_private *priv = ds->priv;
 	enum sja1105_counter_index max_ctr, i;
-	char *p = data;
 
 	if (stringset != ETH_SS_STATS)
 		return;
@@ -598,8 +600,10 @@ void sja1105_get_strings(struct dsa_switch *ds, int port,
 		max_ctr = __MAX_SJA1105PQRS_PORT_COUNTER;
 
 	for (i = 0; i < max_ctr; i++) {
-		strscpy(p, sja1105_port_counters[i].name, ETH_GSTRING_LEN);
-		p += ETH_GSTRING_LEN;
+		if (!strlen(sja1105_port_counters[i].name))
+			continue;
+
+		ethtool_puts(&data, sja1105_port_counters[i].name);
 	}
 }
 

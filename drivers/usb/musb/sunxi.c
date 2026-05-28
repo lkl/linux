@@ -629,7 +629,7 @@ static const struct musb_platform_ops sunxi_musb_ops = {
 #define SUNXI_MUSB_RAM_BITS	11
 
 /* Allwinner OTG supports up to 5 endpoints */
-static struct musb_fifo_cfg sunxi_musb_mode_cfg_5eps[] = {
+static const struct musb_fifo_cfg sunxi_musb_mode_cfg_5eps[] = {
 	MUSB_EP_FIFO_SINGLE(1, FIFO_TX, 512),
 	MUSB_EP_FIFO_SINGLE(1, FIFO_RX, 512),
 	MUSB_EP_FIFO_SINGLE(2, FIFO_TX, 512),
@@ -643,7 +643,7 @@ static struct musb_fifo_cfg sunxi_musb_mode_cfg_5eps[] = {
 };
 
 /* H3/V3s OTG supports only 4 endpoints */
-static struct musb_fifo_cfg sunxi_musb_mode_cfg_4eps[] = {
+static const struct musb_fifo_cfg sunxi_musb_mode_cfg_4eps[] = {
 	MUSB_EP_FIFO_SINGLE(1, FIFO_TX, 512),
 	MUSB_EP_FIFO_SINGLE(1, FIFO_RX, 512),
 	MUSB_EP_FIFO_SINGLE(2, FIFO_TX, 512),
@@ -857,7 +857,7 @@ MODULE_DEVICE_TABLE(of, sunxi_musb_match);
 
 static struct platform_driver sunxi_musb_driver = {
 	.probe = sunxi_musb_probe,
-	.remove_new = sunxi_musb_remove,
+	.remove = sunxi_musb_remove,
 	.driver = {
 		.name = "musb-sunxi",
 		.of_match_table = sunxi_musb_match,

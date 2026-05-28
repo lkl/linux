@@ -112,7 +112,7 @@ static int hda_probes_compr_trigger(struct sof_client_dev *cdev,
 
 static int hda_probes_compr_pointer(struct sof_client_dev *cdev,
 				    struct snd_compr_stream *cstream,
-				    struct snd_compr_tstamp *tstamp,
+				    struct snd_compr_tstamp64 *tstamp,
 				    struct snd_soc_dai *dai)
 {
 	struct hdac_ext_stream *hext_stream = hda_compr_get_stream(cstream);
@@ -139,12 +139,12 @@ int hda_probes_register(struct snd_sof_dev *sdev)
 	return sof_client_dev_register(sdev, "hda-probes", 0, &hda_probes_ops,
 				       sizeof(hda_probes_ops));
 }
-EXPORT_SYMBOL_NS(hda_probes_register, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_probes_register, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 void hda_probes_unregister(struct snd_sof_dev *sdev)
 {
 	sof_client_dev_unregister(sdev, "hda-probes", 0);
 }
-EXPORT_SYMBOL_NS(hda_probes_unregister, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_probes_unregister, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
-MODULE_IMPORT_NS(SND_SOC_SOF_CLIENT);
+MODULE_IMPORT_NS("SND_SOC_SOF_CLIENT");

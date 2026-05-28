@@ -757,8 +757,8 @@ static int stm32_usbphyc_probe(struct platform_device *pdev)
 	}
 
 	version = readl_relaxed(usbphyc->base + STM32_USBPHYC_VERSION);
-	dev_info(dev, "registered rev:%lu.%lu\n",
-		 FIELD_GET(MAJREV, version), FIELD_GET(MINREV, version));
+	dev_dbg(dev, "registered rev: %lu.%lu\n",
+		FIELD_GET(MAJREV, version), FIELD_GET(MINREV, version));
 
 	return 0;
 
@@ -812,7 +812,7 @@ MODULE_DEVICE_TABLE(of, stm32_usbphyc_of_match);
 
 static struct platform_driver stm32_usbphyc_driver = {
 	.probe = stm32_usbphyc_probe,
-	.remove_new = stm32_usbphyc_remove,
+	.remove = stm32_usbphyc_remove,
 	.driver = {
 		.of_match_table = stm32_usbphyc_of_match,
 		.name = "stm32-usbphyc",

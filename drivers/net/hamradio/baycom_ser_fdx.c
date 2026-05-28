@@ -373,6 +373,7 @@ static enum uart ser12_check_uart(unsigned int iobase)
 
 static int ser12_open(struct net_device *dev)
 {
+	const unsigned int nr_irqs = irq_get_nr_irqs();
 	struct baycom_state *bc = netdev_priv(dev);
 	enum uart u;
 
@@ -530,7 +531,7 @@ static int baycom_ioctl(struct net_device *dev, void __user *data,
 		return baycom_setmode(bc, hi->data.modename);
 
 	case HDLCDRVCTL_MODELIST:
-		strcpy(hi->data.modename, "ser12,ser3,ser24");
+		strscpy(hi->data.modename, "ser12,ser3,ser24");
 		if (copy_to_user(data, hi, sizeof(struct hdlcdrv_ioctl)))
 			return -EFAULT;
 		return 0;

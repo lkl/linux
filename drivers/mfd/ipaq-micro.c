@@ -22,6 +22,7 @@
 #include <linux/mfd/core.h>
 #include <linux/mfd/ipaq-micro.h>
 #include <linux/string.h>
+#include <linux/string_choices.h>
 #include <linux/random.h>
 #include <linux/slab.h>
 #include <linux/list.h>
@@ -130,6 +131,7 @@ static void micro_rx_msg(struct ipaq_micro *micro, u8 id, int len, u8 *data)
 	default:
 		dev_err(micro->dev,
 			"unknown msg %d [%d] %*ph\n", id, len, len, data);
+		break;
 	}
 	spin_unlock(&micro->lock);
 }
@@ -266,7 +268,7 @@ static void __init ipaq_micro_eeprom_dump(struct ipaq_micro *micro)
 	dev_info(micro->dev, "page mode: %u\n", ipaq_micro_to_u16(dump+84));
 	dev_info(micro->dev, "country ID: %u\n", ipaq_micro_to_u16(dump+86));
 	dev_info(micro->dev, "color display: %s\n",
-		 ipaq_micro_to_u16(dump+88) ? "yes" : "no");
+		 str_yes_no(ipaq_micro_to_u16(dump + 88)));
 	dev_info(micro->dev, "ROM size: %u MiB\n", ipaq_micro_to_u16(dump+90));
 	dev_info(micro->dev, "RAM size: %u KiB\n", ipaq_micro_to_u16(dump+92));
 	dev_info(micro->dev, "screen: %u x %u\n",

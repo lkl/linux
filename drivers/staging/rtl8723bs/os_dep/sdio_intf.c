@@ -72,7 +72,7 @@ static int sdio_alloc_irq(struct dvobj_priv *dvobj)
 	err = sdio_claim_irq(func, &sd_sync_int_hdl);
 	if (err) {
 		dvobj->drv_dbg.dbg_sdio_alloc_irq_error_cnt++;
-		printk(KERN_CRIT "%s: sdio_claim_irq FAIL(%d)!\n", __func__, err);
+		netdev_crit(dvobj->if1->pnetdev, "%s: sdio_claim_irq FAIL(%d)!\n", __func__, err);
 	} else {
 		dvobj->drv_dbg.dbg_sdio_alloc_irq_cnt++;
 		dvobj->irq_alloc = 1;
@@ -216,8 +216,6 @@ void rtw_set_hal_ops(struct adapter *padapter)
 {
 	/* alloc memory for HAL DATA */
 	rtw_hal_data_init(padapter);
-
-	rtl8723bs_set_hal_ops(padapter);
 }
 
 static void sd_intf_start(struct adapter *padapter)
@@ -289,7 +287,7 @@ static struct adapter *rtw_sdio_if1_init(struct dvobj_priv *dvobj, const struct 
 
 	rtw_hal_chip_configure(padapter);
 
-	hal_btcoex_Initialize((void *) padapter);
+	hal_btcoex_Initialize((void *)padapter);
 
 	/* 3 6. read efuse/eeprom data */
 	rtw_hal_read_chip_info(padapter);
@@ -382,7 +380,6 @@ static int rtw_drv_init(
 	if (sdio_alloc_irq(dvobj) != _SUCCESS)
 		goto free_if1;
 
-	rtw_ndev_notifier_register();
 	status = _SUCCESS;
 
 free_if1:
@@ -484,22 +481,12 @@ static int rtw_sdio_resume(struct device *dev)
 
 static int __init rtw_drv_entry(void)
 {
-	int ret;
-
-	ret = sdio_register_driver(&rtl8723bs_sdio_driver);
-	if (ret != 0)
-		rtw_ndev_notifier_unregister();
-
-	return ret;
+	return sdio_register_driver(&rtl8723bs_sdio_driver);
 }
+module_init(rtw_drv_entry);
 
 static void __exit rtw_drv_halt(void)
 {
 	sdio_unregister_driver(&rtl8723bs_sdio_driver);
-
-	rtw_ndev_notifier_unregister();
 }
-
-
-module_init(rtw_drv_entry);
 module_exit(rtw_drv_halt);

@@ -253,7 +253,7 @@ static int e5010_enum_fmt(struct file *file, void *priv, struct v4l2_fmtdesc *f)
 {
 	int i, index = 0;
 	struct e5010_fmt *fmt = NULL;
-	struct e5010_context *ctx = file->private_data;
+	struct e5010_context *ctx = to_e5010_context(file);
 
 	if (!V4L2_TYPE_IS_MULTIPLANAR(f->type)) {
 		v4l2_err(&ctx->e5010->v4l2_dev, "ENUMFMT with Invalid type: %d\n", f->type);
@@ -279,7 +279,7 @@ static int e5010_enum_fmt(struct file *file, void *priv, struct v4l2_fmtdesc *f)
 
 static int e5010_g_fmt(struct file *file, void *priv, struct v4l2_format *f)
 {
-	struct e5010_context *ctx = file->private_data;
+	struct e5010_context *ctx = to_e5010_context(file);
 	struct e5010_q_data *queue;
 	int i;
 	struct v4l2_pix_format_mplane *pix_mp = &f->fmt.pix_mp;
@@ -380,14 +380,14 @@ static int e5010_jpeg_try_fmt(struct v4l2_format *f, struct e5010_context *ctx)
 
 static int e5010_try_fmt(struct file *file, void *priv, struct v4l2_format *f)
 {
-	struct e5010_context *ctx = file->private_data;
+	struct e5010_context *ctx = to_e5010_context(file);
 
 	return e5010_jpeg_try_fmt(f, ctx);
 }
 
 static int e5010_s_fmt(struct file *file, void *priv, struct v4l2_format *f)
 {
-	struct e5010_context *ctx = file->private_data;
+	struct e5010_context *ctx = to_e5010_context(file);
 	struct vb2_queue *vq;
 	int ret = 0, i = 0;
 	struct v4l2_pix_format_mplane *pix_mp = &f->fmt.pix_mp;
@@ -462,7 +462,7 @@ static int e5010_enum_framesizes(struct file *file, void *priv, struct v4l2_frms
 
 static int e5010_g_selection(struct file *file, void *fh, struct v4l2_selection *s)
 {
-	struct e5010_context *ctx = file->private_data;
+	struct e5010_context *ctx = to_e5010_context(file);
 	struct e5010_q_data *queue;
 
 	if (s->type != V4L2_BUF_TYPE_VIDEO_OUTPUT)
@@ -490,7 +490,7 @@ static int e5010_g_selection(struct file *file, void *fh, struct v4l2_selection 
 
 static int e5010_s_selection(struct file *file, void *fh, struct v4l2_selection *s)
 {
-	struct e5010_context *ctx = file->private_data;
+	struct e5010_context *ctx = to_e5010_context(file);
 	struct e5010_q_data *queue;
 	struct vb2_queue *vq;
 	struct v4l2_rect base_rect;
@@ -742,8 +742,7 @@ static int e5010_open(struct file *file)
 	}
 
 	v4l2_fh_init(&ctx->fh, vdev);
-	file->private_data = ctx;
-	v4l2_fh_add(&ctx->fh);
+	v4l2_fh_add(&ctx->fh, file);
 
 	ctx->e5010 = e5010;
 	ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(e5010->m2m_dev, ctx, queue_init);
@@ -770,7 +769,7 @@ static int e5010_open(struct file *file)
 err_ctrls_setup:
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
 exit:
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 	mutex_unlock(&e5010->mutex);
 free:
@@ -781,13 +780,13 @@ free:
 static int e5010_release(struct file *file)
 {
 	struct e5010_dev *e5010 = video_drvdata(file);
-	struct e5010_context *ctx = file->private_data;
+	struct e5010_context *ctx = to_e5010_context(file);
 
 	dprintk(e5010, 1, "Releasing instance: 0x%p, m2m_ctx: 0x%p\n", ctx, ctx->fh.m2m_ctx);
 	mutex_lock(&e5010->mutex);
 	v4l2_ctrl_handler_free(&ctx->ctrl_handler);
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 	kfree(ctx);
 	mutex_unlock(&e5010->mutex);
@@ -1057,8 +1056,11 @@ static int e5010_probe(struct platform_device *pdev)
 	e5010->vdev->lock = &e5010->mutex;
 
 	ret = v4l2_device_register(dev, &e5010->v4l2_dev);
-	if (ret)
-		return dev_err_probe(dev, ret, "failed to register v4l2 device\n");
+	if (ret) {
+		dev_err_probe(dev, ret, "failed to register v4l2 device\n");
+		goto fail_after_video_device_alloc;
+	}
+
 
 	e5010->m2m_dev = v4l2_m2m_init(&e5010_m2m_ops);
 	if (IS_ERR(e5010->m2m_dev)) {
@@ -1118,6 +1120,8 @@ fail_after_video_register_device:
 	v4l2_m2m_release(e5010->m2m_dev);
 fail_after_v4l2_register:
 	v4l2_device_unregister(&e5010->v4l2_dev);
+fail_after_video_device_alloc:
+	video_device_release(e5010->vdev);
 	return ret;
 }
 
@@ -1257,7 +1261,7 @@ static void e5010_buf_queue(struct vb2_buffer *vb)
 static int e5010_encoder_cmd(struct file *file, void *priv,
 			     struct v4l2_encoder_cmd *cmd)
 {
-	struct e5010_context *ctx = file->private_data;
+	struct e5010_context *ctx = to_e5010_context(file);
 	int ret;
 	struct vb2_queue *cap_vq;
 
@@ -1593,8 +1597,6 @@ static const struct vb2_ops e5010_video_ops = {
 	.buf_finish = e5010_buf_finish,
 	.buf_prepare = e5010_buf_prepare,
 	.buf_out_validate = e5010_buf_out_validate,
-	.wait_prepare = vb2_ops_wait_prepare,
-	.wait_finish = vb2_ops_wait_finish,
 	.start_streaming = e5010_start_streaming,
 	.stop_streaming = e5010_stop_streaming,
 };
@@ -1619,7 +1621,7 @@ MODULE_DEVICE_TABLE(of, e5010_of_match);
 
 static struct platform_driver e5010_driver = {
 	.probe = e5010_probe,
-	.remove_new = e5010_remove,
+	.remove = e5010_remove,
 	.driver = {
 		.name = E5010_MODULE_NAME,
 		.of_match_table = e5010_of_match,

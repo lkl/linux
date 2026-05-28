@@ -81,7 +81,7 @@ static struct attribute *zorro_device_attrs[] = {
 };
 
 static ssize_t zorro_read_config(struct file *filp, struct kobject *kobj,
-				 struct bin_attribute *bin_attr,
+				 const struct bin_attribute *bin_attr,
 				 char *buf, loff_t off, size_t count)
 {
 	struct zorro_dev *z = to_zorro_dev(kobj_to_dev(kobj));
@@ -98,7 +98,7 @@ static ssize_t zorro_read_config(struct file *filp, struct kobject *kobj,
 	return memory_read_from_buffer(buf, count, &off, &cd, sizeof(cd));
 }
 
-static struct bin_attribute zorro_config_attr = {
+static const struct bin_attribute zorro_config_attr = {
 	.attr =	{
 		.name = "config",
 		.mode = S_IRUGO,
@@ -107,7 +107,7 @@ static struct bin_attribute zorro_config_attr = {
 	.read = zorro_read_config,
 };
 
-static struct bin_attribute *zorro_device_bin_attrs[] = {
+static const struct bin_attribute *const zorro_device_bin_attrs[] = {
 	&zorro_config_attr,
 	NULL
 };

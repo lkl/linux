@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: ((GPL-2.0 WITH Linux-syscall-note) OR BSD-3-Clause)
-
+---
 name: mptcp_pm
 protocol: genetlink-legacy
 doc: Multipath TCP.
@@ -17,70 +17,72 @@ definitions:
     enum-name: mptcp-event-type
     name-prefix: mptcp-event-
     entries:
-     -
-      name: unspec
-      doc: unused event
-     -
-      name: created
-      doc:
-        token, family, saddr4 | saddr6, daddr4 | daddr6, sport, dport
-        A new MPTCP connection has been created. It is the good time to
-        allocate memory and send ADD_ADDR if needed. Depending on the
-        traffic-patterns it can take a long time until the
-        MPTCP_EVENT_ESTABLISHED is sent.
-     -
-      name: established
-      doc:
-        token, family, saddr4 | saddr6, daddr4 | daddr6, sport, dport
-        A MPTCP connection is established (can start new subflows).
-     -
-      name: closed
-      doc:
-        token
-        A MPTCP connection has stopped.
-     -
-      name: announced
-      value: 6
-      doc:
-        token, rem_id, family, daddr4 | daddr6 [, dport]
-        A new address has been announced by the peer.
-     -
-      name: removed
-      doc:
-        token, rem_id
-        An address has been lost by the peer.
-     -
-      name: sub-established
-      value: 10
-      doc:
-        token, family, loc_id, rem_id, saddr4 | saddr6, daddr4 | daddr6, sport,
-        dport, backup, if_idx [, error]
-        A new subflow has been established. 'error' should not be set.
-     -
-      name: sub-closed
-      doc:
-        token, family, loc_id, rem_id, saddr4 | saddr6, daddr4 | daddr6, sport,
-        dport, backup, if_idx [, error]
-        A subflow has been closed. An error (copy of sk_err) could be set if an
-        error has been detected for this subflow.
-     -
-      name: sub-priority
-      value: 13
-      doc:
-        token, family, loc_id, rem_id, saddr4 | saddr6, daddr4 | daddr6, sport,
-        dport, backup, if_idx [, error]
-        The priority of a subflow has changed. 'error' should not be set.
-     -
-      name: listener-created
-      value: 15
-      doc:
-        family, sport, saddr4 | saddr6
-        A new PM listener is created.
-     -
-      name: listener-closed
-      doc:
-        family, sport, saddr4 | saddr6
-        A PM listener is closed.
+      -
+        name: unspec
+        doc: unused event
+      -
+        name: created
+        doc: >-
+          A new MPTCP connection has been created. It is the good time to
+          allocate memory and send ADD_ADDR if needed. Depending on the
+          traffic-patterns it can take a long time until the
+          MPTCP_EVENT_ESTABLISHED is sent.
+          Attributes: token, family, saddr4 | saddr6, daddr4 | daddr6, sport,
+          dport, [server-side], [flags].
+      -
+        name: established
+        doc: >-
+          A MPTCP connection is established (can start new subflows).
+          Attributes: token, family, saddr4 | saddr6, daddr4 | daddr6, sport,
+          dport, [server-side], [flags].
+      -
+        name: closed
+        doc: >-
+          A MPTCP connection has stopped.
+          Attribute: token.
+      -
+        name: announced
+        value: 6
+        doc: >-
+          A new address has been announced by the peer.
+          Attributes: token, rem_id, family, daddr4 | daddr6 [, dport].
+      -
+        name: removed
+        doc: >-
+          An address has been lost by the peer.
+          Attributes: token, rem_id.
+      -
+        name: sub-established
+        value: 10
+        doc: >-
+          A new subflow has been established. 'error' should not be set.
+          Attributes: token, family, loc_id, rem_id, saddr4 | saddr6, daddr4 |
+          daddr6, sport, dport, backup, if-idx [, error].
+      -
+        name: sub-closed
+        doc: >-
+          A subflow has been closed. An error (copy of sk_err) could be set if
+          an error has been detected for this subflow.
+          Attributes: token, family, loc_id, rem_id, saddr4 | saddr6, daddr4 |
+          daddr6, sport, dport, backup, if-idx [, error].
+      -
+        name: sub-priority
+        value: 13
+        doc: >-
+          The priority of a subflow has changed. 'error' should not be set.
+          Attributes: token, family, loc_id, rem_id, saddr4 | saddr6, daddr4 |
+          daddr6, sport, dport, backup, if-idx [, error].
+      -
+        name: listener-created
+        value: 15
+        doc: >-
+          A new PM listener is created.
+          Attributes: family, sport, saddr4 | saddr6.
+      -
+        name: listener-closed
+        doc: >-
+          A PM listener is closed.
+          Attributes: family, sport, saddr4 | saddr6.
 
 attribute-sets:
   -
@@ -253,8 +255,8 @@ attribute-sets:
         name: timeout
         type: u32
       -
-        name: if_idx
-        type: u32
+        name: if-idx
+        type: s32
       -
         name: reset-reason
         type: u32
@@ -264,6 +266,7 @@ attribute-sets:
       -
         name: server-side
         type: u8
+        doc: "Deprecated: use 'flags'"
 
 operations:
   list:
@@ -275,8 +278,8 @@ operations:
       name: add-addr
       doc: Add endpoint
       attribute-set: endpoint
-      dont-validate: [ strict ]
-      flags: [ uns-admin-perm ]
+      dont-validate: [strict]
+      flags: [uns-admin-perm]
       do: &add-addr-attrs
         request:
           attributes:
@@ -285,39 +288,39 @@ operations:
       name: del-addr
       doc: Delete endpoint
       attribute-set: endpoint
-      dont-validate: [ strict ]
-      flags: [ uns-admin-perm ]
+      dont-validate: [strict]
+      flags: [uns-admin-perm]
       do: *add-addr-attrs
     -
       name: get-addr
       doc: Get endpoint information
       attribute-set: attr
-      dont-validate: [ strict ]
+      dont-validate: [strict]
       do: &get-addr-attrs
         request:
           attributes:
-           - addr
-           - token
+            - addr
+            - token
         reply:
           attributes:
-           - addr
+            - addr
       dump:
         reply:
-         attributes:
-           - addr
+          attributes:
+            - addr
     -
-      name:  flush-addrs
-      doc: flush addresses
+      name: flush-addrs
+      doc: Flush addresses
       attribute-set: endpoint
-      dont-validate: [ strict ]
-      flags: [ uns-admin-perm ]
+      dont-validate: [strict]
+      flags: [uns-admin-perm]
       do: *add-addr-attrs
     -
       name: set-limits
       doc: Set protocol limits
       attribute-set: attr
-      dont-validate: [ strict ]
-      flags: [ uns-admin-perm ]
+      dont-validate: [strict]
+      flags: [uns-admin-perm]
       do: &mptcp-limits
         request:
           attributes:
@@ -327,10 +330,10 @@ operations:
       name: get-limits
       doc: Get protocol limits
       attribute-set: attr
-      dont-validate: [ strict ]
+      dont-validate: [strict]
       do: &mptcp-get-limits
         request:
-           attributes:
+          attributes:
             - rcv-add-addrs
             - subflows
         reply:
@@ -341,8 +344,8 @@ operations:
       name: set-flags
       doc: Change endpoint flags
       attribute-set: attr
-      dont-validate: [ strict ]
-      flags: [ uns-admin-perm ]
+      dont-validate: [strict]
+      flags: [uns-admin-perm]
       do: &mptcp-set-flags
         request:
           attributes:
@@ -351,10 +354,10 @@ operations:
             - addr-remote
     -
       name: announce
-      doc: announce new sf
+      doc: Announce new address
       attribute-set: attr
-      dont-validate: [ strict ]
-      flags: [ uns-admin-perm ]
+      dont-validate: [strict]
+      flags: [uns-admin-perm]
       do: &announce-add
         request:
           attributes:
@@ -362,21 +365,21 @@ operations:
             - token
     -
       name: remove
-      doc: announce removal
+      doc: Announce removal
       attribute-set: attr
-      dont-validate: [ strict ]
-      flags: [ uns-admin-perm ]
+      dont-validate: [strict]
+      flags: [uns-admin-perm]
       do:
         request:
-         attributes:
-           - token
-           - loc-id
+          attributes:
+            - token
+            - loc-id
     -
       name: subflow-create
-      doc: todo
+      doc: Create subflow
       attribute-set: attr
-      dont-validate: [ strict ]
-      flags: [ uns-admin-perm ]
+      dont-validate: [strict]
+      flags: [uns-admin-perm]
       do: &sf-create
         request:
           attributes:
@@ -385,8 +388,8 @@ operations:
             - addr-remote
     -
       name: subflow-destroy
-      doc: todo
+      doc: Destroy subflow
       attribute-set: attr
-      dont-validate: [ strict ]
-      flags: [ uns-admin-perm ]
+      dont-validate: [strict]
+      flags: [uns-admin-perm]
       do: *sf-create

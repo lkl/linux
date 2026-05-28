@@ -47,7 +47,7 @@ dbc_kfifo_to_req(struct dbc_port *port, char *packet)
 	return len;
 }
 
-static int dbc_start_tx(struct dbc_port *port)
+static int dbc_do_start_tx(struct dbc_port *port)
 	__releases(&port->port_lock)
 	__acquires(&port->port_lock)
 {
@@ -56,6 +56,8 @@ static int dbc_start_tx(struct dbc_port *port)
 	int			status = 0;
 	bool			do_tty_wake = false;
 	struct list_head	*pool = &port->write_pool;
+
+	port->tx_running = true;
 
 	while (!list_empty(pool)) {
 		req = list_entry(pool->next, struct dbc_request, list_pool);
@@ -77,10 +79,23 @@ static int dbc_start_tx(struct dbc_port *port)
 		}
 	}
 
+	port->tx_running = false;
+
 	if (do_tty_wake && port->port.tty)
 		tty_wakeup(port->port.tty);
 
 	return status;
+}
+
+/* must be called with port->port_lock held */
+static int dbc_start_tx(struct dbc_port *port)
+{
+	lockdep_assert_held(&port->port_lock);
+
+	if (port->tx_running)
+		return -EBUSY;
+
+	return dbc_do_start_tx(port);
 }
 
 static void dbc_start_rx(struct dbc_port *port)
@@ -110,15 +125,74 @@ static void dbc_start_rx(struct dbc_port *port)
 	}
 }
 
+/*
+ * Queue received data to tty buffer and push it.
+ *
+ * Returns nr of remaining bytes that didn't fit tty buffer, i.e. 0 if all
+ * bytes sucessfullt moved. In case of error returns negative errno.
+ * Call with lock held
+ */
+static int dbc_rx_push_buffer(struct dbc_port *port, struct dbc_request *req)
+{
+	char		*packet = req->buf;
+	unsigned int	n, size = req->actual;
+	int		count;
+
+	if (!req->actual)
+		return 0;
+
+	/* if n_read is set then request was partially moved to tty buffer */
+	n = port->n_read;
+	if (n) {
+		packet += n;
+		size -= n;
+	}
+
+	count = tty_insert_flip_string(&port->port, packet, size);
+	if (count)
+		tty_flip_buffer_push(&port->port);
+	if (count != size) {
+		port->n_read += count;
+		return size - count;
+	}
+
+	port->n_read = 0;
+	return 0;
+}
+
 static void
 dbc_read_complete(struct xhci_dbc *dbc, struct dbc_request *req)
 {
 	unsigned long		flags;
 	struct dbc_port		*port = dbc_to_port(dbc);
+	struct tty_struct	*tty;
+	int			untransferred;
+
+	tty = port->port.tty;
 
 	spin_lock_irqsave(&port->port_lock, flags);
+
+	/*
+	 * Only defer copyig data to tty buffer in case:
+	 * - !list_empty(&port->read_queue), there are older pending data
+	 * - tty is throttled
+	 * - failed to copy all data to buffer, defer remaining part
+	 */
+
+	if (list_empty(&port->read_queue) && tty && !tty_throttled(tty)) {
+		untransferred = dbc_rx_push_buffer(port, req);
+		if (untransferred == 0) {
+			list_add_tail(&req->list_pool, &port->read_pool);
+			if (req->status != -ESHUTDOWN)
+				dbc_start_rx(port);
+			goto out;
+		}
+	}
+
+	/* defer moving data from req to tty buffer to a tasklet */
 	list_add_tail(&req->list_pool, &port->read_queue);
 	tasklet_schedule(&port->push);
+out:
 	spin_unlock_irqrestore(&port->port_lock, flags);
 }
 
@@ -331,10 +405,10 @@ static void dbc_rx_push(struct tasklet_struct *t)
 	struct dbc_request	*req;
 	struct tty_struct	*tty;
 	unsigned long		flags;
-	bool			do_push = false;
 	bool			disconnect = false;
 	struct dbc_port		*port = from_tasklet(port, t, push);
 	struct list_head	*queue = &port->read_queue;
+	int			untransferred;
 
 	spin_lock_irqsave(&port->port_lock, flags);
 	tty = port->port.tty;
@@ -356,42 +430,15 @@ static void dbc_rx_push(struct tasklet_struct *t)
 			break;
 		}
 
-		if (req->actual) {
-			char		*packet = req->buf;
-			unsigned int	n, size = req->actual;
-			int		count;
-
-			n = port->n_read;
-			if (n) {
-				packet += n;
-				size -= n;
-			}
-
-			count = tty_insert_flip_string(&port->port, packet,
-						       size);
-			if (count)
-				do_push = true;
-			if (count != size) {
-				port->n_read += count;
-				break;
-			}
-			port->n_read = 0;
-		}
+		untransferred = dbc_rx_push_buffer(port, req);
+		if (untransferred > 0)
+			break;
 
 		list_move_tail(&req->list_pool, &port->read_pool);
 	}
 
-	if (do_push)
-		tty_flip_buffer_push(&port->port);
-
-	if (!list_empty(queue) && tty) {
-		if (!tty_throttled(tty)) {
-			if (do_push)
-				tasklet_schedule(&port->push);
-			else
-				pr_warn("ttyDBC0: RX not scheduled?\n");
-		}
-	}
+	if (!list_empty(queue))
+		tasklet_schedule(&port->push);
 
 	if (!disconnect)
 		dbc_start_rx(port);
@@ -503,6 +550,12 @@ static void xhci_dbc_tty_unregister_device(struct xhci_dbc *dbc)
 
 	if (!port->registered)
 		return;
+	/*
+	 * Hang up the TTY. This wakes up any blocked
+	 * writers and causes subsequent writes to fail.
+	 */
+	tty_vhangup(port->port.tty);
+
 	tty_unregister_device(dbc_tty_driver, port->minor);
 	xhci_dbc_tty_exit_port(port);
 	port->registered = false;
@@ -585,6 +638,7 @@ int dbc_tty_init(void)
 	dbc_tty_driver->type = TTY_DRIVER_TYPE_SERIAL;
 	dbc_tty_driver->subtype = SERIAL_TYPE_NORMAL;
 	dbc_tty_driver->init_termios = tty_std_termios;
+	dbc_tty_driver->init_termios.c_lflag &= ~ECHO;
 	dbc_tty_driver->init_termios.c_cflag =
 			B9600 | CS8 | CREAD | HUPCL | CLOCAL;
 	dbc_tty_driver->init_termios.c_ispeed = 9600;

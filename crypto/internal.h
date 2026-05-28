@@ -22,8 +22,6 @@
 #include <linux/sched.h>
 #include <linux/types.h>
 
-struct akcipher_request;
-struct crypto_akcipher;
 struct crypto_instance;
 struct crypto_template;
 
@@ -35,17 +33,20 @@ struct crypto_larval {
 	bool test_started;
 };
 
-struct crypto_akcipher_sync_data {
-	struct crypto_akcipher *tfm;
-	const void *src;
-	void *dst;
-	unsigned int slen;
-	unsigned int dlen;
+struct crypto_type {
+	unsigned int (*ctxsize)(struct crypto_alg *alg, u32 type, u32 mask);
+	unsigned int (*extsize)(struct crypto_alg *alg);
+	int (*init_tfm)(struct crypto_tfm *tfm);
+	void (*show)(struct seq_file *m, struct crypto_alg *alg);
+	int (*report)(struct sk_buff *skb, struct crypto_alg *alg);
+	void (*free)(struct crypto_instance *inst);
+	void (*destroy)(struct crypto_alg *alg);
 
-	struct akcipher_request *req;
-	struct crypto_wait cwait;
-	struct scatterlist sg;
-	u8 *buf;
+	unsigned int type;
+	unsigned int maskclear;
+	unsigned int maskset;
+	unsigned int tfmsize;
+	unsigned int algsize;
 };
 
 enum {
@@ -66,8 +67,7 @@ extern struct blocking_notifier_head crypto_chain;
 
 int alg_test(const char *driver, const char *alg, u32 type, u32 mask);
 
-#if !IS_BUILTIN(CONFIG_CRYPTO_ALGAPI) || \
-    IS_ENABLED(CONFIG_CRYPTO_MANAGER_DISABLE_TESTS)
+#if !IS_BUILTIN(CONFIG_CRYPTO_ALGAPI) || !IS_ENABLED(CONFIG_CRYPTO_SELFTESTS)
 static inline bool crypto_boot_test_finished(void)
 {
 	return true;
@@ -86,7 +86,7 @@ static inline void set_crypto_boot_test_finished(void)
 	static_branch_enable(&__crypto_boot_test_finished);
 }
 #endif /* !IS_BUILTIN(CONFIG_CRYPTO_ALGAPI) ||
-	* IS_ENABLED(CONFIG_CRYPTO_MANAGER_DISABLE_TESTS)
+	* !IS_ENABLED(CONFIG_CRYPTO_SELFTESTS)
 	*/
 
 #ifdef CONFIG_PROC_FS
@@ -129,10 +129,6 @@ void *crypto_create_tfm_node(struct crypto_alg *alg,
 void *crypto_clone_tfm(const struct crypto_type *frontend,
 		       struct crypto_tfm *otfm);
 
-int crypto_akcipher_sync_prep(struct crypto_akcipher_sync_data *data);
-int crypto_akcipher_sync_post(struct crypto_akcipher_sync_data *data, int err);
-int crypto_init_akcipher_ops_sig(struct crypto_tfm *tfm);
-
 static inline void *crypto_create_tfm(struct crypto_alg *alg,
 			const struct crypto_type *frontend)
 {
@@ -166,10 +162,12 @@ static inline struct crypto_alg *crypto_alg_get(struct crypto_alg *alg)
 	return alg;
 }
 
+void crypto_destroy_alg(struct crypto_alg *alg);
+
 static inline void crypto_alg_put(struct crypto_alg *alg)
 {
-	if (refcount_dec_and_test(&alg->cra_refcnt) && alg->cra_destroy)
-		alg->cra_destroy(alg);
+	if (refcount_dec_and_test(&alg->cra_refcnt))
+		crypto_destroy_alg(alg);
 }
 
 static inline int crypto_tmpl_get(struct crypto_template *tmpl)

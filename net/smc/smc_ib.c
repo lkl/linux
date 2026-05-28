@@ -662,7 +662,6 @@ void smc_ib_destroy_queue_pair(struct smc_link *lnk)
 /* create a queue pair within the protection domain for a link */
 int smc_ib_create_queue_pair(struct smc_link *lnk)
 {
-	int sges_per_buf = (lnk->lgr->smc_version == SMC_V2) ? 2 : 1;
 	struct ib_qp_init_attr qp_attr = {
 		.event_handler = smc_ib_qp_event_handler,
 		.qp_context = lnk,
@@ -676,7 +675,7 @@ int smc_ib_create_queue_pair(struct smc_link *lnk)
 			.max_send_wr = SMC_WR_BUF_CNT * 3,
 			.max_recv_wr = SMC_WR_BUF_CNT * 3,
 			.max_send_sge = SMC_IB_MAX_SEND_SGE,
-			.max_recv_sge = sges_per_buf,
+			.max_recv_sge = lnk->wr_rx_sge_cnt,
 			.max_inline_data = 0,
 		},
 		.sq_sig_type = IB_SIGNAL_REQ_WR,
@@ -742,6 +741,9 @@ bool smc_ib_is_sg_need_sync(struct smc_link *lnk,
 	struct scatterlist *sg;
 	unsigned int i;
 	bool ret = false;
+
+	if (!lnk->smcibdev->ibdev->dma_device)
+		return ret;
 
 	/* for now there is just one DMA address */
 	for_each_sg(buf_slot->sgt[lnk->link_idx].sgl, sg,
@@ -972,13 +974,17 @@ static int smc_ib_add_dev(struct ib_device *ibdev)
 					   smcibdev->pnetid[i]))
 			smc_pnetid_by_table_ib(smcibdev, i + 1);
 		smc_copy_netdev_ifindex(smcibdev, i);
-		pr_warn_ratelimited("smc:    ib device %s port %d has pnetid "
-				    "%.16s%s\n",
-				    smcibdev->ibdev->name, i + 1,
-				    smcibdev->pnetid[i],
-				    smcibdev->pnetid_by_user[i] ?
-				     " (user defined)" :
-				     "");
+		if (smc_pnet_is_pnetid_set(smcibdev->pnetid[i]))
+			pr_warn_ratelimited("smc:    ib device %s port %d has pnetid %.16s%s\n",
+					    smcibdev->ibdev->name, i + 1,
+					    smcibdev->pnetid[i],
+					    smcibdev->pnetid_by_user[i] ?
+						" (user defined)" :
+						"");
+		else
+			pr_warn_ratelimited("smc:    ib device %s port %d has no pnetid\n",
+					    smcibdev->ibdev->name, i + 1);
+
 	}
 	schedule_work(&smcibdev->port_event_work);
 	return 0;

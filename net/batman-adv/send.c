@@ -21,7 +21,6 @@
 #include <linux/list.h>
 #include <linux/netdevice.h>
 #include <linux/printk.h>
-#include <linux/rculist.h>
 #include <linux/rcupdate.h>
 #include <linux/skbuff.h>
 #include <linux/slab.h>
@@ -34,10 +33,9 @@
 #include "gateway_client.h"
 #include "hard-interface.h"
 #include "log.h"
-#include "network-coding.h"
+#include "mesh-interface.h"
 #include "originator.h"
 #include "routing.h"
-#include "soft-interface.h"
 #include "translation-table.h"
 
 static void batadv_send_outstanding_bcast_packet(struct work_struct *work);
@@ -64,11 +62,8 @@ int batadv_send_skb_packet(struct sk_buff *skb,
 			   struct batadv_hard_iface *hard_iface,
 			   const u8 *dst_addr)
 {
-	struct batadv_priv *bat_priv;
 	struct ethhdr *ethhdr;
 	int ret;
-
-	bat_priv = netdev_priv(hard_iface->soft_iface);
 
 	if (hard_iface->if_status != BATADV_IF_ACTIVE)
 		goto send_skb_err;
@@ -98,9 +93,6 @@ int batadv_send_skb_packet(struct sk_buff *skb,
 
 	skb->dev = hard_iface->net_dev;
 
-	/* Save a clone of the skb to use when decoding coded packets */
-	batadv_nc_skb_store_for_decoding(bat_priv, skb);
-
 	/* dev_queue_xmit() returns a negative result on error.	 However on
 	 * congestion and traffic shaping, it drops and returns NET_XMIT_DROP
 	 * (which is > 0). This will not be treated as an error.
@@ -124,7 +116,9 @@ send_skb_err:
 int batadv_send_broadcast_skb(struct sk_buff *skb,
 			      struct batadv_hard_iface *hard_iface)
 {
-	return batadv_send_skb_packet(skb, hard_iface, batadv_broadcast_addr);
+	static const u8 broadcast_addr[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+
+	return batadv_send_skb_packet(skb, hard_iface, broadcast_addr);
 }
 
 /**
@@ -201,14 +195,7 @@ int batadv_send_skb_to_orig(struct sk_buff *skb,
 		goto put_neigh_node;
 	}
 
-	/* try to network code the packet, if it is received on an interface
-	 * (i.e. being forwarded). If the packet originates from this node or if
-	 * network coding fails, then send the packet as usual.
-	 */
-	if (recv_if && batadv_nc_skb_forward(skb, neigh_node))
-		ret = -EINPROGRESS;
-	else
-		ret = batadv_send_unicast_skb(skb, neigh_node);
+	ret = batadv_send_unicast_skb(skb, neigh_node);
 
 	/* skb was consumed */
 	skb = NULL;
@@ -272,7 +259,7 @@ static bool batadv_send_skb_prepare_unicast(struct sk_buff *skb,
 /**
  * batadv_send_skb_prepare_unicast_4addr() - encapsulate an skb with a
  *  unicast 4addr header
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: the skb containing the payload to encapsulate
  * @orig: the destination node
  * @packet_subtype: the unicast 4addr packet subtype to use
@@ -314,7 +301,7 @@ out:
 
 /**
  * batadv_send_skb_unicast() - encapsulate and send an skb via unicast
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: payload to send
  * @packet_type: the batman unicast packet type to use
  * @packet_subtype: the unicast 4addr packet subtype (only relevant for unicast
@@ -384,7 +371,7 @@ out:
 
 /**
  * batadv_send_skb_via_tt_generic() - send an skb via TT lookup
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: payload to send
  * @packet_type: the batman unicast packet type to use
  * @packet_subtype: the unicast 4addr packet subtype (only relevant for unicast
@@ -430,7 +417,7 @@ int batadv_send_skb_via_tt_generic(struct batadv_priv *bat_priv,
 
 /**
  * batadv_send_skb_via_gw() - send an skb via gateway lookup
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: payload to send
  * @vid: the vid to be used to search the translation table
  *
@@ -532,7 +519,7 @@ batadv_forw_packet_alloc(struct batadv_hard_iface *if_incoming,
 	forw_packet->queue_left = queue_left;
 	forw_packet->if_incoming = if_incoming;
 	forw_packet->if_outgoing = if_outgoing;
-	forw_packet->num_packets = 0;
+	forw_packet->num_packets = 1;
 
 	return forw_packet;
 
@@ -695,7 +682,7 @@ static void batadv_forw_packet_queue(struct batadv_forw_packet *forw_packet,
 
 /**
  * batadv_forw_packet_bcast_queue() - try to queue a broadcast packet
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @forw_packet: the forwarding packet to queue
  * @send_time: timestamp (jiffies) when the packet is to be sent
  *
@@ -714,7 +701,7 @@ batadv_forw_packet_bcast_queue(struct batadv_priv *bat_priv,
 
 /**
  * batadv_forw_packet_ogmv1_queue() - try to queue an OGMv1 packet
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @forw_packet: the forwarding packet to queue
  * @send_time: timestamp (jiffies) when the packet is to be sent
  *
@@ -732,7 +719,7 @@ void batadv_forw_packet_ogmv1_queue(struct batadv_priv *bat_priv,
 
 /**
  * batadv_forw_bcast_packet_to_list() - queue broadcast packet for transmissions
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: broadcast packet to add
  * @delay: number of jiffies to wait before sending
  * @own_packet: true if it is a self-generated broadcast packet
@@ -787,7 +774,7 @@ err:
 
 /**
  * batadv_forw_bcast_packet_if() - forward and queue a broadcast packet
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: broadcast packet to add
  * @delay: number of jiffies to wait before sending
  * @own_packet: true if it is a self-generated broadcast packet
@@ -838,7 +825,7 @@ static int batadv_forw_bcast_packet_if(struct batadv_priv *bat_priv,
 
 /**
  * batadv_send_no_broadcast() - check whether (re)broadcast is necessary
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: broadcast packet to check
  * @own_packet: true if it is a self-generated broadcast packet
  * @if_out: the outgoing interface checked and considered for (re)broadcast
@@ -900,7 +887,7 @@ static bool batadv_send_no_broadcast(struct batadv_priv *bat_priv,
 
 /**
  * __batadv_forw_bcast_packet() - forward and queue a broadcast packet
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: broadcast packet to add
  * @delay: number of jiffies to wait before sending
  * @own_packet: true if it is a self-generated broadcast packet
@@ -922,6 +909,7 @@ static int __batadv_forw_bcast_packet(struct batadv_priv *bat_priv,
 {
 	struct batadv_hard_iface *hard_iface;
 	struct batadv_hard_iface *primary_if;
+	struct list_head *iter;
 	int ret = NETDEV_TX_OK;
 
 	primary_if = batadv_primary_if_get_selected(bat_priv);
@@ -929,10 +917,7 @@ static int __batadv_forw_bcast_packet(struct batadv_priv *bat_priv,
 		return NETDEV_TX_BUSY;
 
 	rcu_read_lock();
-	list_for_each_entry_rcu(hard_iface, &batadv_hardif_list, list) {
-		if (hard_iface->soft_iface != bat_priv->soft_iface)
-			continue;
-
+	netdev_for_each_lower_private_rcu(bat_priv->mesh_iface, hard_iface, iter) {
 		if (!kref_get_unless_zero(&hard_iface->refcount))
 			continue;
 
@@ -958,7 +943,7 @@ static int __batadv_forw_bcast_packet(struct batadv_priv *bat_priv,
 
 /**
  * batadv_forw_bcast_packet() - forward and queue a broadcast packet
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: broadcast packet to add
  * @delay: number of jiffies to wait before sending
  * @own_packet: true if it is a self-generated broadcast packet
@@ -979,7 +964,7 @@ int batadv_forw_bcast_packet(struct batadv_priv *bat_priv,
 
 /**
  * batadv_send_bcast_packet() - send and queue a broadcast packet
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: broadcast packet to add
  * @delay: number of jiffies to wait before sending
  * @own_packet: true if it is a self-generated broadcast packet
@@ -1060,7 +1045,7 @@ static void batadv_send_outstanding_bcast_packet(struct work_struct *work)
 	delayed_work = to_delayed_work(work);
 	forw_packet = container_of(delayed_work, struct batadv_forw_packet,
 				   delayed_work);
-	bat_priv = netdev_priv(forw_packet->if_incoming->soft_iface);
+	bat_priv = netdev_priv(forw_packet->if_incoming->mesh_iface);
 
 	if (atomic_read(&bat_priv->mesh_state) == BATADV_MESH_DEACTIVATING) {
 		dropped = true;
@@ -1095,7 +1080,7 @@ out:
 
 /**
  * batadv_purge_outstanding_packets() - stop/purge scheduled bcast/OGMv1 packets
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @hard_iface: the hard interface to cancel and purge bcast/ogm packets on
  *
  * This method cancels and purges any broadcast and OGMv1 packet on the given

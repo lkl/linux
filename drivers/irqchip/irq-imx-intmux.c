@@ -254,7 +254,7 @@ static int imx_intmux_probe(struct platform_device *pdev)
 			goto out;
 		}
 
-		domain = irq_domain_add_linear(np, 32, &imx_intmux_domain_ops,
+		domain = irq_domain_create_linear(of_fwnode_handle(np), 32, &imx_intmux_domain_ops,
 					       &data->irqchip_data[i]);
 		if (!domain) {
 			ret = -ENOMEM;
@@ -361,6 +361,6 @@ static struct platform_driver imx_intmux_driver = {
 		.pm		= &imx_intmux_pm_ops,
 	},
 	.probe		= imx_intmux_probe,
-	.remove_new	= imx_intmux_remove,
+	.remove		= imx_intmux_remove,
 };
 builtin_platform_driver(imx_intmux_driver);

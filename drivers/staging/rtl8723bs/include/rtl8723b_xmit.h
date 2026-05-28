@@ -405,6 +405,8 @@ struct txdesc_8723b {
 void rtl8723b_update_txdesc(struct xmit_frame *pxmitframe, u8 *pmem);
 void rtl8723b_fill_fake_txdesc(struct adapter *padapter, u8 *pDesc, u32 BufferLen, u8 IsPsPoll, u8 IsBTQosNull, u8 bDataFrame);
 
+u32 rtl8723bs_hal_init(struct adapter *padapter);
+u32 rtl8723bs_hal_deinit(struct adapter *padapter);
 s32 rtl8723bs_init_xmit_priv(struct adapter *padapter);
 void rtl8723bs_free_xmit_priv(struct adapter *padapter);
 s32 rtl8723bs_hal_xmit(struct adapter *padapter, struct xmit_frame *pxmitframe);
@@ -412,7 +414,6 @@ s32 rtl8723bs_mgnt_xmit(struct adapter *padapter, struct xmit_frame *pmgntframe)
 s32	rtl8723bs_hal_xmitframe_enqueue(struct adapter *padapter, struct xmit_frame *pxmitframe);
 s32 rtl8723bs_xmit_buf_handler(struct adapter *padapter);
 int rtl8723bs_xmit_thread(void *context);
-#define hal_xmit_handler rtl8723bs_xmit_buf_handler
 
 u8 BWMapping_8723B(struct adapter *Adapter, struct pkt_attrib *pattrib);
 u8 SCMapping_8723B(struct adapter *Adapter, struct pkt_attrib *pattrib);

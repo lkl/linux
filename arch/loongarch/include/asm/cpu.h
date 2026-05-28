@@ -46,7 +46,7 @@
 
 #define PRID_PRODUCT_MASK	0x0fff
 
-#if !defined(__ASSEMBLY__)
+#if !defined(__ASSEMBLER__)
 
 enum cpu_type_enum {
 	CPU_UNKNOWN,
@@ -55,7 +55,28 @@ enum cpu_type_enum {
 	CPU_LAST
 };
 
-#endif /* !__ASSEMBLY */
+static inline char *id_to_core_name(unsigned int id)
+{
+	if ((id & PRID_COMP_MASK) != PRID_COMP_LOONGSON)
+		return "Unknown";
+
+	switch (id & PRID_SERIES_MASK) {
+	case PRID_SERIES_LA132:
+		return "LA132";
+	case PRID_SERIES_LA264:
+		return "LA264";
+	case PRID_SERIES_LA364:
+		return "LA364";
+	case PRID_SERIES_LA464:
+		return "LA464";
+	case PRID_SERIES_LA664:
+		return "LA664";
+	default:
+		return "Unknown";
+	}
+}
+
+#endif /* !__ASSEMBLER__ */
 
 /*
  * ISA Level encodings
@@ -101,7 +122,9 @@ enum cpu_type_enum {
 #define CPU_FEATURE_HYPERVISOR		26	/* CPU has hypervisor (running in VM) */
 #define CPU_FEATURE_PTW			27	/* CPU has hardware page table walker */
 #define CPU_FEATURE_LSPW		28	/* CPU has LSPW (lddir/ldpte instructions) */
-#define CPU_FEATURE_AVECINT		29	/* CPU has AVEC interrupt */
+#define CPU_FEATURE_MSGINT		29	/* CPU has MSG interrupt */
+#define CPU_FEATURE_AVECINT		30	/* CPU has AVEC interrupt */
+#define CPU_FEATURE_REDIRECTINT		31	/* CPU has interrupt remapping */
 
 #define LOONGARCH_CPU_CPUCFG		BIT_ULL(CPU_FEATURE_CPUCFG)
 #define LOONGARCH_CPU_LAM		BIT_ULL(CPU_FEATURE_LAM)
@@ -132,6 +155,8 @@ enum cpu_type_enum {
 #define LOONGARCH_CPU_HYPERVISOR	BIT_ULL(CPU_FEATURE_HYPERVISOR)
 #define LOONGARCH_CPU_PTW		BIT_ULL(CPU_FEATURE_PTW)
 #define LOONGARCH_CPU_LSPW		BIT_ULL(CPU_FEATURE_LSPW)
+#define LOONGARCH_CPU_MSGINT		BIT_ULL(CPU_FEATURE_MSGINT)
 #define LOONGARCH_CPU_AVECINT		BIT_ULL(CPU_FEATURE_AVECINT)
+#define LOONGARCH_CPU_REDIRECTINT	BIT_ULL(CPU_FEATURE_REDIRECTINT)
 
 #endif /* _ASM_CPU_H */

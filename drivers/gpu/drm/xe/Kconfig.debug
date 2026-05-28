@@ -40,9 +40,21 @@ config DRM_XE_DEBUG_VM
 
 	  If in doubt, say "N".
 
+config DRM_XE_DEBUG_MEMIRQ
+	bool "Enable extra memirq debugging"
+	default n
+	help
+	  Choose this option to enable additional debugging info for
+	  memory based interrupts.
+
+	  Recommended for driver developers only.
+
+	  If in doubt, say "N".
+
 config DRM_XE_DEBUG_SRIOV
 	bool "Enable extra SR-IOV debugging"
 	default n
+	select DRM_XE_DEBUG_MEMIRQ
 	help
 	  Enable extra SR-IOV debugging info.
 
@@ -54,7 +66,7 @@ config DRM_XE_DEBUG_MEM
 	bool "Enable passing SYS/VRAM addresses to user space"
 	default n
 	help
-	  Pass object location trough uapi. Intended for extended
+	  Pass object location through uapi. Intended for extended
 	  testing and development only.
 
 	  Recommended for driver developers only.
@@ -74,12 +86,17 @@ config DRM_XE_KUNIT_TEST
 
 	  If in doubt, say "N".
 
-config DRM_XE_LARGE_GUC_BUFFER
-        bool "Enable larger guc log buffer"
+config DRM_XE_DEBUG_GUC
+        bool "Enable extra GuC related debug options"
+        depends on DRM_XE_DEBUG
         default n
+        select STACKDEPOT
         help
           Choose this option when debugging guc issues.
-          Buffer should be large enough for complex issues.
+          The GuC log buffer is increased to the maximum allowed, which should
+          be large enough for complex issues. The tracking of FAST_REQ messages
+          is extended to include a record of the calling stack, which is then
+          dumped on a FAST_REQ error notification.
 
           Recommended for driver developers only.
 
@@ -87,10 +104,11 @@ config DRM_XE_LARGE_GUC_BUFFER
 
 config DRM_XE_USERPTR_INVAL_INJECT
        bool "Inject userptr invalidation -EINVAL errors"
+       depends on DRM_GPUSVM
        default n
        help
          Choose this option when debugging error paths that
 	 are hit during checks for userptr invalidations.
 
-	 Recomended for driver developers only.
+	 Recommended for driver developers only.
 	 If in doubt, say "N".

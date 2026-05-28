@@ -557,9 +557,9 @@ static int cs530x_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	unsigned int asp_fmt, asp_cfg = 0;
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		asp_cfg = CS530X_ASP_PRIMARY;
 		break;
 	default:
@@ -793,7 +793,7 @@ static int cs530x_set_sysclk(struct snd_soc_component *component, int clk_id,
 	case CS530X_SYSCLK_SRC_PLL:
 		break;
 	default:
-		dev_err(component->dev, "Invalid clock id %d\n", clk_id);
+		dev_err(component->dev, "Invalid sysclk source: %d\n", source);
 		return -EINVAL;
 	}
 
@@ -821,7 +821,7 @@ const struct regmap_config cs530x_regmap = {
 	.reg_defaults = cs530x_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(cs530x_reg_defaults),
 };
-EXPORT_SYMBOL_NS_GPL(cs530x_regmap, SND_SOC_CS530X);
+EXPORT_SYMBOL_NS_GPL(cs530x_regmap, "SND_SOC_CS530X");
 
 static int cs530x_check_device_id(struct cs530x_priv *cs530x)
 {
@@ -964,7 +964,7 @@ err_regulator:
 
 	return ret;
 }
-EXPORT_SYMBOL_NS_GPL(cs530x_probe, SND_SOC_CS530X);
+EXPORT_SYMBOL_NS_GPL(cs530x_probe, "SND_SOC_CS530X");
 
 MODULE_DESCRIPTION("CS530X CODEC Driver");
 MODULE_AUTHOR("Paul Handrigan <paulha@opensource.cirrus.com>");

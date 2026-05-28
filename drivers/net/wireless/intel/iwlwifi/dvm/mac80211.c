@@ -2,7 +2,7 @@
 /******************************************************************************
  *
  * Copyright(c) 2003 - 2014 Intel Corporation. All rights reserved.
- * Copyright(C) 2018 - 2019, 2022 - 2024 Intel Corporation
+ * Copyright(C) 2018 - 2019, 2022 - 2025 Intel Corporation
  *
  * Portions of this file are derived from the ipw3945 project, as well
  * as portions of the ieee80211 subsystem header files.
@@ -96,7 +96,7 @@ int iwlagn_mac_setup_register(struct iwl_priv *priv,
 	ieee80211_hw_set(hw, SUPPORT_FAST_XMIT);
 	ieee80211_hw_set(hw, WANT_MONITOR_VIF);
 
-	if (priv->trans->max_skb_frags)
+	if (priv->trans->info.max_skb_frags)
 		hw->netdev_features = NETIF_F_HIGHDMA | NETIF_F_SG;
 
 	hw->offchannel_tx_hw_queue = IWL_AUX_QUEUE;
@@ -188,7 +188,7 @@ int iwlagn_mac_setup_register(struct iwl_priv *priv,
 		priv->hw->wiphy->bands[NL80211_BAND_5GHZ] =
 			&priv->nvm_data->bands[NL80211_BAND_5GHZ];
 
-	hw->wiphy->hw_version = priv->trans->hw_id;
+	hw->wiphy->hw_version = priv->trans->info.hw_id;
 
 	iwl_leds_init(priv);
 
@@ -378,7 +378,7 @@ static int iwlagn_mac_suspend(struct ieee80211_hw *hw,
 	iwl_write32(priv->trans, CSR_UCODE_DRV_GP1_SET,
 		    CSR_UCODE_DRV_GP1_BIT_D3_CFG_COMPLETE);
 
-	iwl_trans_d3_suspend(priv->trans, false, true);
+	iwl_trans_d3_suspend(priv->trans, true);
 
 	goto out;
 
@@ -422,7 +422,6 @@ static int iwlagn_mac_resume(struct ieee80211_hw *hw)
 	struct ieee80211_vif *vif;
 	u32 base;
 	int ret;
-	enum iwl_d3_status d3_status;
 	struct error_table_start {
 		/* cf. struct iwl_error_event_table */
 		u32 valid;
@@ -451,14 +450,9 @@ static int iwlagn_mac_resume(struct ieee80211_hw *hw)
 	/* we'll clear ctx->vif during iwlagn_prepare_restart() */
 	vif = ctx->vif;
 
-	ret = iwl_trans_d3_resume(priv->trans, &d3_status, false, true);
+	ret = iwl_trans_d3_resume(priv->trans, true);
 	if (ret)
 		goto out_unlock;
-
-	if (d3_status != IWL_D3_STATUS_ALIVE) {
-		IWL_INFO(priv, "Device was reset during suspend\n");
-		goto out_unlock;
-	}
 
 	/* uCode is no longer operating by itself */
 	iwl_write32(priv->trans, CSR_UCODE_DRV_GP1_CLR,
@@ -549,7 +543,7 @@ static int iwlagn_mac_resume(struct ieee80211_hw *hw)
 
 	iwlagn_prepare_restart(priv);
 
-	memset((void *)&ctx->active, 0, sizeof(ctx->active));
+	memset((void *)(uintptr_t)&ctx->active, 0, sizeof(ctx->active));
 	iwl_connection_init_rx_config(priv, ctx);
 	iwlagn_set_rxon_chain(priv, ctx);
 
@@ -1091,7 +1085,7 @@ static void iwlagn_mac_flush(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		goto done;
 	}
 
-	scd_queues = BIT(priv->trans->trans_cfg->base_params->num_of_queues) - 1;
+	scd_queues = BIT(priv->trans->mac_cfg->base->num_of_queues) - 1;
 	scd_queues &= ~(BIT(IWL_IPAN_CMD_QUEUE_NUM) |
 			BIT(IWL_DEFAULT_CMD_QUEUE_NUM));
 
@@ -1565,6 +1559,16 @@ static void iwlagn_mac_sta_notify(struct ieee80211_hw *hw,
 	IWL_DEBUG_MAC80211(priv, "leave\n");
 }
 
+static void
+iwlagn_mac_reconfig_complete(struct ieee80211_hw *hw,
+			     enum ieee80211_reconfig_type reconfig_type)
+{
+	struct iwl_priv *priv = IWL_MAC80211_GET_DVM(hw);
+
+	if (reconfig_type == IEEE80211_RECONFIG_TYPE_RESTART)
+		iwl_trans_finish_sw_reset(priv->trans);
+}
+
 const struct ieee80211_ops iwlagn_hw_ops = {
 	.add_chanctx = ieee80211_emulate_add_chanctx,
 	.remove_chanctx = ieee80211_emulate_remove_chanctx,
@@ -1598,6 +1602,7 @@ const struct ieee80211_ops iwlagn_hw_ops = {
 	.tx_last_beacon = iwlagn_mac_tx_last_beacon,
 	.event_callback = iwlagn_mac_event_callback,
 	.set_tim = iwlagn_mac_set_tim,
+	.reconfig_complete = iwlagn_mac_reconfig_complete,
 };
 
 /* This function both allocates and initializes hw and priv. */

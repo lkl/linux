@@ -8,6 +8,7 @@
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
+#include <linux/math64.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_graph.h>
@@ -15,6 +16,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/reset.h>
 #include <linux/sys_soc.h>
+#include <linux/units.h>
 
 #include <media/mipi-csi2.h>
 #include <media/v4l2-ctrls.h>
@@ -135,13 +137,23 @@ struct rcar_csi2;
 /* V4H BASE registers */
 #define V4H_N_LANES_REG					0x0004
 #define V4H_CSI2_RESETN_REG				0x0008
+
 #define V4H_PHY_MODE_REG				0x001c
+#define V4H_PHY_MODE_DPHY				0
+#define V4H_PHY_MODE_CPHY				1
+
 #define V4H_PHY_SHUTDOWNZ_REG				0x0040
 #define V4H_DPHY_RSTZ_REG				0x0044
 #define V4H_FLDC_REG					0x0804
 #define V4H_FLDD_REG					0x0808
 #define V4H_IDIC_REG					0x0810
+
 #define V4H_PHY_EN_REG					0x2000
+#define V4H_PHY_EN_ENABLE_3				BIT(7)
+#define V4H_PHY_EN_ENABLE_2				BIT(6)
+#define V4H_PHY_EN_ENABLE_1				BIT(5)
+#define V4H_PHY_EN_ENABLE_0				BIT(4)
+#define V4H_PHY_EN_ENABLE_CLK				BIT(0)
 
 #define V4H_ST_PHYST_REG				0x2814
 #define V4H_ST_PHYST_ST_PHY_READY			BIT(31)
@@ -160,30 +172,40 @@ struct rcar_csi2;
 #define V4H_PPI_RW_LPDCOCAL_TWAIT_CONFIG_REG		0x21c0a
 #define V4H_PPI_RW_LPDCOCAL_VT_CONFIG_REG		0x21c0c
 #define V4H_PPI_RW_LPDCOCAL_COARSE_CFG_REG		0x21c10
+#define V4H_PPI_RW_DDLCAL_CFG_n_REG(n)			(0x21c40 + ((n) * 2)) /* n = 0 - 7 */
 #define V4H_PPI_RW_COMMON_CFG_REG			0x21c6c
 #define V4H_PPI_RW_TERMCAL_CFG_0_REG			0x21c80
 #define V4H_PPI_RW_OFFSETCAL_CFG_0_REG			0x21ca0
 
 /* V4H CORE registers */
-#define V4H_CORE_DIG_IOCTRL_RW_AFE_LANE0_CTRL_2_REG(n)	(0x22040 + ((n) * 2)) /* n = 0 - 15 */
-#define V4H_CORE_DIG_IOCTRL_RW_AFE_LANE1_CTRL_2_REG(n)	(0x22440 + ((n) * 2)) /* n = 0 - 15 */
-#define V4H_CORE_DIG_IOCTRL_RW_AFE_LANE2_CTRL_2_REG(n)	(0x22840 + ((n) * 2)) /* n = 0 - 15 */
-#define V4H_CORE_DIG_IOCTRL_RW_AFE_LANE3_CTRL_2_REG(n)	(0x22c40 + ((n) * 2)) /* n = 0 - 15 */
-#define V4H_CORE_DIG_IOCTRL_RW_AFE_LANE4_CTRL_2_REG(n)	(0x23040 + ((n) * 2)) /* n = 0 - 15 */
+
+#define V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(l, n) (0x22040 + ((l) * 0x400) + ((n) * 2))
+#define V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_3_REG(l, n) (0x22060 + ((l) * 0x400) + ((n) * 2))
+#define V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_4_REG(l, n) (0x22080 + ((l) * 0x400) + ((n) * 2))
+
 #define V4H_CORE_DIG_IOCTRL_RW_AFE_CB_CTRL_2_REG(n)	(0x23840 + ((n) * 2)) /* n = 0 - 11 */
 #define V4H_CORE_DIG_RW_COMMON_REG(n)			(0x23880 + ((n) * 2)) /* n = 0 - 15 */
 #define V4H_CORE_DIG_ANACTRL_RW_COMMON_ANACTRL_REG(n)	(0x239e0 + ((n) * 2)) /* n = 0 - 3 */
-#define V4H_CORE_DIG_CLANE_1_RW_CFG_0_REG		0x2a400
-#define V4H_CORE_DIG_CLANE_1_RW_HS_TX_6_REG		0x2a60c
+#define V4H_CORE_DIG_COMMON_RW_DESKEW_FINE_MEM_REG	0x23fe0
+
+#define V4H_CORE_DIG_DLANE_l_RW_CFG_n_REG(l, n)		(0x26000 + ((l) * 0x400) + ((n) * 2))
+#define V4H_CORE_DIG_DLANE_l_RW_LP_n_REG(l, n)		(0x26080 + ((l) * 0x400) + ((n) * 2))
+#define V4H_CORE_DIG_DLANE_l_RW_HS_RX_n_REG(l, n)	(0x26100 + ((l) * 0x400) + ((n) * 2))
+#define V4H_CORE_DIG_DLANE_CLK_RW_LP_n_REG(n)		V4H_CORE_DIG_DLANE_l_RW_LP_n_REG(4, (n))
+#define V4H_CORE_DIG_DLANE_CLK_RW_HS_RX_n_REG(n)	V4H_CORE_DIG_DLANE_l_RW_HS_RX_n_REG(4, (n))
 
 /* V4H C-PHY */
 #define V4H_CORE_DIG_RW_TRIO0_REG(n)			(0x22100 + ((n) * 2)) /* n = 0 - 3 */
 #define V4H_CORE_DIG_RW_TRIO1_REG(n)			(0x22500 + ((n) * 2)) /* n = 0 - 3 */
 #define V4H_CORE_DIG_RW_TRIO2_REG(n)			(0x22900 + ((n) * 2)) /* n = 0 - 3 */
+#define V4H_CORE_DIG_CLANE_0_RW_CFG_0_REG		0x2a000
 #define V4H_CORE_DIG_CLANE_0_RW_LP_0_REG		0x2a080
 #define V4H_CORE_DIG_CLANE_0_RW_HS_RX_REG(n)		(0x2a100 + ((n) * 2)) /* n = 0 - 6 */
+#define V4H_CORE_DIG_CLANE_1_RW_CFG_0_REG		0x2a400
 #define V4H_CORE_DIG_CLANE_1_RW_LP_0_REG		0x2a480
 #define V4H_CORE_DIG_CLANE_1_RW_HS_RX_REG(n)		(0x2a500 + ((n) * 2)) /* n = 0 - 6 */
+#define V4H_CORE_DIG_CLANE_1_RW_HS_TX_6_REG		0x2a60c
+#define V4H_CORE_DIG_CLANE_2_RW_CFG_0_REG		0x2a800
 #define V4H_CORE_DIG_CLANE_2_RW_LP_0_REG		0x2a880
 #define V4H_CORE_DIG_CLANE_2_RW_HS_RX_REG(n)		(0x2a900 + ((n) * 2)) /* n = 0 - 6 */
 
@@ -237,17 +259,37 @@ static const struct rcsi2_cphy_setting cphy_setting_table_r8a779g0[] = {
 	{ /* sentinel */ },
 };
 
+/* V4M registers */
+#define V4M_OVR1_REG					0x0848
+#define V4M_OVR1_FORCERXMODE_3				BIT(12)
+#define V4M_OVR1_FORCERXMODE_2				BIT(11)
+#define V4M_OVR1_FORCERXMODE_1				BIT(10)
+#define V4M_OVR1_FORCERXMODE_0				BIT(9)
+
+#define V4M_FRXM_REG					0x2004
+#define V4M_FRXM_FORCERXMODE_3				BIT(3)
+#define V4M_FRXM_FORCERXMODE_2				BIT(2)
+#define V4M_FRXM_FORCERXMODE_1				BIT(1)
+#define V4M_FRXM_FORCERXMODE_0				BIT(0)
+
+#define V4M_PHYPLL_REG					0x02050
+#define V4M_CSI0CLKFCPR_REG				0x02054
+#define V4M_PHTW_REG					0x02060
+#define V4M_PHTR_REG					0x02064
+#define V4M_PHTC_REG					0x02068
+
 struct phtw_value {
-	u16 data;
-	u16 code;
+	u8 data;
+	u8 code;
 };
 
-struct rcsi2_mbps_reg {
+struct rcsi2_mbps_info {
 	u16 mbps;
-	u16 reg;
+	u8 reg;
+	u16 osc_freq; /* V4M */
 };
 
-static const struct rcsi2_mbps_reg phtw_mbps_v3u[] = {
+static const struct rcsi2_mbps_info phtw_mbps_v3u[] = {
 	{ .mbps = 1500, .reg = 0xcc },
 	{ .mbps = 1550, .reg = 0x1d },
 	{ .mbps = 1600, .reg = 0x27 },
@@ -272,7 +314,7 @@ static const struct rcsi2_mbps_reg phtw_mbps_v3u[] = {
 	{ /* sentinel */ },
 };
 
-static const struct rcsi2_mbps_reg phtw_mbps_h3_v3h_m3n[] = {
+static const struct rcsi2_mbps_info phtw_mbps_h3_v3h_m3n[] = {
 	{ .mbps =   80, .reg = 0x86 },
 	{ .mbps =   90, .reg = 0x86 },
 	{ .mbps =  100, .reg = 0x87 },
@@ -292,7 +334,7 @@ static const struct rcsi2_mbps_reg phtw_mbps_h3_v3h_m3n[] = {
 	{ /* sentinel */ },
 };
 
-static const struct rcsi2_mbps_reg phtw_mbps_v3m_e3[] = {
+static const struct rcsi2_mbps_info phtw_mbps_v3m_e3[] = {
 	{ .mbps =   80, .reg = 0x00 },
 	{ .mbps =   90, .reg = 0x20 },
 	{ .mbps =  100, .reg = 0x40 },
@@ -336,7 +378,7 @@ static const struct rcsi2_mbps_reg phtw_mbps_v3m_e3[] = {
 #define PHYPLL_REG			0x68
 #define PHYPLL_HSFREQRANGE(n)		((n) << 16)
 
-static const struct rcsi2_mbps_reg hsfreqrange_v3u[] = {
+static const struct rcsi2_mbps_info hsfreqrange_v3u[] = {
 	{ .mbps =   80, .reg = 0x00 },
 	{ .mbps =   90, .reg = 0x10 },
 	{ .mbps =  100, .reg = 0x20 },
@@ -402,7 +444,7 @@ static const struct rcsi2_mbps_reg hsfreqrange_v3u[] = {
 	{ /* sentinel */ },
 };
 
-static const struct rcsi2_mbps_reg hsfreqrange_h3_v3h_m3n[] = {
+static const struct rcsi2_mbps_info hsfreqrange_h3_v3h_m3n[] = {
 	{ .mbps =   80, .reg = 0x00 },
 	{ .mbps =   90, .reg = 0x10 },
 	{ .mbps =  100, .reg = 0x20 },
@@ -449,7 +491,7 @@ static const struct rcsi2_mbps_reg hsfreqrange_h3_v3h_m3n[] = {
 	{ /* sentinel */ },
 };
 
-static const struct rcsi2_mbps_reg hsfreqrange_m3w[] = {
+static const struct rcsi2_mbps_info hsfreqrange_m3w[] = {
 	{ .mbps =   80,	.reg = 0x00 },
 	{ .mbps =   90,	.reg = 0x10 },
 	{ .mbps =  100,	.reg = 0x20 },
@@ -496,6 +538,73 @@ static const struct rcsi2_mbps_reg hsfreqrange_m3w[] = {
 	{ /* sentinel */ },
 };
 
+static const struct rcsi2_mbps_info hsfreqrange_v4m[] = {
+	{ .mbps =   80, .reg = 0x00, .osc_freq = 0x01a9 },
+	{ .mbps =   90, .reg = 0x10, .osc_freq = 0x01a9 },
+	{ .mbps =  100, .reg = 0x20, .osc_freq = 0x01a9 },
+	{ .mbps =  110, .reg = 0x30, .osc_freq = 0x01a9 },
+	{ .mbps =  120, .reg = 0x01, .osc_freq = 0x01a9 },
+	{ .mbps =  130, .reg = 0x11, .osc_freq = 0x01a9 },
+	{ .mbps =  140, .reg = 0x21, .osc_freq = 0x01a9 },
+	{ .mbps =  150, .reg = 0x31, .osc_freq = 0x01a9 },
+	{ .mbps =  160, .reg = 0x02, .osc_freq = 0x01a9 },
+	{ .mbps =  170, .reg = 0x12, .osc_freq = 0x01a9 },
+	{ .mbps =  180, .reg = 0x22, .osc_freq = 0x01a9 },
+	{ .mbps =  190, .reg = 0x32, .osc_freq = 0x01a9 },
+	{ .mbps =  205, .reg = 0x03, .osc_freq = 0x01a9 },
+	{ .mbps =  220, .reg = 0x13, .osc_freq = 0x01a9 },
+	{ .mbps =  235, .reg = 0x23, .osc_freq = 0x01a9 },
+	{ .mbps =  250, .reg = 0x33, .osc_freq = 0x01a9 },
+	{ .mbps =  275, .reg = 0x04, .osc_freq = 0x01a9 },
+	{ .mbps =  300, .reg = 0x14, .osc_freq = 0x01a9 },
+	{ .mbps =  325, .reg = 0x25, .osc_freq = 0x01a9 },
+	{ .mbps =  350, .reg = 0x35, .osc_freq = 0x01a9 },
+	{ .mbps =  400, .reg = 0x05, .osc_freq = 0x01a9 },
+	{ .mbps =  450, .reg = 0x16, .osc_freq = 0x01a9 },
+	{ .mbps =  500, .reg = 0x26, .osc_freq = 0x01a9 },
+	{ .mbps =  550, .reg = 0x37, .osc_freq = 0x01a9 },
+	{ .mbps =  600, .reg = 0x07, .osc_freq = 0x01a9 },
+	{ .mbps =  650, .reg = 0x18, .osc_freq = 0x01a9 },
+	{ .mbps =  700, .reg = 0x28, .osc_freq = 0x01a9 },
+	{ .mbps =  750, .reg = 0x39, .osc_freq = 0x01a9 },
+	{ .mbps =  800, .reg = 0x09, .osc_freq = 0x01a9 },
+	{ .mbps =  850, .reg = 0x19, .osc_freq = 0x01a9 },
+	{ .mbps =  900, .reg = 0x29, .osc_freq = 0x01a9 },
+	{ .mbps =  950, .reg = 0x3a, .osc_freq = 0x01a9 },
+	{ .mbps = 1000, .reg = 0x0a, .osc_freq = 0x01a9 },
+	{ .mbps = 1050, .reg = 0x1a, .osc_freq = 0x01a9 },
+	{ .mbps = 1100, .reg = 0x2a, .osc_freq = 0x01a9 },
+	{ .mbps = 1150, .reg = 0x3b, .osc_freq = 0x01a9 },
+	{ .mbps = 1200, .reg = 0x0b, .osc_freq = 0x01a9 },
+	{ .mbps = 1250, .reg = 0x1b, .osc_freq = 0x01a9 },
+	{ .mbps = 1300, .reg = 0x2b, .osc_freq = 0x01a9 },
+	{ .mbps = 1350, .reg = 0x3c, .osc_freq = 0x01a9 },
+	{ .mbps = 1400, .reg = 0x0c, .osc_freq = 0x01a9 },
+	{ .mbps = 1450, .reg = 0x1c, .osc_freq = 0x01a9 },
+	{ .mbps = 1500, .reg = 0x2c, .osc_freq = 0x01a9 },
+	{ .mbps = 1550, .reg = 0x3d, .osc_freq = 0x0108 },
+	{ .mbps = 1600, .reg = 0x0d, .osc_freq = 0x0110 },
+	{ .mbps = 1650, .reg = 0x1d, .osc_freq = 0x0119 },
+	{ .mbps = 1700, .reg = 0x2e, .osc_freq = 0x0121 },
+	{ .mbps = 1750, .reg = 0x3e, .osc_freq = 0x012a },
+	{ .mbps = 1800, .reg = 0x0e, .osc_freq = 0x0132 },
+	{ .mbps = 1850, .reg = 0x1e, .osc_freq = 0x013b },
+	{ .mbps = 1900, .reg = 0x2f, .osc_freq = 0x0143 },
+	{ .mbps = 1950, .reg = 0x3f, .osc_freq = 0x014c },
+	{ .mbps = 2000, .reg = 0x0f, .osc_freq = 0x0154 },
+	{ .mbps = 2050, .reg = 0x40, .osc_freq = 0x015d },
+	{ .mbps = 2100, .reg = 0x41, .osc_freq = 0x0165 },
+	{ .mbps = 2150, .reg = 0x42, .osc_freq = 0x016e },
+	{ .mbps = 2200, .reg = 0x43, .osc_freq = 0x0176 },
+	{ .mbps = 2250, .reg = 0x44, .osc_freq = 0x017f },
+	{ .mbps = 2300, .reg = 0x45, .osc_freq = 0x0187 },
+	{ .mbps = 2350, .reg = 0x46, .osc_freq = 0x0190 },
+	{ .mbps = 2400, .reg = 0x47, .osc_freq = 0x0198 },
+	{ .mbps = 2450, .reg = 0x48, .osc_freq = 0x01a1 },
+	{ .mbps = 2500, .reg = 0x49, .osc_freq = 0x01a9 },
+	{ /* sentinel */ },
+};
+
 /* PHY ESC Error Monitor */
 #define PHEERM_REG			0x74
 
@@ -538,6 +647,10 @@ static const struct rcar_csi2_format rcar_csi2_formats[] = {
 		.datatype = MIPI_CSI2_DT_YUV422_8B,
 		.bpp = 20,
 	}, {
+		.code = MEDIA_BUS_FMT_Y8_1X8,
+		.datatype = MIPI_CSI2_DT_RAW8,
+		.bpp = 8,
+	}, {
 		.code = MEDIA_BUS_FMT_Y10_1X10,
 		.datatype = MIPI_CSI2_DT_RAW10,
 		.bpp = 10,
@@ -558,9 +671,37 @@ static const struct rcar_csi2_format rcar_csi2_formats[] = {
 		.datatype = MIPI_CSI2_DT_RAW8,
 		.bpp = 8,
 	}, {
-		.code = MEDIA_BUS_FMT_Y8_1X8,
-		.datatype = MIPI_CSI2_DT_RAW8,
-		.bpp = 8,
+		.code = MEDIA_BUS_FMT_SBGGR10_1X10,
+		.datatype = MIPI_CSI2_DT_RAW10,
+		.bpp = 10,
+	}, {
+		.code = MEDIA_BUS_FMT_SGBRG10_1X10,
+		.datatype = MIPI_CSI2_DT_RAW10,
+		.bpp = 10,
+	}, {
+		.code = MEDIA_BUS_FMT_SGRBG10_1X10,
+		.datatype = MIPI_CSI2_DT_RAW10,
+		.bpp = 10,
+	}, {
+		.code = MEDIA_BUS_FMT_SRGGB10_1X10,
+		.datatype = MIPI_CSI2_DT_RAW10,
+		.bpp = 10,
+	}, {
+		.code = MEDIA_BUS_FMT_SBGGR12_1X12,
+		.datatype = MIPI_CSI2_DT_RAW12,
+		.bpp = 12,
+	}, {
+		.code = MEDIA_BUS_FMT_SGBRG12_1X12,
+		.datatype = MIPI_CSI2_DT_RAW12,
+		.bpp = 12,
+	}, {
+		.code = MEDIA_BUS_FMT_SGRBG12_1X12,
+		.datatype = MIPI_CSI2_DT_RAW12,
+		.bpp = 12,
+	}, {
+		.code = MEDIA_BUS_FMT_SRGGB12_1X12,
+		.datatype = MIPI_CSI2_DT_RAW12,
+		.bpp = 12,
 	},
 };
 
@@ -575,6 +716,21 @@ static const struct rcar_csi2_format *rcsi2_code_to_fmt(unsigned int code)
 	return NULL;
 }
 
+struct rcsi2_cphy_line_order {
+	enum v4l2_mbus_csi2_cphy_line_orders_type order;
+	u16 cfg;
+	u16 ctrl29;
+};
+
+static const struct rcsi2_cphy_line_order rcsi2_cphy_line_orders[] = {
+	{ .order = V4L2_MBUS_CSI2_CPHY_LINE_ORDER_ABC, .cfg = 0x0, .ctrl29 = 0x0 },
+	{ .order = V4L2_MBUS_CSI2_CPHY_LINE_ORDER_ACB, .cfg = 0xa, .ctrl29 = 0x1 },
+	{ .order = V4L2_MBUS_CSI2_CPHY_LINE_ORDER_BAC, .cfg = 0xc, .ctrl29 = 0x1 },
+	{ .order = V4L2_MBUS_CSI2_CPHY_LINE_ORDER_BCA, .cfg = 0x5, .ctrl29 = 0x0 },
+	{ .order = V4L2_MBUS_CSI2_CPHY_LINE_ORDER_CAB, .cfg = 0x3, .ctrl29 = 0x0 },
+	{ .order = V4L2_MBUS_CSI2_CPHY_LINE_ORDER_CBA, .cfg = 0x9, .ctrl29 = 0x1 }
+};
+
 enum rcar_csi2_pads {
 	RCAR_CSI2_SINK,
 	RCAR_CSI2_SOURCE_VC0,
@@ -584,13 +740,19 @@ enum rcar_csi2_pads {
 	NR_OF_RCAR_CSI2_PAD,
 };
 
+struct rcsi2_register_layout {
+	unsigned int phtw;
+	unsigned int phypll;
+};
+
 struct rcar_csi2_info {
+	const struct rcsi2_register_layout *regs;
 	int (*init_phtw)(struct rcar_csi2 *priv, unsigned int mbps);
 	int (*phy_post_init)(struct rcar_csi2 *priv);
 	int (*start_receiver)(struct rcar_csi2 *priv,
 			      struct v4l2_subdev_state *state);
 	void (*enter_standby)(struct rcar_csi2 *priv);
-	const struct rcsi2_mbps_reg *hsfreqrange;
+	const struct rcsi2_mbps_info *hsfreqrange;
 	unsigned int csi0clkfreqrange;
 	unsigned int num_channels;
 	bool clear_ulps;
@@ -619,6 +781,7 @@ struct rcar_csi2 {
 	bool cphy;
 	unsigned short lanes;
 	unsigned char lane_swap[4];
+	enum v4l2_mbus_csi2_cphy_line_orders_type line_orders[3];
 };
 
 static inline struct rcar_csi2 *sd_to_csi2(struct v4l2_subdev *sd)
@@ -651,9 +814,86 @@ static void rcsi2_write(struct rcar_csi2 *priv, unsigned int reg, u32 data)
 	iowrite32(data, priv->base + reg);
 }
 
+static u16 rcsi2_read16(struct rcar_csi2 *priv, unsigned int reg)
+{
+	return ioread16(priv->base + reg);
+}
+
 static void rcsi2_write16(struct rcar_csi2 *priv, unsigned int reg, u16 data)
 {
 	iowrite16(data, priv->base + reg);
+}
+
+static void rcsi2_modify16(struct rcar_csi2 *priv, unsigned int reg, u16 data, u16 mask)
+{
+	u16 val;
+
+	val = rcsi2_read16(priv, reg) & ~mask;
+	rcsi2_write16(priv, reg, val | data);
+}
+
+static int rcsi2_phtw_write(struct rcar_csi2 *priv, u8 data, u8 code)
+{
+	unsigned int timeout;
+
+	rcsi2_write(priv, priv->info->regs->phtw,
+		    PHTW_DWEN | PHTW_TESTDIN_DATA(data) |
+		    PHTW_CWEN | PHTW_TESTDIN_CODE(code));
+
+	/* Wait for DWEN and CWEN to be cleared by hardware. */
+	for (timeout = 0; timeout <= 20; timeout++) {
+		if (!(rcsi2_read(priv, priv->info->regs->phtw) & (PHTW_DWEN | PHTW_CWEN)))
+			return 0;
+
+		usleep_range(1000, 2000);
+	}
+
+	dev_err(priv->dev, "Timeout waiting for PHTW_DWEN and/or PHTW_CWEN\n");
+
+	return -ETIMEDOUT;
+}
+
+static int rcsi2_phtw_write_array(struct rcar_csi2 *priv,
+				  const struct phtw_value *values,
+				  unsigned int size)
+{
+	int ret;
+
+	for (unsigned int i = 0; i < size; i++) {
+		ret = rcsi2_phtw_write(priv, values[i].data, values[i].code);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static const struct rcsi2_mbps_info *
+rcsi2_mbps_to_info(struct rcar_csi2 *priv,
+		   const struct rcsi2_mbps_info *infotable, unsigned int mbps)
+{
+	const struct rcsi2_mbps_info *info;
+	const struct rcsi2_mbps_info *prev = NULL;
+
+	if (mbps < infotable->mbps)
+		dev_warn(priv->dev, "%u Mbps less than min PHY speed %u Mbps",
+			 mbps, infotable->mbps);
+
+	for (info = infotable; info->mbps != 0; info++) {
+		if (info->mbps >= mbps)
+			break;
+		prev = info;
+	}
+
+	if (!info->mbps) {
+		dev_err(priv->dev, "Unsupported PHY speed (%u Mbps)", mbps);
+		return NULL;
+	}
+
+	if (prev && ((mbps - prev->mbps) <= (info->mbps - mbps)))
+		info = prev;
+
+	return info;
 }
 
 static void rcsi2_enter_standby_gen3(struct rcar_csi2 *priv)
@@ -708,29 +948,13 @@ static int rcsi2_wait_phy_start(struct rcar_csi2 *priv,
 
 static int rcsi2_set_phypll(struct rcar_csi2 *priv, unsigned int mbps)
 {
-	const struct rcsi2_mbps_reg *hsfreq;
-	const struct rcsi2_mbps_reg *hsfreq_prev = NULL;
+	const struct rcsi2_mbps_info *info;
 
-	if (mbps < priv->info->hsfreqrange->mbps)
-		dev_warn(priv->dev, "%u Mbps less than min PHY speed %u Mbps",
-			 mbps, priv->info->hsfreqrange->mbps);
-
-	for (hsfreq = priv->info->hsfreqrange; hsfreq->mbps != 0; hsfreq++) {
-		if (hsfreq->mbps >= mbps)
-			break;
-		hsfreq_prev = hsfreq;
-	}
-
-	if (!hsfreq->mbps) {
-		dev_err(priv->dev, "Unsupported PHY speed (%u Mbps)", mbps);
+	info = rcsi2_mbps_to_info(priv, priv->info->hsfreqrange, mbps);
+	if (!info)
 		return -ERANGE;
-	}
 
-	if (hsfreq_prev &&
-	    ((mbps - hsfreq_prev->mbps) <= (hsfreq->mbps - mbps)))
-		hsfreq = hsfreq_prev;
-
-	rcsi2_write(priv, PHYPLL_REG, PHYPLL_HSFREQRANGE(hsfreq->reg));
+	rcsi2_write(priv, priv->info->regs->phypll, PHYPLL_HSFREQRANGE(info->reg));
 
 	return 0;
 }
@@ -738,34 +962,28 @@ static int rcsi2_set_phypll(struct rcar_csi2 *priv, unsigned int mbps)
 static int rcsi2_calc_mbps(struct rcar_csi2 *priv, unsigned int bpp,
 			   unsigned int lanes)
 {
+	struct media_pad *remote_pad;
 	struct v4l2_subdev *source;
-	struct v4l2_ctrl *ctrl;
+	s64 freq;
 	u64 mbps;
 
 	if (!priv->remote)
 		return -ENODEV;
 
 	source = priv->remote;
+	remote_pad = &source->entity.pads[priv->remote_pad];
 
-	/* Read the pixel rate control from remote. */
-	ctrl = v4l2_ctrl_find(source->ctrl_handler, V4L2_CID_PIXEL_RATE);
-	if (!ctrl) {
-		dev_err(priv->dev, "no pixel rate control in subdev %s\n",
-			source->name);
-		return -EINVAL;
+	freq = v4l2_get_link_freq(remote_pad, bpp, 2 * lanes);
+	if (freq < 0) {
+		int ret = (int)freq;
+
+		dev_err(priv->dev, "failed to get link freq for %s: %d\n",
+			source->name, ret);
+
+		return ret;
 	}
 
-	/*
-	 * Calculate the phypll in mbps.
-	 * link_freq = (pixel_rate * bits_per_sample) / (2 * nr_of_lanes)
-	 * bps = link_freq * 2
-	 */
-	mbps = v4l2_ctrl_g_ctrl_int64(ctrl) * bpp;
-	do_div(mbps, lanes * 1000000);
-
-	/* Adjust for C-PHY, divide by 2.8. */
-	if (priv->cphy)
-		mbps = div_u64(mbps * 5, 14);
+	mbps = div_u64(freq * 2, MEGA);
 
 	return mbps;
 }
@@ -863,15 +1081,9 @@ static int rcsi2_start_receiver_gen3(struct rcar_csi2 *priv,
 			vcdt2 |= vcdt_part << ((i % 2) * 16);
 	}
 
-	if (fmt->field == V4L2_FIELD_ALTERNATE) {
+	if (fmt->field == V4L2_FIELD_ALTERNATE)
 		fld = FLD_DET_SEL(1) | FLD_FLD_EN4 | FLD_FLD_EN3 | FLD_FLD_EN2
 			| FLD_FLD_EN;
-
-		if (fmt->height == 240)
-			fld |= FLD_FLD_NUM(0);
-		else
-			fld |= FLD_FLD_NUM(1);
-	}
 
 	/*
 	 * Get the number of active data lanes inspecting the remote mbus
@@ -961,6 +1173,26 @@ static int rcsi2_start_receiver_gen3(struct rcar_csi2 *priv,
 	return 0;
 }
 
+static void rsci2_set_line_order(struct rcar_csi2 *priv,
+				 enum v4l2_mbus_csi2_cphy_line_orders_type order,
+				 unsigned int cfgreg, unsigned int ctrlreg)
+{
+	const struct rcsi2_cphy_line_order *info = NULL;
+
+	for (unsigned int i = 0; i < ARRAY_SIZE(rcsi2_cphy_line_orders); i++) {
+		if (rcsi2_cphy_line_orders[i].order == order) {
+			info = &rcsi2_cphy_line_orders[i];
+			break;
+		}
+	}
+
+	if (!info)
+		return;
+
+	rcsi2_modify16(priv, cfgreg, info->cfg, 0x000f);
+	rcsi2_modify16(priv, ctrlreg, info->ctrl29, 0x0100);
+}
+
 static int rcsi2_wait_phy_start_v4h(struct rcar_csi2 *priv, u32 match)
 {
 	unsigned int timeout;
@@ -977,9 +1209,14 @@ static int rcsi2_wait_phy_start_v4h(struct rcar_csi2 *priv, u32 match)
 	return -ETIMEDOUT;
 }
 
-static int rcsi2_c_phy_setting_v4h(struct rcar_csi2 *priv, int msps)
+static const struct rcsi2_cphy_setting *
+rcsi2_c_phy_setting_v4h(struct rcar_csi2 *priv, int mbps)
 {
 	const struct rcsi2_cphy_setting *conf;
+	int msps;
+
+	/* Adjust for C-PHY symbols, divide by 2.8. */
+	msps = div_u64(mbps * 5, 14);
 
 	for (conf = cphy_setting_table_r8a779g0; conf->msps != 0; conf++) {
 		if (conf->msps > msps)
@@ -988,7 +1225,7 @@ static int rcsi2_c_phy_setting_v4h(struct rcar_csi2 *priv, int msps)
 
 	if (!conf->msps) {
 		dev_err(priv->dev, "Unsupported PHY speed for msps setting (%u Msps)", msps);
-		return -ERANGE;
+		return NULL;
 	}
 
 	/* C-PHY specific */
@@ -1020,11 +1257,11 @@ static int rcsi2_c_phy_setting_v4h(struct rcar_csi2 *priv, int msps)
 	rcsi2_write16(priv, V4H_CORE_DIG_CLANE_1_RW_HS_RX_REG(2), conf->rx2);
 	rcsi2_write16(priv, V4H_CORE_DIG_CLANE_2_RW_HS_RX_REG(2), conf->rx2);
 
-	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANE0_CTRL_2_REG(2), 0x0001);
-	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANE1_CTRL_2_REG(2), 0);
-	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANE2_CTRL_2_REG(2), 0x0001);
-	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANE3_CTRL_2_REG(2), 0x0001);
-	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANE4_CTRL_2_REG(2), 0);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(0, 2), 0x0001);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(1, 2), 0);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(2, 2), 0x0001);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(3, 2), 0x0001);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(4, 2), 0);
 
 	rcsi2_write16(priv, V4H_CORE_DIG_RW_TRIO0_REG(0), conf->trio0);
 	rcsi2_write16(priv, V4H_CORE_DIG_RW_TRIO1_REG(0), conf->trio0);
@@ -1038,27 +1275,201 @@ static int rcsi2_c_phy_setting_v4h(struct rcar_csi2 *priv, int msps)
 	rcsi2_write16(priv, V4H_CORE_DIG_RW_TRIO1_REG(1), conf->trio1);
 	rcsi2_write16(priv, V4H_CORE_DIG_RW_TRIO2_REG(1), conf->trio1);
 
-	/*
-	 * Configure pin-swap.
-	 * TODO: This registers is not documented yet, the values should depend
-	 * on the 'clock-lanes' and 'data-lanes' devicetree properties.
-	 */
-	rcsi2_write16(priv, V4H_CORE_DIG_CLANE_1_RW_CFG_0_REG, 0xf5);
+	/* Configure data line order. */
+	rsci2_set_line_order(priv, priv->line_orders[0],
+			     V4H_CORE_DIG_CLANE_0_RW_CFG_0_REG,
+			     V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(0, 9));
+	rsci2_set_line_order(priv, priv->line_orders[1],
+			     V4H_CORE_DIG_CLANE_1_RW_CFG_0_REG,
+			     V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(1, 9));
+	rsci2_set_line_order(priv, priv->line_orders[2],
+			     V4H_CORE_DIG_CLANE_2_RW_CFG_0_REG,
+			     V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(2, 9));
+
+	/* TODO: This registers is not documented. */
 	rcsi2_write16(priv, V4H_CORE_DIG_CLANE_1_RW_HS_TX_6_REG, 0x5000);
 
-	/* Leave Shutdown mode */
-	rcsi2_write(priv, V4H_DPHY_RSTZ_REG, BIT(0));
-	rcsi2_write(priv, V4H_PHY_SHUTDOWNZ_REG, BIT(0));
+	return conf;
+}
 
-	/* Wait for calibration */
-	if (rcsi2_wait_phy_start_v4h(priv, V4H_ST_PHYST_ST_PHY_READY)) {
-		dev_err(priv->dev, "PHY calibration failed\n");
-		return -ETIMEDOUT;
+struct rcsi2_d_phy_setting_v4h_lut_value {
+	unsigned int mbps;
+	unsigned char cfg_1;
+	unsigned char cfg_5_94;
+	unsigned char cfg_5_30;
+	unsigned char lane_ctrl_2_8;
+	unsigned char rw_hs_rx_3_83;
+	unsigned char rw_hs_rx_3_20;
+	unsigned char rw_hs_rx_6;
+	unsigned char rw_hs_rx_1;
+};
+
+static const struct rcsi2_d_phy_setting_v4h_lut_value *
+rcsi2_d_phy_setting_v4h_lut_lookup(int mbps)
+{
+	static const struct rcsi2_d_phy_setting_v4h_lut_value values[] = {
+		{ 4500, 0x3f, 0x07, 0x00, 0x01, 0x02, 0x01, 0x0d, 0x10 },
+		{ 4000, 0x47, 0x08, 0x01, 0x01, 0x05, 0x01, 0x0f, 0x0d },
+		{ 3600, 0x4f, 0x09, 0x01, 0x01, 0x06, 0x01, 0x10, 0x0b },
+		{ 3230, 0x57, 0x0a, 0x01, 0x01, 0x06, 0x01, 0x12, 0x09 },
+		{ 3000, 0x47, 0x08, 0x00, 0x00, 0x03, 0x01, 0x0f, 0x0c },
+		{ 2700, 0x4f, 0x09, 0x01, 0x00, 0x06, 0x01, 0x10, 0x0b },
+		{ 2455, 0x57, 0x0a, 0x01, 0x00, 0x06, 0x01, 0x12, 0x09 },
+		{ 2250, 0x5f, 0x0b, 0x01, 0x00, 0x08, 0x01, 0x13, 0x08 },
+		{ 2077, 0x67, 0x0c, 0x01, 0x00, 0x06, 0x02, 0x15, 0x0d },
+		{ 1929, 0x6f, 0x0d, 0x02, 0x00, 0x06, 0x02, 0x17, 0x0d },
+		{ 1800, 0x77, 0x0e, 0x02, 0x00, 0x06, 0x02, 0x18, 0x0d },
+		{ 1688, 0x7f, 0x0f, 0x02, 0x00, 0x08, 0x02, 0x1a, 0x0d },
+		{ 1588, 0x87, 0x10, 0x02, 0x00, 0x08, 0x02, 0x1b, 0x0d },
+		{ 1500, 0x8f, 0x11, 0x03, 0x00, 0x08, 0x02, 0x1d, 0x0c },
+	};
+
+	for (unsigned int i = 0; i < ARRAY_SIZE(values); i++)
+		if (mbps >= values[i].mbps)
+			return &values[i];
+
+	return NULL;
+}
+
+static int rcsi2_d_phy_setting_v4h(struct rcar_csi2 *priv, int mbps)
+{
+	const struct rcsi2_d_phy_setting_v4h_lut_value *lut =
+		rcsi2_d_phy_setting_v4h_lut_lookup(mbps);
+	u16 val;
+
+	rcsi2_write16(priv, V4H_CORE_DIG_RW_COMMON_REG(7), 0x0000);
+	rcsi2_write16(priv, V4H_PPI_STARTUP_RW_COMMON_DPHY_REG(7), mbps > 1500 ? 0x0028 : 0x0068);
+	rcsi2_write16(priv, V4H_PPI_STARTUP_RW_COMMON_DPHY_REG(8), 0x0050);
+	rcsi2_write16(priv, V4H_PPI_RW_DDLCAL_CFG_n_REG(0), 0x0063);
+	rcsi2_write16(priv, V4H_PPI_RW_DDLCAL_CFG_n_REG(7), 0x1132);
+	rcsi2_write16(priv, V4H_PPI_RW_DDLCAL_CFG_n_REG(1), 0x1340);
+	rcsi2_write16(priv, V4H_PPI_RW_DDLCAL_CFG_n_REG(2), 0x4b13);
+	rcsi2_write16(priv, V4H_PPI_RW_DDLCAL_CFG_n_REG(4), 0x000a);
+	rcsi2_write16(priv, V4H_PPI_RW_DDLCAL_CFG_n_REG(6), 0x800a);
+	rcsi2_write16(priv, V4H_PPI_RW_DDLCAL_CFG_n_REG(7), 0x1109);
+
+	if (mbps > 1500) {
+		val = DIV_ROUND_UP(5 * mbps, 64);
+		rcsi2_write16(priv, V4H_PPI_RW_DDLCAL_CFG_n_REG(3), val);
 	}
 
-	/* C-PHY setting - analog programing*/
-	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANE0_CTRL_2_REG(9), conf->lane29);
-	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANE0_CTRL_2_REG(7), conf->lane27);
+	if (lut) {
+		rcsi2_modify16(priv, V4H_PPI_RW_DDLCAL_CFG_n_REG(1),
+			       lut->cfg_1, 0x00ff);
+		rcsi2_modify16(priv, V4H_PPI_RW_DDLCAL_CFG_n_REG(5),
+			       lut->cfg_5_94 << 4, 0x03f0);
+		rcsi2_modify16(priv, V4H_PPI_RW_DDLCAL_CFG_n_REG(5),
+			       lut->cfg_5_30 << 0, 0x000f);
+
+		for (unsigned int l = 0; l < 5; l++)
+			rcsi2_modify16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(l, 8),
+				       lut->lane_ctrl_2_8 << 12, 0x1000);
+	}
+
+	for (unsigned int l = 0; l < 4; l++)
+		rcsi2_write16(priv, V4H_CORE_DIG_DLANE_l_RW_LP_n_REG(l, 0), 0x463c);
+
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(0, 2), 0x0000);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(1, 2), 0x0000);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(2, 2), 0x0001);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(3, 2), 0x0000);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(4, 2), 0x0000);
+
+	rcsi2_write16(priv, V4H_CORE_DIG_RW_COMMON_REG(6), 0x0009);
+
+	val = mbps > 1500 ? 0x0800 : 0x0802;
+	for (unsigned int l = 0; l < 5; l++)
+		rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(l, 12), val);
+
+	val = mbps > 1500 ? 0x0000 : 0x0002;
+	for (unsigned int l = 0; l < 5; l++)
+		rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(l, 13), val);
+
+	if (mbps >= 80) {
+		/* 2560: 6, 1280: 5, 640: 4, 320: 3, 160: 2, 80: 1 */
+		val = ilog2(mbps / 80) + 1;
+		rcsi2_modify16(priv,
+			       V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(2, 9),
+			       val << 5, 0xe0);
+	}
+
+	rcsi2_write16(priv, V4H_CORE_DIG_DLANE_CLK_RW_HS_RX_n_REG(0), 0x091c);
+	rcsi2_write16(priv, V4H_CORE_DIG_DLANE_CLK_RW_HS_RX_n_REG(7), 0x3b06);
+
+	val = DIV_ROUND_UP(1200, mbps) + 12;
+	for (unsigned int l = 0; l < 4; l++)
+		rcsi2_modify16(priv, V4H_CORE_DIG_DLANE_l_RW_HS_RX_n_REG(l, 0), val << 8, 0xf0);
+
+	val = mbps > 1500 ? 0x0004 : 0x0008;
+	for (unsigned int l = 0; l < 4; l++)
+		rcsi2_write16(priv, V4H_CORE_DIG_DLANE_l_RW_CFG_n_REG(l, 1), val);
+
+	val = mbps > 2500 ? 0x669a : mbps > 1500 ? 0xe69a : 0xe69b;
+	for (unsigned int l = 0; l < 4; l++)
+		rcsi2_write16(priv, V4H_CORE_DIG_DLANE_l_RW_HS_RX_n_REG(l, 2), val);
+
+	for (unsigned int l = 0; l < 4; l++)
+		rcsi2_write16(priv, V4H_CORE_DIG_DLANE_l_RW_LP_n_REG(l, 0), 0x163c);
+	rcsi2_write16(priv, V4H_CORE_DIG_DLANE_CLK_RW_LP_n_REG(0), 0x163c);
+
+	if (lut) {
+		for (unsigned int l = 0; l < 4; l++)
+			rcsi2_modify16(priv, V4H_CORE_DIG_DLANE_l_RW_HS_RX_n_REG(l, 1),
+				       lut->rw_hs_rx_1, 0xff);
+	}
+
+	for (unsigned int l = 0; l < 4; l++)
+		rcsi2_write16(priv, V4H_CORE_DIG_DLANE_l_RW_HS_RX_n_REG(l, 3), 0x9209);
+
+	for (unsigned int l = 0; l < 4; l++)
+		rcsi2_write16(priv, V4H_CORE_DIG_DLANE_l_RW_HS_RX_n_REG(l, 4), 0x0096);
+
+	for (unsigned int l = 0; l < 4; l++)
+		rcsi2_write16(priv, V4H_CORE_DIG_DLANE_l_RW_HS_RX_n_REG(l, 5), 0x0100);
+
+	for (unsigned int l = 0; l < 4; l++)
+		rcsi2_write16(priv, V4H_CORE_DIG_DLANE_l_RW_HS_RX_n_REG(l, 6), 0x2d02);
+
+	for (unsigned int l = 0; l < 4; l++)
+		rcsi2_write16(priv, V4H_CORE_DIG_DLANE_l_RW_HS_RX_n_REG(l, 7), 0x1b06);
+
+	if (lut) {
+		/*
+		 * Documentation LUT have two values but document writing both
+		 * values in a single write.
+		 */
+		for (unsigned int l = 0; l < 4; l++)
+			rcsi2_modify16(priv, V4H_CORE_DIG_DLANE_l_RW_HS_RX_n_REG(l, 3),
+				       lut->rw_hs_rx_3_83 << 3 | lut->rw_hs_rx_3_20, 0x1ff);
+
+		for (unsigned int l = 0; l < 4; l++)
+			rcsi2_modify16(priv, V4H_CORE_DIG_DLANE_l_RW_HS_RX_n_REG(l, 6),
+				       lut->rw_hs_rx_6 << 8, 0xff00);
+	}
+
+	static const u16 deskew_fine[] = {
+		0x0404, 0x040c, 0x0414, 0x041c, 0x0423, 0x0429, 0x0430, 0x043a,
+		0x0445, 0x044a, 0x0450, 0x045a, 0x0465, 0x0469, 0x0472, 0x047a,
+		0x0485, 0x0489, 0x0490, 0x049a, 0x04a4, 0x04ac, 0x04b4, 0x04bc,
+		0x04c4, 0x04cc, 0x04d4, 0x04dc, 0x04e4, 0x04ec, 0x04f4, 0x04fc,
+		0x0504, 0x050c, 0x0514, 0x051c, 0x0523, 0x0529, 0x0530, 0x053a,
+		0x0545, 0x054a, 0x0550, 0x055a, 0x0565, 0x0569, 0x0572, 0x057a,
+		0x0585, 0x0589, 0x0590, 0x059a, 0x05a4, 0x05ac, 0x05b4, 0x05bc,
+		0x05c4, 0x05cc, 0x05d4, 0x05dc, 0x05e4, 0x05ec, 0x05f4, 0x05fc,
+		0x0604, 0x060c, 0x0614, 0x061c, 0x0623, 0x0629, 0x0632, 0x063a,
+		0x0645, 0x064a, 0x0650, 0x065a, 0x0665, 0x0669, 0x0672, 0x067a,
+		0x0685, 0x0689, 0x0690, 0x069a, 0x06a4, 0x06ac, 0x06b4, 0x06bc,
+		0x06c4, 0x06cc, 0x06d4, 0x06dc, 0x06e4, 0x06ec, 0x06f4, 0x06fc,
+		0x0704, 0x070c, 0x0714, 0x071c, 0x0723, 0x072a, 0x0730, 0x073a,
+		0x0745, 0x074a, 0x0750, 0x075a, 0x0765, 0x0769, 0x0772, 0x077a,
+		0x0785, 0x0789, 0x0790, 0x079a, 0x07a4, 0x07ac, 0x07b4, 0x07bc,
+		0x07c4, 0x07cc, 0x07d4, 0x07dc, 0x07e4, 0x07ec, 0x07f4, 0x07fc,
+	};
+
+	for (unsigned int i = 0; i < ARRAY_SIZE(deskew_fine); i++) {
+		rcsi2_write16(priv, V4H_CORE_DIG_COMMON_RW_DESKEW_FINE_MEM_REG,
+			      deskew_fine[i]);
+	}
 
 	return 0;
 }
@@ -1066,10 +1477,11 @@ static int rcsi2_c_phy_setting_v4h(struct rcar_csi2 *priv, int msps)
 static int rcsi2_start_receiver_v4h(struct rcar_csi2 *priv,
 				    struct v4l2_subdev_state *state)
 {
+	const struct rcsi2_cphy_setting *cphy = NULL;
 	const struct rcar_csi2_format *format;
 	const struct v4l2_mbus_framefmt *fmt;
 	unsigned int lanes;
-	int msps;
+	int mbps;
 	int ret;
 
 	/* Use the format on the sink pad to compute the receiver config. */
@@ -1082,28 +1494,40 @@ static int rcsi2_start_receiver_v4h(struct rcar_csi2 *priv,
 	if (ret)
 		return ret;
 
-	msps = rcsi2_calc_mbps(priv, format->bpp, lanes);
-	if (msps < 0)
-		return msps;
+	mbps = rcsi2_calc_mbps(priv, format->bpp, lanes);
+	if (mbps < 0)
+		return mbps;
 
-	/* Reset LINK and PHY*/
+	/* T0: Reset LINK and PHY*/
 	rcsi2_write(priv, V4H_CSI2_RESETN_REG, 0);
 	rcsi2_write(priv, V4H_DPHY_RSTZ_REG, 0);
 	rcsi2_write(priv, V4H_PHY_SHUTDOWNZ_REG, 0);
 
-	/* PHY static setting */
-	rcsi2_write(priv, V4H_PHY_EN_REG, BIT(0));
+	/* T1: PHY static setting */
+	rcsi2_write(priv, V4H_PHY_EN_REG, V4H_PHY_EN_ENABLE_CLK |
+		    V4H_PHY_EN_ENABLE_0 | V4H_PHY_EN_ENABLE_1 |
+		    V4H_PHY_EN_ENABLE_2 | V4H_PHY_EN_ENABLE_3);
 	rcsi2_write(priv, V4H_FLDC_REG, 0);
 	rcsi2_write(priv, V4H_FLDD_REG, 0);
 	rcsi2_write(priv, V4H_IDIC_REG, 0);
-	rcsi2_write(priv, V4H_PHY_MODE_REG, BIT(0));
+	rcsi2_write(priv, V4H_PHY_MODE_REG,
+		    priv->cphy ? V4H_PHY_MODE_CPHY : V4H_PHY_MODE_DPHY);
 	rcsi2_write(priv, V4H_N_LANES_REG, lanes - 1);
 
-	/* Reset CSI2 */
+	rcsi2_write(priv, V4M_FRXM_REG,
+		    V4M_FRXM_FORCERXMODE_0 | V4M_FRXM_FORCERXMODE_1 |
+		    V4M_FRXM_FORCERXMODE_2 | V4M_FRXM_FORCERXMODE_3);
+	rcsi2_write(priv, V4M_OVR1_REG,
+		    V4M_OVR1_FORCERXMODE_0 | V4M_OVR1_FORCERXMODE_1 |
+		    V4M_OVR1_FORCERXMODE_2 | V4M_OVR1_FORCERXMODE_3);
+
+	/* T2: Reset CSI2 */
 	rcsi2_write(priv, V4H_CSI2_RESETN_REG, BIT(0));
 
 	/* Registers static setting through APB */
 	/* Common setting */
+	rcsi2_write16(priv, V4H_PPI_STARTUP_RW_COMMON_DPHY_REG(10), 0x0030);
+	rcsi2_write16(priv, V4H_CORE_DIG_ANACTRL_RW_COMMON_ANACTRL_REG(2), 0x1444);
 	rcsi2_write16(priv, V4H_CORE_DIG_ANACTRL_RW_COMMON_ANACTRL_REG(0), 0x1bfd);
 	rcsi2_write16(priv, V4H_PPI_STARTUP_RW_COMMON_STARTUP_1_1_REG, 0x0233);
 	rcsi2_write16(priv, V4H_PPI_STARTUP_RW_COMMON_DPHY_REG(6), 0x0027);
@@ -1118,15 +1542,260 @@ static int rcsi2_start_receiver_v4h(struct rcar_csi2 *priv,
 	rcsi2_write16(priv, V4H_PPI_RW_LPDCOCAL_COARSE_CFG_REG, 0x0105);
 	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_CB_CTRL_2_REG(6), 0x1000);
 	rcsi2_write16(priv, V4H_PPI_RW_COMMON_CFG_REG, 0x0003);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_CB_CTRL_2_REG(0), 0x0000);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_CB_CTRL_2_REG(1), 0x0400);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_CB_CTRL_2_REG(3), 0x41f6);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_CB_CTRL_2_REG(0), 0x0000);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_CB_CTRL_2_REG(3), 0x43f6);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_CB_CTRL_2_REG(6), 0x3000);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_CB_CTRL_2_REG(7), 0x0000);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_CB_CTRL_2_REG(6), 0x7000);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_CB_CTRL_2_REG(7), 0x0000);
+	rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_CB_CTRL_2_REG(5), 0x4000);
 
-	/* C-PHY settings */
-	ret = rcsi2_c_phy_setting_v4h(priv, msps);
+	/* T3: PHY settings */
+	if (priv->cphy) {
+		cphy = rcsi2_c_phy_setting_v4h(priv, mbps);
+		if (!cphy)
+			return -ERANGE;
+	} else {
+		ret = rcsi2_d_phy_setting_v4h(priv, mbps);
+		if (ret)
+			return ret;
+	}
+
+	/* T4: Leave Shutdown mode */
+	rcsi2_write(priv, V4H_DPHY_RSTZ_REG, BIT(0));
+	rcsi2_write(priv, V4H_PHY_SHUTDOWNZ_REG, BIT(0));
+
+	/* T5: Wait for calibration */
+	if (rcsi2_wait_phy_start_v4h(priv, V4H_ST_PHYST_ST_PHY_READY)) {
+		dev_err(priv->dev, "PHY calibration failed\n");
+		return -ETIMEDOUT;
+	}
+
+	/* T6: Analog programming */
+	if (priv->cphy) {
+		for (unsigned int l = 0; l < 3; l++) {
+			rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(l, 9),
+				      cphy->lane29);
+			rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(l, 7),
+				      cphy->lane27);
+		}
+	} else {
+		u16 val_2_9 = mbps > 2500 ? 0x14 : mbps > 1500 ? 0x04 : 0x00;
+		u16 val_2_15 = mbps > 1500 ? 0x03 : 0x00;
+
+		for (unsigned int l = 0; l < 5; l++) {
+			rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(l, 9),
+				      val_2_9);
+			rcsi2_write16(priv, V4H_CORE_DIG_IOCTRL_RW_AFE_LANEl_CTRL_2_REG(l, 15),
+				      val_2_15);
+		}
+	}
+
+	/* T7: Wait for stop state */
+	rcsi2_wait_phy_start_v4h(priv, V4H_ST_PHYST_ST_STOPSTATE_0 |
+				 V4H_ST_PHYST_ST_STOPSTATE_1 |
+				 V4H_ST_PHYST_ST_STOPSTATE_2 |
+				 V4H_ST_PHYST_ST_STOPSTATE_3);
+
+	/* T8: De-assert FRXM */
+	rcsi2_write(priv, V4M_FRXM_REG, 0);
+
+	return 0;
+}
+
+static int rcsi2_d_phy_setting_v4m(struct rcar_csi2 *priv, int mbps)
+{
+	unsigned int timeout;
+	int ret;
+
+	static const struct phtw_value step1[] = {
+		{ .data = 0x00, .code = 0x00 },
+		{ .data = 0x00, .code = 0x1e },
+	};
+
+	/* Shutdown and reset PHY. */
+	rcsi2_write(priv, V4H_DPHY_RSTZ_REG, BIT(0));
+	rcsi2_write(priv, V4H_PHY_SHUTDOWNZ_REG, BIT(0));
+
+	/* Start internal calibration (POR). */
+	ret = rcsi2_phtw_write_array(priv, step1, ARRAY_SIZE(step1));
+	if (ret)
+		return ret;
+
+	/* Wait for POR to complete. */
+	for (timeout = 10; timeout > 0; timeout--) {
+		if ((rcsi2_read(priv, V4M_PHTR_REG) & 0xf0000) == 0x70000)
+			break;
+		usleep_range(1000, 2000);
+	}
+
+	if (!timeout) {
+		dev_err(priv->dev, "D-PHY calibration failed\n");
+		return -ETIMEDOUT;
+	}
+
+	return 0;
+}
+
+static int rcsi2_set_osc_freq(struct rcar_csi2 *priv, unsigned int mbps)
+{
+	const struct rcsi2_mbps_info *info;
+	struct phtw_value steps[] = {
+		{ .data = 0x00, .code = 0x00 },
+		{ .code = 0xe2 }, /* Data filled in below. */
+		{ .code = 0xe3 }, /* Data filled in below. */
+		{ .data = 0x01, .code = 0xe4 },
+	};
+
+	info = rcsi2_mbps_to_info(priv, priv->info->hsfreqrange, mbps);
+	if (!info)
+		return -ERANGE;
+
+	/* Fill in data for command. */
+	steps[1].data = (info->osc_freq & 0x00ff) >> 0;
+	steps[2].data = (info->osc_freq & 0x0f00) >> 8;
+
+	return rcsi2_phtw_write_array(priv, steps, ARRAY_SIZE(steps));
+}
+
+static int rcsi2_init_common_v4m(struct rcar_csi2 *priv, unsigned int mbps)
+{
+	int ret;
+
+	static const struct phtw_value step1[] = {
+		{ .data = 0x00, .code = 0x00 },
+		{ .data = 0x3c, .code = 0x08 },
+	};
+
+	static const struct phtw_value step2[] = {
+		{ .data = 0x00, .code = 0x00 },
+		{ .data = 0x80, .code = 0xe0 },
+		{ .data = 0x31, .code = 0xe1 },
+		{ .data = 0x06, .code = 0x00 },
+		{ .data = 0x11, .code = 0x11 },
+		{ .data = 0x08, .code = 0x00 },
+		{ .data = 0x11, .code = 0x11 },
+		{ .data = 0x0a, .code = 0x00 },
+		{ .data = 0x11, .code = 0x11 },
+		{ .data = 0x0c, .code = 0x00 },
+		{ .data = 0x11, .code = 0x11 },
+		{ .data = 0x01, .code = 0x00 },
+		{ .data = 0x31, .code = 0xaa },
+		{ .data = 0x05, .code = 0x00 },
+		{ .data = 0x05, .code = 0x09 },
+		{ .data = 0x07, .code = 0x00 },
+		{ .data = 0x05, .code = 0x09 },
+		{ .data = 0x09, .code = 0x00 },
+		{ .data = 0x05, .code = 0x09 },
+		{ .data = 0x0b, .code = 0x00 },
+		{ .data = 0x05, .code = 0x09 },
+	};
+
+	static const struct phtw_value step3[] = {
+		{ .data = 0x01, .code = 0x00 },
+		{ .data = 0x06, .code = 0xab },
+	};
+
+	if (priv->info->hsfreqrange) {
+		ret = rcsi2_set_phypll(priv, mbps);
+		if (ret)
+			return ret;
+
+		ret = rcsi2_set_osc_freq(priv, mbps);
+		if (ret)
+			return ret;
+	}
+
+	if (mbps <= 1500) {
+		ret = rcsi2_phtw_write_array(priv, step1, ARRAY_SIZE(step1));
+		if (ret)
+			return ret;
+	}
+
+	if (priv->info->csi0clkfreqrange)
+		rcsi2_write(priv, V4M_CSI0CLKFCPR_REG,
+			    CSI0CLKFREQRANGE(priv->info->csi0clkfreqrange));
+
+	rcsi2_write(priv, V4H_PHY_EN_REG, V4H_PHY_EN_ENABLE_CLK |
+		    V4H_PHY_EN_ENABLE_0 | V4H_PHY_EN_ENABLE_1 |
+		    V4H_PHY_EN_ENABLE_2 | V4H_PHY_EN_ENABLE_3);
+
+	if (mbps > 1500) {
+		ret = rcsi2_phtw_write_array(priv, step2, ARRAY_SIZE(step2));
+		if (ret)
+			return ret;
+	}
+
+	return rcsi2_phtw_write_array(priv, step3, ARRAY_SIZE(step3));
+}
+
+static int rcsi2_start_receiver_v4m(struct rcar_csi2 *priv,
+				    struct v4l2_subdev_state *state)
+{
+	const struct rcar_csi2_format *format;
+	const struct v4l2_mbus_framefmt *fmt;
+	unsigned int lanes;
+	int mbps;
+	int ret;
+
+	/* Calculate parameters */
+	fmt = v4l2_subdev_state_get_format(state, RCAR_CSI2_SINK);
+	format = rcsi2_code_to_fmt(fmt->code);
+	if (!format)
+		return -EINVAL;
+
+	ret = rcsi2_get_active_lanes(priv, &lanes);
+	if (ret)
+		return ret;
+
+	mbps = rcsi2_calc_mbps(priv, format->bpp, lanes);
+	if (mbps < 0)
+		return mbps;
+
+	/* Reset LINK and PHY */
+	rcsi2_write(priv, V4H_CSI2_RESETN_REG, 0);
+	rcsi2_write(priv, V4H_DPHY_RSTZ_REG, 0);
+	rcsi2_write(priv, V4H_PHY_SHUTDOWNZ_REG, 0);
+	rcsi2_write(priv, V4M_PHTC_REG, PHTC_TESTCLR);
+
+	/* PHY static setting */
+	rcsi2_write(priv, V4H_PHY_EN_REG, V4H_PHY_EN_ENABLE_CLK);
+	rcsi2_write(priv, V4H_FLDC_REG, 0);
+	rcsi2_write(priv, V4H_FLDD_REG, 0);
+	rcsi2_write(priv, V4H_IDIC_REG, 0);
+	rcsi2_write(priv, V4H_PHY_MODE_REG, V4H_PHY_MODE_DPHY);
+	rcsi2_write(priv, V4H_N_LANES_REG, lanes - 1);
+
+	rcsi2_write(priv, V4M_FRXM_REG,
+		    V4M_FRXM_FORCERXMODE_0 | V4M_FRXM_FORCERXMODE_1 |
+		    V4M_FRXM_FORCERXMODE_2 | V4M_FRXM_FORCERXMODE_3);
+	rcsi2_write(priv, V4M_OVR1_REG,
+		    V4M_OVR1_FORCERXMODE_0 | V4M_OVR1_FORCERXMODE_1 |
+		    V4M_OVR1_FORCERXMODE_2 | V4M_OVR1_FORCERXMODE_3);
+
+	/* Reset CSI2 */
+	rcsi2_write(priv, V4M_PHTC_REG, 0);
+	rcsi2_write(priv, V4H_CSI2_RESETN_REG, BIT(0));
+
+	/* Common settings */
+	ret = rcsi2_init_common_v4m(priv, mbps);
+	if (ret)
+		return ret;
+
+	/* D-PHY settings */
+	ret = rcsi2_d_phy_setting_v4m(priv, mbps);
 	if (ret)
 		return ret;
 
 	rcsi2_wait_phy_start_v4h(priv, V4H_ST_PHYST_ST_STOPSTATE_0 |
 				 V4H_ST_PHYST_ST_STOPSTATE_1 |
-				 V4H_ST_PHYST_ST_STOPSTATE_2);
+				 V4H_ST_PHYST_ST_STOPSTATE_2 |
+				 V4H_ST_PHYST_ST_STOPSTATE_3);
+
+	rcsi2_write(priv, V4M_FRXM_REG, 0);
 
 	return 0;
 }
@@ -1145,7 +1814,8 @@ static int rcsi2_start(struct rcar_csi2 *priv, struct v4l2_subdev_state *state)
 		return ret;
 	}
 
-	ret = v4l2_subdev_call(priv->remote, video, s_stream, 1);
+	ret = v4l2_subdev_enable_streams(priv->remote, priv->remote_pad,
+					 BIT_ULL(0));
 	if (ret) {
 		rcsi2_enter_standby(priv);
 		return ret;
@@ -1157,31 +1827,50 @@ static int rcsi2_start(struct rcar_csi2 *priv, struct v4l2_subdev_state *state)
 static void rcsi2_stop(struct rcar_csi2 *priv)
 {
 	rcsi2_enter_standby(priv);
-	v4l2_subdev_call(priv->remote, video, s_stream, 0);
+	v4l2_subdev_disable_streams(priv->remote, priv->remote_pad, BIT_ULL(0));
 }
 
-static int rcsi2_s_stream(struct v4l2_subdev *sd, int enable)
+static int rcsi2_enable_streams(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *state, u32 source_pad,
+				u64 source_streams_mask)
 {
 	struct rcar_csi2 *priv = sd_to_csi2(sd);
-	struct v4l2_subdev_state *state;
 	int ret = 0;
+
+	if (source_streams_mask != 1)
+		return -EINVAL;
 
 	if (!priv->remote)
 		return -ENODEV;
 
-	state = v4l2_subdev_lock_and_get_active_state(&priv->subdev);
-
-	if (enable && priv->stream_count == 0) {
+	if (priv->stream_count == 0) {
 		ret = rcsi2_start(priv, state);
 		if (ret)
-			goto out;
-	} else if (!enable && priv->stream_count == 1) {
-		rcsi2_stop(priv);
+			return ret;
 	}
 
-	priv->stream_count += enable ? 1 : -1;
-out:
-	v4l2_subdev_unlock_state(state);
+	priv->stream_count += 1;
+
+	return ret;
+}
+
+static int rcsi2_disable_streams(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *state,
+				 u32 source_pad, u64 source_streams_mask)
+{
+	struct rcar_csi2 *priv = sd_to_csi2(sd);
+	int ret = 0;
+
+	if (source_streams_mask != 1)
+		return -EINVAL;
+
+	if (!priv->remote)
+		return -ENODEV;
+
+	if (priv->stream_count == 1)
+		rcsi2_stop(priv);
+
+	priv->stream_count -= 1;
 
 	return ret;
 }
@@ -1208,17 +1897,15 @@ static int rcsi2_set_pad_format(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static const struct v4l2_subdev_video_ops rcar_csi2_video_ops = {
-	.s_stream = rcsi2_s_stream,
-};
-
 static const struct v4l2_subdev_pad_ops rcar_csi2_pad_ops = {
+	.enable_streams = rcsi2_enable_streams,
+	.disable_streams = rcsi2_disable_streams,
+
 	.set_fmt = rcsi2_set_pad_format,
 	.get_fmt = v4l2_subdev_get_fmt,
 };
 
 static const struct v4l2_subdev_ops rcar_csi2_subdev_ops = {
-	.video	= &rcar_csi2_video_ops,
 	.pad	= &rcar_csi2_pad_ops,
 };
 
@@ -1392,6 +2079,9 @@ static int rcsi2_parse_v4l2(struct rcar_csi2 *priv,
 		}
 	}
 
+	for (i = 0; i < ARRAY_SIZE(priv->line_orders); i++)
+		priv->line_orders[i] = vep->bus.mipi_csi2.line_orders[i];
+
 	return 0;
 }
 
@@ -1451,64 +2141,16 @@ static int rcsi2_parse_dt(struct rcar_csi2 *priv)
  * NOTE: Magic values are from the datasheet and lack documentation.
  */
 
-static int rcsi2_phtw_write(struct rcar_csi2 *priv, u16 data, u16 code)
-{
-	unsigned int timeout;
-
-	rcsi2_write(priv, PHTW_REG,
-		    PHTW_DWEN | PHTW_TESTDIN_DATA(data) |
-		    PHTW_CWEN | PHTW_TESTDIN_CODE(code));
-
-	/* Wait for DWEN and CWEN to be cleared by hardware. */
-	for (timeout = 0; timeout <= 20; timeout++) {
-		if (!(rcsi2_read(priv, PHTW_REG) & (PHTW_DWEN | PHTW_CWEN)))
-			return 0;
-
-		usleep_range(1000, 2000);
-	}
-
-	dev_err(priv->dev, "Timeout waiting for PHTW_DWEN and/or PHTW_CWEN\n");
-
-	return -ETIMEDOUT;
-}
-
-static int rcsi2_phtw_write_array(struct rcar_csi2 *priv,
-				  const struct phtw_value *values)
-{
-	const struct phtw_value *value;
-	int ret;
-
-	for (value = values; value->data || value->code; value++) {
-		ret = rcsi2_phtw_write(priv, value->data, value->code);
-		if (ret)
-			return ret;
-	}
-
-	return 0;
-}
-
 static int rcsi2_phtw_write_mbps(struct rcar_csi2 *priv, unsigned int mbps,
-				 const struct rcsi2_mbps_reg *values, u16 code)
+				 const struct rcsi2_mbps_info *values, u8 code)
 {
-	const struct rcsi2_mbps_reg *value;
-	const struct rcsi2_mbps_reg *prev_value = NULL;
+	const struct rcsi2_mbps_info *info;
 
-	for (value = values; value->mbps; value++) {
-		if (value->mbps >= mbps)
-			break;
-		prev_value = value;
-	}
-
-	if (prev_value &&
-	    ((mbps - prev_value->mbps) <= (value->mbps - mbps)))
-		value = prev_value;
-
-	if (!value->mbps) {
-		dev_err(priv->dev, "Unsupported PHY speed (%u Mbps)", mbps);
+	info = rcsi2_mbps_to_info(priv, values, mbps);
+	if (!info)
 		return -ERANGE;
-	}
 
-	return rcsi2_phtw_write(priv, value->reg, code);
+	return rcsi2_phtw_write(priv, info->reg, code);
 }
 
 static int __rcsi2_init_phtw_h3_v3h_m3n(struct rcar_csi2 *priv,
@@ -1520,7 +2162,6 @@ static int __rcsi2_init_phtw_h3_v3h_m3n(struct rcar_csi2 *priv,
 		{ .data = 0x11, .code = 0xe4 },
 		{ .data = 0x01, .code = 0xe5 },
 		{ .data = 0x10, .code = 0x04 },
-		{ /* sentinel */ },
 	};
 
 	static const struct phtw_value step2[] = {
@@ -1529,12 +2170,11 @@ static int __rcsi2_init_phtw_h3_v3h_m3n(struct rcar_csi2 *priv,
 		{ .data = 0x4b, .code = 0xac },
 		{ .data = 0x03, .code = 0x00 },
 		{ .data = 0x80, .code = 0x07 },
-		{ /* sentinel */ },
 	};
 
 	int ret;
 
-	ret = rcsi2_phtw_write_array(priv, step1);
+	ret = rcsi2_phtw_write_array(priv, step1, ARRAY_SIZE(step1));
 	if (ret)
 		return ret;
 
@@ -1549,7 +2189,7 @@ static int __rcsi2_init_phtw_h3_v3h_m3n(struct rcar_csi2 *priv,
 			return ret;
 	}
 
-	return rcsi2_phtw_write_array(priv, step2);
+	return rcsi2_phtw_write_array(priv, step2, ARRAY_SIZE(step2));
 }
 
 static int rcsi2_init_phtw_h3_v3h_m3n(struct rcar_csi2 *priv, unsigned int mbps)
@@ -1575,10 +2215,9 @@ static int rcsi2_phy_post_init_v3m_e3(struct rcar_csi2 *priv)
 		{ .data = 0xee, .code = 0x54 },
 		{ .data = 0xee, .code = 0x84 },
 		{ .data = 0xee, .code = 0x94 },
-		{ /* sentinel */ },
 	};
 
-	return rcsi2_phtw_write_array(priv, step1);
+	return rcsi2_phtw_write_array(priv, step1, ARRAY_SIZE(step1));
 }
 
 static int rcsi2_init_phtw_v3u(struct rcar_csi2 *priv,
@@ -1587,20 +2226,17 @@ static int rcsi2_init_phtw_v3u(struct rcar_csi2 *priv,
 	/* In case of 1500Mbps or less */
 	static const struct phtw_value step1[] = {
 		{ .data = 0xcc, .code = 0xe2 },
-		{ /* sentinel */ },
 	};
 
 	static const struct phtw_value step2[] = {
 		{ .data = 0x01, .code = 0xe3 },
 		{ .data = 0x11, .code = 0xe4 },
 		{ .data = 0x01, .code = 0xe5 },
-		{ /* sentinel */ },
 	};
 
 	/* In case of 1500Mbps or less */
 	static const struct phtw_value step3[] = {
 		{ .data = 0x38, .code = 0x08 },
-		{ /* sentinel */ },
 	};
 
 	static const struct phtw_value step4[] = {
@@ -1608,29 +2244,28 @@ static int rcsi2_init_phtw_v3u(struct rcar_csi2 *priv,
 		{ .data = 0x4b, .code = 0xac },
 		{ .data = 0x03, .code = 0x00 },
 		{ .data = 0x80, .code = 0x07 },
-		{ /* sentinel */ },
 	};
 
 	int ret;
 
 	if (mbps != 0 && mbps <= 1500)
-		ret = rcsi2_phtw_write_array(priv, step1);
+		ret = rcsi2_phtw_write_array(priv, step1, ARRAY_SIZE(step1));
 	else
 		ret = rcsi2_phtw_write_mbps(priv, mbps, phtw_mbps_v3u, 0xe2);
 	if (ret)
 		return ret;
 
-	ret = rcsi2_phtw_write_array(priv, step2);
+	ret = rcsi2_phtw_write_array(priv, step2, ARRAY_SIZE(step2));
 	if (ret)
 		return ret;
 
 	if (mbps != 0 && mbps <= 1500) {
-		ret = rcsi2_phtw_write_array(priv, step3);
+		ret = rcsi2_phtw_write_array(priv, step3, ARRAY_SIZE(step3));
 		if (ret)
 			return ret;
 	}
 
-	ret = rcsi2_phtw_write_array(priv, step4);
+	ret = rcsi2_phtw_write_array(priv, step4, ARRAY_SIZE(step4));
 	if (ret)
 		return ret;
 
@@ -1714,7 +2349,13 @@ static int rcsi2_probe_resources(struct rcar_csi2 *priv,
 	return PTR_ERR_OR_ZERO(priv->rstc);
 }
 
+static const struct rcsi2_register_layout rcsi2_registers_gen3 = {
+	.phtw = PHTW_REG,
+	.phypll = PHYPLL_REG,
+};
+
 static const struct rcar_csi2_info rcar_csi2_info_r8a7795 = {
+	.regs = &rcsi2_registers_gen3,
 	.init_phtw = rcsi2_init_phtw_h3_v3h_m3n,
 	.start_receiver = rcsi2_start_receiver_gen3,
 	.enter_standby = rcsi2_enter_standby_gen3,
@@ -1726,6 +2367,7 @@ static const struct rcar_csi2_info rcar_csi2_info_r8a7795 = {
 };
 
 static const struct rcar_csi2_info rcar_csi2_info_r8a7795es2 = {
+	.regs = &rcsi2_registers_gen3,
 	.init_phtw = rcsi2_init_phtw_h3es2,
 	.start_receiver = rcsi2_start_receiver_gen3,
 	.enter_standby = rcsi2_enter_standby_gen3,
@@ -1737,6 +2379,7 @@ static const struct rcar_csi2_info rcar_csi2_info_r8a7795es2 = {
 };
 
 static const struct rcar_csi2_info rcar_csi2_info_r8a7796 = {
+	.regs = &rcsi2_registers_gen3,
 	.start_receiver = rcsi2_start_receiver_gen3,
 	.enter_standby = rcsi2_enter_standby_gen3,
 	.hsfreqrange = hsfreqrange_m3w,
@@ -1745,6 +2388,7 @@ static const struct rcar_csi2_info rcar_csi2_info_r8a7796 = {
 };
 
 static const struct rcar_csi2_info rcar_csi2_info_r8a77961 = {
+	.regs = &rcsi2_registers_gen3,
 	.start_receiver = rcsi2_start_receiver_gen3,
 	.enter_standby = rcsi2_enter_standby_gen3,
 	.hsfreqrange = hsfreqrange_m3w,
@@ -1753,6 +2397,7 @@ static const struct rcar_csi2_info rcar_csi2_info_r8a77961 = {
 };
 
 static const struct rcar_csi2_info rcar_csi2_info_r8a77965 = {
+	.regs = &rcsi2_registers_gen3,
 	.init_phtw = rcsi2_init_phtw_h3_v3h_m3n,
 	.start_receiver = rcsi2_start_receiver_gen3,
 	.enter_standby = rcsi2_enter_standby_gen3,
@@ -1764,6 +2409,7 @@ static const struct rcar_csi2_info rcar_csi2_info_r8a77965 = {
 };
 
 static const struct rcar_csi2_info rcar_csi2_info_r8a77970 = {
+	.regs = &rcsi2_registers_gen3,
 	.init_phtw = rcsi2_init_phtw_v3m_e3,
 	.phy_post_init = rcsi2_phy_post_init_v3m_e3,
 	.start_receiver = rcsi2_start_receiver_gen3,
@@ -1773,6 +2419,7 @@ static const struct rcar_csi2_info rcar_csi2_info_r8a77970 = {
 };
 
 static const struct rcar_csi2_info rcar_csi2_info_r8a77980 = {
+	.regs = &rcsi2_registers_gen3,
 	.init_phtw = rcsi2_init_phtw_h3_v3h_m3n,
 	.start_receiver = rcsi2_start_receiver_gen3,
 	.enter_standby = rcsi2_enter_standby_gen3,
@@ -1783,6 +2430,7 @@ static const struct rcar_csi2_info rcar_csi2_info_r8a77980 = {
 };
 
 static const struct rcar_csi2_info rcar_csi2_info_r8a77990 = {
+	.regs = &rcsi2_registers_gen3,
 	.init_phtw = rcsi2_init_phtw_v3m_e3,
 	.phy_post_init = rcsi2_phy_post_init_v3m_e3,
 	.start_receiver = rcsi2_start_receiver_gen3,
@@ -1792,6 +2440,7 @@ static const struct rcar_csi2_info rcar_csi2_info_r8a77990 = {
 };
 
 static const struct rcar_csi2_info rcar_csi2_info_r8a779a0 = {
+	.regs = &rcsi2_registers_gen3,
 	.init_phtw = rcsi2_init_phtw_v3u,
 	.start_receiver = rcsi2_start_receiver_gen3,
 	.enter_standby = rcsi2_enter_standby_gen3,
@@ -1803,9 +2452,25 @@ static const struct rcar_csi2_info rcar_csi2_info_r8a779a0 = {
 };
 
 static const struct rcar_csi2_info rcar_csi2_info_r8a779g0 = {
+	.regs = &rcsi2_registers_gen3,
 	.start_receiver = rcsi2_start_receiver_v4h,
 	.use_isp = true,
 	.support_cphy = true,
+	.support_dphy = true,
+};
+
+static const struct rcsi2_register_layout rcsi2_registers_v4m = {
+	.phtw = V4M_PHTW_REG,
+	.phypll = V4M_PHYPLL_REG,
+};
+
+static const struct rcar_csi2_info rcar_csi2_info_r8a779h0 = {
+	.regs = &rcsi2_registers_v4m,
+	.start_receiver = rcsi2_start_receiver_v4m,
+	.hsfreqrange = hsfreqrange_v4m,
+	.csi0clkfreqrange = 0x0c,
+	.use_isp = true,
+	.support_dphy = true,
 };
 
 static const struct of_device_id rcar_csi2_of_table[] = {
@@ -1860,6 +2525,10 @@ static const struct of_device_id rcar_csi2_of_table[] = {
 	{
 		.compatible = "renesas,r8a779g0-csi2",
 		.data = &rcar_csi2_info_r8a779g0,
+	},
+	{
+		.compatible = "renesas,r8a779h0-csi2",
+		.data = &rcar_csi2_info_r8a779h0,
 	},
 	{ /* sentinel */ },
 };
@@ -1974,7 +2643,7 @@ static void rcsi2_remove(struct platform_device *pdev)
 }
 
 static struct platform_driver rcar_csi2_pdrv = {
-	.remove_new = rcsi2_remove,
+	.remove = rcsi2_remove,
 	.probe	= rcsi2_probe,
 	.driver	= {
 		.name	= "rcar-csi2",

@@ -4195,7 +4195,7 @@ pci_map_failed:
 static void
 s2io_alarm_handle(struct timer_list *t)
 {
-	struct s2io_nic *sp = from_timer(sp, t, alarm_timer);
+	struct s2io_nic *sp = timer_container_of(sp, t, alarm_timer);
 	struct net_device *dev = sp->dev;
 
 	s2io_handle_errors(dev);
@@ -4707,7 +4707,7 @@ static irqreturn_t s2io_isr(int irq, void *dev_id)
 			/*
 			 * rx_traffic_int reg is an R1 register, writing all 1's
 			 * will ensure that the actual interrupt causing bit
-			 * get's cleared and hence a read can be avoided.
+			 * gets cleared and hence a read can be avoided.
 			 */
 			if (reason & GEN_INTR_RXTRAFFIC)
 				writeq(S2IO_MINUS_ONE, &bar0->rx_traffic_int);
@@ -4721,7 +4721,7 @@ static irqreturn_t s2io_isr(int irq, void *dev_id)
 
 		/*
 		 * tx_traffic_int reg is an R1 register, writing all 1's
-		 * will ensure that the actual interrupt causing bit get's
+		 * will ensure that the actual interrupt causing bit gets
 		 * cleared and hence a read can be avoided.
 		 */
 		if (reason & GEN_INTR_TXTRAFFIC)
@@ -7019,7 +7019,7 @@ static void do_s2io_card_down(struct s2io_nic *sp, int do_io)
 	if (!is_s2io_card_up(sp))
 		return;
 
-	del_timer_sync(&sp->alarm_timer);
+	timer_delete_sync(&sp->alarm_timer);
 	/* If s2io_set_link task is executing, wait till it completes. */
 	while (test_and_set_bit(__S2IO_STATE_LINK_TASK, &(sp->state)))
 		msleep(50);
@@ -8523,7 +8523,7 @@ static pci_ers_result_t s2io_io_error_detected(struct pci_dev *pdev,
  * @pdev: Pointer to PCI device
  *
  * Restart the card from scratch, as if from a cold-boot.
- * At this point, the card has exprienced a hard reset,
+ * At this point, the card has experienced a hard reset,
  * followed by fixups by BIOS, and has its config space
  * set up identically to what it was at cold boot.
  */

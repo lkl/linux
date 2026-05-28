@@ -2,9 +2,15 @@
 #ifndef _NET_HOTDATA_H
 #define _NET_HOTDATA_H
 
+#include <linux/llist.h>
 #include <linux/types.h>
 #include <linux/netdevice.h>
 #include <net/protocol.h>
+
+struct skb_defer_node {
+	struct llist_head	defer_list;
+	atomic_long_t		defer_count;
+} ____cacheline_aligned_in_smp;
 
 /* Read mostly data used in network fast paths. */
 struct net_hotdata {
@@ -23,7 +29,6 @@ struct net_hotdata {
 	struct net_offload	udpv6_offload;
 #endif
 	struct list_head	offload_base;
-	struct list_head	ptype_all;
 	struct kmem_cache	*skbuff_cache;
 	struct kmem_cache	*skbuff_fclone_cache;
 	struct kmem_cache	*skb_small_head_cache;
@@ -31,6 +36,7 @@ struct net_hotdata {
 	struct rps_sock_flow_table __rcu *rps_sock_flow_table;
 	u32			rps_cpu_mask;
 #endif
+	struct skb_defer_node __percpu *skb_defer_nodes;
 	int			gro_normal_batch;
 	int			netdev_budget;
 	int			netdev_budget_usecs;

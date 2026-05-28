@@ -339,7 +339,7 @@ static int hix5hd2_i2c_xfer_msg(struct hix5hd2_i2c_priv *priv,
 	ret = priv->state;
 
 	/*
-	 * If this is the last message to be transfered (stop == 1)
+	 * If this is the last message to be transferred (stop == 1)
 	 * Then check if the bus can be brought back to idle.
 	 */
 	if (priv->state == HIX5I2C_STAT_RW_SUCCESS && stop)
@@ -373,7 +373,6 @@ static int hix5hd2_i2c_xfer(struct i2c_adapter *adap,
 	ret = num;
 
 out:
-	pm_runtime_mark_last_busy(priv->dev);
 	pm_runtime_put_autosuspend(priv->dev);
 	return ret;
 }
@@ -508,7 +507,7 @@ MODULE_DEVICE_TABLE(of, hix5hd2_i2c_match);
 
 static struct platform_driver hix5hd2_i2c_driver = {
 	.probe		= hix5hd2_i2c_probe,
-	.remove_new	= hix5hd2_i2c_remove,
+	.remove		= hix5hd2_i2c_remove,
 	.driver		= {
 		.name	= "hix5hd2-i2c",
 		.pm	= pm_ptr(&hix5hd2_i2c_pm_ops),

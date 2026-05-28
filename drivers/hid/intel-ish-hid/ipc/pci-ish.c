@@ -26,9 +26,13 @@
 enum ishtp_driver_data_index {
 	ISHTP_DRIVER_DATA_NONE,
 	ISHTP_DRIVER_DATA_LNL_M,
+	ISHTP_DRIVER_DATA_PTL,
+	ISHTP_DRIVER_DATA_WCL,
 };
 
 #define ISH_FW_GEN_LNL_M "lnlm"
+#define ISH_FW_GEN_PTL "ptl"
+#define ISH_FW_GEN_WCL "wcl"
 
 #define ISH_FIRMWARE_PATH(gen) "intel/ish/ish_" gen ".bin"
 #define ISH_FIRMWARE_PATH_ALL "intel/ish/ish_*.bin"
@@ -36,6 +40,12 @@ enum ishtp_driver_data_index {
 static struct ishtp_driver_data ishtp_driver_data[] = {
 	[ISHTP_DRIVER_DATA_LNL_M] = {
 		.fw_generation = ISH_FW_GEN_LNL_M,
+	},
+	[ISHTP_DRIVER_DATA_PTL] = {
+		.fw_generation = ISH_FW_GEN_PTL,
+	},
+	[ISHTP_DRIVER_DATA_WCL] = {
+		.fw_generation = ISH_FW_GEN_WCL,
 	},
 };
 
@@ -62,7 +72,10 @@ static const struct pci_device_id ish_pci_tbl[] = {
 	{PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_ISH_MTL_P)},
 	{PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_ISH_ARL_H)},
 	{PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_ISH_ARL_S)},
-	{PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_ISH_LNL_M), .driver_data = ISHTP_DRIVER_DATA_LNL_M},
+	{PCI_DEVICE_DATA(INTEL, ISH_LNL_M, ISHTP_DRIVER_DATA_LNL_M)},
+	{PCI_DEVICE_DATA(INTEL, ISH_PTL_H, ISHTP_DRIVER_DATA_PTL)},
+	{PCI_DEVICE_DATA(INTEL, ISH_PTL_P, ISHTP_DRIVER_DATA_PTL)},
+	{PCI_DEVICE_DATA(INTEL, ISH_WCL, ISHTP_DRIVER_DATA_WCL)},
 	{}
 };
 MODULE_DEVICE_TABLE(pci, ish_pci_tbl);
@@ -251,9 +264,6 @@ static void ish_shutdown(struct pci_dev *pdev)
 
 static struct device __maybe_unused *ish_resume_device;
 
-/* 50ms to get resume response */
-#define WAIT_FOR_RESUME_ACK_MS		50
-
 /**
  * ish_resume_handler() - Work function to complete resume
  * @work:	work struct
@@ -381,6 +391,50 @@ static int __maybe_unused ish_resume(struct device *device)
 
 static SIMPLE_DEV_PM_OPS(ish_pm_ops, ish_suspend, ish_resume);
 
+static ssize_t base_version_show(struct device *cdev,
+				 struct device_attribute *attr, char *buf)
+{
+	struct ishtp_device *dev = dev_get_drvdata(cdev);
+
+	return sysfs_emit(buf, "%u.%u.%u.%u\n", dev->base_ver.major,
+			  dev->base_ver.minor, dev->base_ver.hotfix,
+			  dev->base_ver.build);
+}
+static DEVICE_ATTR_RO(base_version);
+
+static ssize_t project_version_show(struct device *cdev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct ishtp_device *dev = dev_get_drvdata(cdev);
+
+	return sysfs_emit(buf, "%u.%u.%u.%u\n", dev->prj_ver.major,
+			  dev->prj_ver.minor, dev->prj_ver.hotfix,
+			  dev->prj_ver.build);
+}
+static DEVICE_ATTR_RO(project_version);
+
+static struct attribute *ish_firmware_attrs[] = {
+	&dev_attr_base_version.attr,
+	&dev_attr_project_version.attr,
+	NULL
+};
+
+static umode_t firmware_is_visible(struct kobject *kobj, struct attribute *attr,
+				   int i)
+{
+	struct ishtp_device *dev = dev_get_drvdata(kobj_to_dev(kobj));
+
+	return dev->driver_data->fw_generation ? attr->mode : 0;
+}
+
+static const struct attribute_group ish_firmware_group = {
+	.name = "firmware",
+	.attrs = ish_firmware_attrs,
+	.is_visible = firmware_is_visible,
+};
+
+__ATTRIBUTE_GROUPS(ish_firmware);
+
 static struct pci_driver ish_driver = {
 	.name = KBUILD_MODNAME,
 	.id_table = ish_pci_tbl,
@@ -388,6 +442,7 @@ static struct pci_driver ish_driver = {
 	.remove = ish_remove,
 	.shutdown = ish_shutdown,
 	.driver.pm = &ish_pm_ops,
+	.dev_groups = ish_firmware_groups,
 };
 
 module_pci_driver(ish_driver);

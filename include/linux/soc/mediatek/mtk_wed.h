@@ -147,7 +147,7 @@ struct mtk_wed_device {
 		u32 wpdma_tx;
 		u32 wpdma_txfree;
 		u32 wpdma_rx_glo;
-		u32 wpdma_rx;
+		u32 wpdma_rx[MTK_WED_RX_QUEUES];
 		u32 wpdma_rx_rro[MTK_WED_RX_QUEUES];
 		u32 wpdma_rx_pg;
 
@@ -192,7 +192,7 @@ struct mtk_wed_device {
 };
 
 struct mtk_wed_ops {
-	int (*attach)(struct mtk_wed_device *dev);
+	int (*attach)(struct mtk_wed_device *dev) __releases(RCU);
 	int (*tx_ring_setup)(struct mtk_wed_device *dev, int ring,
 			     void __iomem *regs, bool reset);
 	int (*rx_ring_setup)(struct mtk_wed_device *dev, int ring,

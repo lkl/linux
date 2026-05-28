@@ -123,6 +123,7 @@
 			      <0x0 0xf0120000 0x0 0x2000>;	/* GICH */
 			interrupts = <GIC_PPI 9 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-controller;
+			#address-cells = <0>;
 			#interrupt-cells = <3>;
 		};
 
@@ -151,7 +152,7 @@
 			al,msi-num-spis = <160>;
 		};
 
-		io-fabric@fc000000 {
+		io-bus@fc000000 {
 			compatible = "simple-bus";
 			#address-cells = <1>;
 			#size-cells = <1>;

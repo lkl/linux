@@ -90,20 +90,13 @@ static int pvr_fw_cmd_init(struct pvr_device *pvr_dev, struct pvr_job *job,
 	void *stream;
 	int err;
 
-	stream = kzalloc(stream_len, GFP_KERNEL);
-	if (!stream)
-		return -ENOMEM;
-
-	if (copy_from_user(stream, u64_to_user_ptr(stream_userptr), stream_len)) {
-		err = -EFAULT;
-		goto err_free_stream;
-	}
+	stream = memdup_user(u64_to_user_ptr(stream_userptr), stream_len);
+	if (IS_ERR(stream))
+		return PTR_ERR(stream);
 
 	err = pvr_job_process_stream(pvr_dev, stream_def, stream, stream_len, job);
 
-err_free_stream:
 	kfree(stream);
-
 	return err;
 }
 
@@ -453,7 +446,7 @@ create_job(struct pvr_device *pvr_dev,
 	if (err)
 		goto err_put_job;
 
-	err = pvr_queue_job_init(job);
+	err = pvr_queue_job_init(job, pvr_file->file->client_id);
 	if (err)
 		goto err_put_job;
 
@@ -604,8 +597,6 @@ update_job_resvs_for_each(struct pvr_job_data *job_data, u32 job_count)
 static bool can_combine_jobs(struct pvr_job *a, struct pvr_job *b)
 {
 	struct pvr_job *geom_job = a, *frag_job = b;
-	struct dma_fence *fence;
-	unsigned long index;
 
 	/* Geometry and fragment jobs can be combined if they are queued to the
 	 * same context and targeting the same HWRT.
@@ -616,13 +607,9 @@ static bool can_combine_jobs(struct pvr_job *a, struct pvr_job *b)
 	    a->hwrt != b->hwrt)
 		return false;
 
-	xa_for_each(&frag_job->base.dependencies, index, fence) {
-		/* We combine when we see an explicit geom -> frag dep. */
-		if (&geom_job->base.s_fence->scheduled == fence)
-			return true;
-	}
-
-	return false;
+	/* We combine when we see an explicit geom -> frag dep. */
+	return drm_sched_job_has_dependency(&frag_job->base,
+					    &geom_job->base.s_fence->scheduled);
 }
 
 static struct dma_fence *
@@ -683,6 +670,13 @@ pvr_jobs_link_geom_frag(struct pvr_job_data *job_data, u32 *job_count)
 
 		geom_job->paired_job = frag_job;
 		frag_job->paired_job = geom_job;
+
+		/* The geometry job pvr_job structure is used when the fragment
+		 * job is being prepared by the GPU scheduler. Have the fragment
+		 * job hold a reference on the geometry job to prevent it being
+		 * freed until the fragment job has finished with it.
+		 */
+		pvr_job_get(geom_job);
 
 		/* Skip the fragment job we just paired to the geometry job. */
 		i++;

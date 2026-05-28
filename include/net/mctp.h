@@ -69,7 +69,10 @@ struct mctp_sock {
 
 	/* bind() params */
 	unsigned int	bind_net;
-	mctp_eid_t	bind_addr;
+	mctp_eid_t	bind_local_addr;
+	mctp_eid_t	bind_peer_addr;
+	unsigned int	bind_peer_net;
+	bool		bind_peer_set;
 	__u8		bind_type;
 
 	/* sendmsg()/recvmsg() uses struct sockaddr_mctp_ext */
@@ -183,8 +186,8 @@ struct mctp_sk_key {
 struct mctp_skb_cb {
 	unsigned int	magic;
 	unsigned int	net;
-	int		ifindex; /* extended/direct addressing if set */
-	mctp_eid_t	src;
+	/* fields below provide extended addressing for ingress to recvmsg() */
+	int		ifindex;
 	unsigned char	halen;
 	unsigned char	haddr[MAX_ADDR_LEN];
 };
@@ -212,7 +215,7 @@ static inline struct mctp_skb_cb *mctp_cb(struct sk_buff *skb)
 
 	BUILD_BUG_ON(sizeof(struct mctp_skb_cb) > sizeof(skb->cb));
 	WARN_ON(cb->magic != 0x4d435450);
-	return (void *)(skb->cb);
+	return cb;
 }
 
 /* If CONFIG_MCTP_FLOWS, we may add one of these as a SKB extension,
@@ -222,6 +225,8 @@ struct mctp_flow {
 	struct mctp_sk_key *key;
 };
 
+struct mctp_dst;
+
 /* Route definition.
  *
  * These are held in the pernet->mctp.routes list, with RCU protection for
@@ -229,16 +234,25 @@ struct mctp_flow {
  * dropped on NETDEV_UNREGISTER events.
  *
  * Updates to the route table are performed under rtnl; all reads under RCU,
- * so routes cannot be referenced over a RCU grace period. Specifically: A
- * caller cannot block between mctp_route_lookup and mctp_route_release()
+ * so routes cannot be referenced over a RCU grace period.
  */
 struct mctp_route {
 	mctp_eid_t		min, max;
 
 	unsigned char		type;
+
 	unsigned int		mtu;
-	struct mctp_dev		*dev;
-	int			(*output)(struct mctp_route *route,
+
+	enum {
+		MCTP_ROUTE_DIRECT,
+		MCTP_ROUTE_GATEWAY,
+	} dst_type;
+	union {
+		struct mctp_dev	*dev;
+		struct mctp_fq_addr gateway;
+	};
+
+	int			(*output)(struct mctp_dst *dst,
 					  struct sk_buff *skb);
 
 	struct list_head	list;
@@ -246,12 +260,35 @@ struct mctp_route {
 	struct rcu_head		rcu;
 };
 
+/* Route lookup result: dst. Represents the results of a routing decision,
+ * but is only held over the individual routing operation.
+ *
+ * Will typically be stored on the caller stack, and must be released after
+ * usage.
+ */
+struct mctp_dst {
+	struct mctp_dev *dev;
+	unsigned int mtu;
+	mctp_eid_t nexthop;
+
+	/* set for direct addressing */
+	unsigned char halen;
+	unsigned char haddr[MAX_ADDR_LEN];
+
+	int (*output)(struct mctp_dst *dst, struct sk_buff *skb);
+};
+
+int mctp_dst_from_extaddr(struct mctp_dst *dst, struct net *net, int ifindex,
+			  unsigned char halen, const unsigned char *haddr);
+
 /* route interfaces */
-struct mctp_route *mctp_route_lookup(struct net *net, unsigned int dnet,
-				     mctp_eid_t daddr);
+int mctp_route_lookup(struct net *net, unsigned int dnet,
+		      mctp_eid_t daddr, struct mctp_dst *dst);
+
+void mctp_dst_release(struct mctp_dst *dst);
 
 /* always takes ownership of skb */
-int mctp_local_output(struct sock *sk, struct mctp_route *rt,
+int mctp_local_output(struct sock *sk, struct mctp_dst *dst,
 		      struct sk_buff *skb, mctp_eid_t daddr, u8 req_tag);
 
 void mctp_key_unref(struct mctp_sk_key *key);
@@ -297,5 +334,23 @@ void mctp_routes_exit(void);
 
 int mctp_device_init(void);
 void mctp_device_exit(void);
+
+/* MCTP IDs and Codes from DMTF specification
+ * "DSP0239 Management Component Transport Protocol (MCTP) IDs and Codes"
+ * https://www.dmtf.org/sites/default/files/standards/documents/DSP0239_1.11.1.pdf
+ */
+enum mctp_phys_binding {
+	MCTP_PHYS_BINDING_UNSPEC	= 0x00,
+	MCTP_PHYS_BINDING_SMBUS		= 0x01,
+	MCTP_PHYS_BINDING_PCIE_VDM	= 0x02,
+	MCTP_PHYS_BINDING_USB		= 0x03,
+	MCTP_PHYS_BINDING_KCS		= 0x04,
+	MCTP_PHYS_BINDING_SERIAL	= 0x05,
+	MCTP_PHYS_BINDING_I3C		= 0x06,
+	MCTP_PHYS_BINDING_MMBI		= 0x07,
+	MCTP_PHYS_BINDING_PCC		= 0x08,
+	MCTP_PHYS_BINDING_UCIE		= 0x09,
+	MCTP_PHYS_BINDING_VENDOR	= 0xFF,
+};
 
 #endif /* __NET_MCTP_H */

@@ -18,6 +18,8 @@
  * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA
  */
 
+#include <linux/export.h>
+
 #include "mpi-internal.h"
 #include "longlong.h"
 
@@ -95,6 +97,7 @@ int mpi_set_bit(MPI a, unsigned int n)
 	a->d[limbno] |= (A_LIMB_1<<bitno);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(mpi_set_bit);
 
 /*
  * Shift A by N bits to the right.

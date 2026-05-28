@@ -1045,10 +1045,6 @@ void esas2r_build_mgt_req(struct esas2r_adapter *a,
 			  u32 length,
 			  void *data);
 void esas2r_build_ae_req(struct esas2r_adapter *a, struct esas2r_request *rq);
-void esas2r_build_cli_req(struct esas2r_adapter *a,
-			  struct esas2r_request *rq,
-			  u32 length,
-			  u32 cmd_rsp_len);
 void esas2r_build_ioctl_req(struct esas2r_adapter *a,
 			    struct esas2r_request *rq,
 			    u32 length,
@@ -1415,11 +1411,11 @@ static inline void esas2r_comp_list_drain(struct esas2r_adapter *a,
 }
 
 /* sysfs handlers */
-extern struct bin_attribute bin_attr_fw;
-extern struct bin_attribute bin_attr_fs;
-extern struct bin_attribute bin_attr_vda;
-extern struct bin_attribute bin_attr_hw;
-extern struct bin_attribute bin_attr_live_nvram;
-extern struct bin_attribute bin_attr_default_nvram;
+extern const struct bin_attribute bin_attr_fw;
+extern const struct bin_attribute bin_attr_fs;
+extern const struct bin_attribute bin_attr_vda;
+extern const struct bin_attribute bin_attr_hw;
+extern const struct bin_attribute bin_attr_live_nvram;
+extern const struct bin_attribute bin_attr_default_nvram;
 
 #endif /* ESAS2R_H */

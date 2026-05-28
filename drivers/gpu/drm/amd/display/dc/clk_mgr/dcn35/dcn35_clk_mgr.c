@@ -36,53 +36,119 @@
 #include "dcn20/dcn20_clk_mgr.h"
 
 
-
-
 #include "reg_helper.h"
 #include "core_types.h"
 #include "dcn35_smu.h"
 #include "dm_helpers.h"
 
-/* TODO: remove this include once we ported over remaining clk mgr functions*/
-#include "dcn30/dcn30_clk_mgr.h"
 #include "dcn31/dcn31_clk_mgr.h"
 
 #include "dc_dmub_srv.h"
-#include "link.h"
+#include "link_service.h"
 #include "logger_types.h"
 
 #undef DC_LOGGER
 #define DC_LOGGER \
 	clk_mgr->base.base.ctx->logger
 
-#define regCLK1_CLK_PLL_REQ			0x0237
-#define regCLK1_CLK_PLL_REQ_BASE_IDX		0
+#define DCN_BASE__INST0_SEG1 0x000000C0
+#define mmCLK1_CLK_PLL_REQ 0x16E37
 
-#define CLK1_CLK_PLL_REQ__FbMult_int__SHIFT	0x0
-#define CLK1_CLK_PLL_REQ__PllSpineDiv__SHIFT	0xc
-#define CLK1_CLK_PLL_REQ__FbMult_frac__SHIFT	0x10
-#define CLK1_CLK_PLL_REQ__FbMult_int_MASK	0x000001FFL
-#define CLK1_CLK_PLL_REQ__PllSpineDiv_MASK	0x0000F000L
-#define CLK1_CLK_PLL_REQ__FbMult_frac_MASK	0xFFFF0000L
+#define mmCLK1_CLK0_DFS_CNTL 0x16E69
+#define mmCLK1_CLK1_DFS_CNTL 0x16E6C
+#define mmCLK1_CLK2_DFS_CNTL 0x16E6F
+#define mmCLK1_CLK3_DFS_CNTL 0x16E72
+#define mmCLK1_CLK4_DFS_CNTL 0x16E75
+#define mmCLK1_CLK5_DFS_CNTL 0x16E78
 
-#define regCLK1_CLK2_BYPASS_CNTL			0x029c
-#define regCLK1_CLK2_BYPASS_CNTL_BASE_IDX	0
+#define mmCLK1_CLK0_CURRENT_CNT 0x16EFB
+#define mmCLK1_CLK1_CURRENT_CNT 0x16EFC
+#define mmCLK1_CLK2_CURRENT_CNT 0x16EFD
+#define mmCLK1_CLK3_CURRENT_CNT 0x16EFE
+#define mmCLK1_CLK4_CURRENT_CNT 0x16EFF
+#define mmCLK1_CLK5_CURRENT_CNT 0x16F00
 
-#define CLK1_CLK2_BYPASS_CNTL__CLK2_BYPASS_SEL__SHIFT	0x0
-#define CLK1_CLK2_BYPASS_CNTL__CLK2_BYPASS_DIV__SHIFT	0x10
-#define CLK1_CLK2_BYPASS_CNTL__CLK2_BYPASS_SEL_MASK		0x00000007L
-#define CLK1_CLK2_BYPASS_CNTL__CLK2_BYPASS_DIV_MASK		0x000F0000L
+#define mmCLK1_CLK0_BYPASS_CNTL 0x16E8A
+#define mmCLK1_CLK1_BYPASS_CNTL 0x16E93
+#define mmCLK1_CLK2_BYPASS_CNTL 0x16E9C
+#define mmCLK1_CLK3_BYPASS_CNTL 0x16EA5
+#define mmCLK1_CLK4_BYPASS_CNTL 0x16EAE
+#define mmCLK1_CLK5_BYPASS_CNTL 0x16EB7
 
-#define regCLK5_0_CLK5_spll_field_8				0x464b
-#define regCLK5_0_CLK5_spll_field_8_BASE_IDX	0
+#define mmCLK1_CLK0_DS_CNTL 0x16E83
+#define mmCLK1_CLK1_DS_CNTL 0x16E8C
+#define mmCLK1_CLK2_DS_CNTL 0x16E95
+#define mmCLK1_CLK3_DS_CNTL 0x16E9E
+#define mmCLK1_CLK4_DS_CNTL 0x16EA7
+#define mmCLK1_CLK5_DS_CNTL 0x16EB0
 
-#define CLK5_0_CLK5_spll_field_8__spll_ssc_en__SHIFT	0xd
-#define CLK5_0_CLK5_spll_field_8__spll_ssc_en_MASK		0x00002000L
+#define mmCLK1_CLK0_ALLOW_DS 0x16E84
+#define mmCLK1_CLK1_ALLOW_DS 0x16E8D
+#define mmCLK1_CLK2_ALLOW_DS 0x16E96
+#define mmCLK1_CLK3_ALLOW_DS 0x16E9F
+#define mmCLK1_CLK4_ALLOW_DS 0x16EA8
+#define mmCLK1_CLK5_ALLOW_DS 0x16EB1
+
+#define mmCLK5_spll_field_8 0x1B24B
+#define mmCLK6_spll_field_8 0x1B24B
+#define mmDENTIST_DISPCLK_CNTL 0x0124
+#define regDENTIST_DISPCLK_CNTL 0x0064
+#define regDENTIST_DISPCLK_CNTL_BASE_IDX 1
+
+#define CLK1_CLK_PLL_REQ__FbMult_int__SHIFT 0x0
+#define CLK1_CLK_PLL_REQ__PllSpineDiv__SHIFT 0xc
+#define CLK1_CLK_PLL_REQ__FbMult_frac__SHIFT 0x10
+#define CLK1_CLK_PLL_REQ__FbMult_int_MASK 0x000001FFL
+#define CLK1_CLK_PLL_REQ__PllSpineDiv_MASK 0x0000F000L
+#define CLK1_CLK_PLL_REQ__FbMult_frac_MASK 0xFFFF0000L
+
+#define CLK1_CLK2_BYPASS_CNTL__CLK2_BYPASS_SEL_MASK 0x00000007L
+#define CLK1_CLK2_BYPASS_CNTL__CLK2_BYPASS_DIV_MASK 0x000F0000L
+// DENTIST_DISPCLK_CNTL
+#define DENTIST_DISPCLK_CNTL__DENTIST_DISPCLK_WDIVIDER__SHIFT 0x0
+#define DENTIST_DISPCLK_CNTL__DENTIST_DISPCLK_RDIVIDER__SHIFT 0x8
+#define DENTIST_DISPCLK_CNTL__DENTIST_DISPCLK_CHG_DONE__SHIFT 0x13
+#define DENTIST_DISPCLK_CNTL__DENTIST_DPPCLK_CHG_DONE__SHIFT 0x14
+#define DENTIST_DISPCLK_CNTL__DENTIST_DPPCLK_WDIVIDER__SHIFT 0x18
+#define DENTIST_DISPCLK_CNTL__DENTIST_DISPCLK_WDIVIDER_MASK 0x0000007FL
+#define DENTIST_DISPCLK_CNTL__DENTIST_DISPCLK_RDIVIDER_MASK 0x00007F00L
+#define DENTIST_DISPCLK_CNTL__DENTIST_DISPCLK_CHG_DONE_MASK 0x00080000L
+#define DENTIST_DISPCLK_CNTL__DENTIST_DPPCLK_CHG_DONE_MASK 0x00100000L
+#define DENTIST_DISPCLK_CNTL__DENTIST_DPPCLK_WDIVIDER_MASK 0x7F000000L
+
+#define CLK5_spll_field_8__spll_ssc_en_MASK 0x00002000L
+#define CLK6_spll_field_8__spll_ssc_en_MASK 0x00002000L
 
 #define SMU_VER_THRESHOLD 0x5D4A00 //93.74.0
+#undef FN
+#define FN(reg_name, field_name) \
+	clk_mgr->clk_mgr_shift->field_name, clk_mgr->clk_mgr_mask->field_name
 
-#define REG(reg_name) \
-	(ctx->clk_reg_offsets[reg ## reg_name ## _BASE_IDX] + reg ## reg_name)
+#define REG(reg) \
+	(clk_mgr->regs->reg)
+
+#define BASE_INNER(seg) DCN_BASE__INST0_SEG ## seg
+
+#define BASE(seg) BASE_INNER(seg)
+
+#define SR(reg_name)\
+		.reg_name = BASE(reg ## reg_name ## _BASE_IDX) +  \
+					reg ## reg_name
+
+#define CLK_SR_DCN35(reg_name)\
+	.reg_name = mm ## reg_name
+
+static const struct clk_mgr_registers clk_mgr_regs_dcn35 = {
+	CLK_REG_LIST_DCN35()
+};
+
+static const struct clk_mgr_shift clk_mgr_shift_dcn35 = {
+	CLK_COMMON_MASK_SH_LIST_DCN32(__SHIFT)
+};
+
+static const struct clk_mgr_mask clk_mgr_mask_dcn35 = {
+	CLK_COMMON_MASK_SH_LIST_DCN32(_MASK)
+};
 
 #define TO_CLK_MGR_DCN35(clk_mgr)\
 	container_of(clk_mgr, struct clk_mgr_dcn35, base)
@@ -132,24 +198,46 @@ static void dcn35_disable_otg_wa(struct clk_mgr *clk_mgr_base, struct dc_state *
 	for (i = 0; i < dc->res_pool->pipe_count; ++i) {
 		struct pipe_ctx *old_pipe = &dc->current_state->res_ctx.pipe_ctx[i];
 		struct pipe_ctx *new_pipe = &context->res_ctx.pipe_ctx[i];
+		struct clk_mgr_internal *clk_mgr_internal = TO_CLK_MGR_INTERNAL(clk_mgr_base);
+		struct dccg *dccg = clk_mgr_internal->dccg;
 		struct pipe_ctx *pipe = safe_to_lower
 			? &context->res_ctx.pipe_ctx[i]
 			: &dc->current_state->res_ctx.pipe_ctx[i];
+		struct link_encoder *new_pipe_link_enc = new_pipe->link_res.dio_link_enc;
+		struct link_encoder *pipe_link_enc = pipe->link_res.dio_link_enc;
 		bool stream_changed_otg_dig_on = false;
+		bool has_active_hpo = false;
+
 		if (pipe->top_pipe || pipe->prev_odm_pipe)
 			continue;
+
+		if (!dc->config.unify_link_enc_assignment) {
+			if (new_pipe->stream)
+				new_pipe_link_enc = new_pipe->stream->link_enc;
+			if (pipe->stream)
+				pipe_link_enc = pipe->stream->link_enc;
+		}
+
 		stream_changed_otg_dig_on = old_pipe->stream && new_pipe->stream &&
 		old_pipe->stream != new_pipe->stream &&
 		old_pipe->stream_res.tg == new_pipe->stream_res.tg &&
-		new_pipe->stream->link_enc && !new_pipe->stream->dpms_off &&
-		new_pipe->stream->link_enc->funcs->is_dig_enabled &&
-		new_pipe->stream->link_enc->funcs->is_dig_enabled(
-		new_pipe->stream->link_enc) &&
+		new_pipe_link_enc && !new_pipe->stream->dpms_off &&
+		new_pipe_link_enc->funcs->is_dig_enabled &&
+		new_pipe_link_enc->funcs->is_dig_enabled(
+		new_pipe_link_enc) &&
 		new_pipe->stream_res.stream_enc &&
 		new_pipe->stream_res.stream_enc->funcs->is_fifo_enabled &&
 		new_pipe->stream_res.stream_enc->funcs->is_fifo_enabled(new_pipe->stream_res.stream_enc);
-		if (pipe->stream && (pipe->stream->dpms_off || dc_is_virtual_signal(pipe->stream->signal) ||
-			!pipe->stream->link_enc) && !stream_changed_otg_dig_on) {
+
+		if (old_pipe->stream && new_pipe->stream && old_pipe->stream == new_pipe->stream) {
+			has_active_hpo =  dccg->ctx->dc->link_srv->dp_is_128b_132b_signal(old_pipe) &&
+			dccg->ctx->dc->link_srv->dp_is_128b_132b_signal(new_pipe);
+
+		}
+
+		if (!has_active_hpo && !stream_changed_otg_dig_on && pipe->stream &&
+		    (pipe->stream->dpms_off || dc_is_virtual_signal(pipe->stream->signal) || !pipe_link_enc) &&
+		    !dccg->ctx->dc->link_srv->dp_is_128b_132b_signal(pipe)) {
 			/* This w/a should not trigger when we have a dig active */
 			if (disable) {
 				if (pipe->stream_res.tg && pipe->stream_res.tg->funcs->immediate_disable_crtc)
@@ -257,11 +345,11 @@ static void dcn35_notify_host_router_bw(struct clk_mgr *clk_mgr_base, struct dc_
 	struct clk_mgr_internal *clk_mgr = TO_CLK_MGR_INTERNAL(clk_mgr_base);
 	uint32_t host_router_bw_kbps[MAX_HOST_ROUTERS_NUM] = { 0 };
 	int i;
-
 	for (i = 0; i < context->stream_count; ++i) {
 		const struct dc_stream_state *stream = context->streams[i];
 		const struct dc_link *link = stream->link;
-		uint8_t lowest_dpia_index = 0, hr_index = 0;
+		uint8_t lowest_dpia_index = 0;
+		unsigned int hr_index = 0;
 
 		if (!link)
 			continue;
@@ -271,6 +359,8 @@ static void dcn35_notify_host_router_bw(struct clk_mgr *clk_mgr_base, struct dc_
 			continue;
 
 		hr_index = (link->link_index - lowest_dpia_index) / 2;
+		if (hr_index >= MAX_HOST_ROUTERS_NUM)
+			continue;
 		host_router_bw_kbps[hr_index] += dc_bandwidth_in_kbps_from_timing(
 			&stream->timing, dc_link_get_highest_encoding_format(link));
 	}
@@ -304,6 +394,8 @@ void dcn35_update_clocks(struct clk_mgr *clk_mgr_base,
 	display_count = dcn35_get_active_display_cnt_wa(dc, context, &all_active_disps);
 	if (new_clocks->dtbclk_en && !new_clocks->ref_dtbclk_khz)
 		new_clocks->ref_dtbclk_khz = 600000;
+	else if (!new_clocks->dtbclk_en && new_clocks->ref_dtbclk_khz > 590000)
+		new_clocks->ref_dtbclk_khz = 0;
 
 	/*
 	 * if it is safe to lower, but we are already in the lower state, we don't have to do anything
@@ -320,6 +412,7 @@ void dcn35_update_clocks(struct clk_mgr *clk_mgr_base,
 		if (clk_mgr_base->clks.dtbclk_en && !new_clocks->dtbclk_en) {
 			if (clk_mgr->base.ctx->dc->config.allow_0_dtb_clk)
 				dcn35_smu_set_dtbclk(clk_mgr, false);
+
 			clk_mgr_base->clks.dtbclk_en = new_clocks->dtbclk_en;
 		}
 		/* check that we're not already in lower */
@@ -337,11 +430,17 @@ void dcn35_update_clocks(struct clk_mgr *clk_mgr_base,
 		}
 
 		if (!clk_mgr_base->clks.dtbclk_en && new_clocks->dtbclk_en) {
-			dcn35_smu_set_dtbclk(clk_mgr, true);
-			clk_mgr_base->clks.dtbclk_en = new_clocks->dtbclk_en;
+			int actual_dtbclk = 0;
 
 			dcn35_update_clocks_update_dtb_dto(clk_mgr, context, new_clocks->ref_dtbclk_khz);
-			clk_mgr_base->clks.ref_dtbclk_khz = new_clocks->ref_dtbclk_khz;
+			dcn35_smu_set_dtbclk(clk_mgr, true);
+
+			actual_dtbclk = REG_READ(CLK1_CLK4_CURRENT_CNT);
+
+			if (actual_dtbclk > 590000) {
+				clk_mgr_base->clks.ref_dtbclk_khz = new_clocks->ref_dtbclk_khz;
+				clk_mgr_base->clks.dtbclk_en = new_clocks->dtbclk_en;
+			}
 		}
 
 		/* check that we're not already in D0 */
@@ -379,14 +478,19 @@ void dcn35_update_clocks(struct clk_mgr *clk_mgr_base,
 		update_dppclk = true;
 	}
 
-	if (should_set_clock(safe_to_lower, new_clocks->dispclk_khz, clk_mgr_base->clks.dispclk_khz)) {
+	if (should_set_clock(safe_to_lower, new_clocks->dispclk_khz, clk_mgr_base->clks.dispclk_khz) &&
+	    (new_clocks->dispclk_khz > 0 || (safe_to_lower && display_count == 0))) {
+		int requested_dispclk_khz = new_clocks->dispclk_khz;
+
 		dcn35_disable_otg_wa(clk_mgr_base, context, safe_to_lower, true);
 
-		if (dc->debug.min_disp_clk_khz > 0 && new_clocks->dispclk_khz < dc->debug.min_disp_clk_khz)
-			new_clocks->dispclk_khz = dc->debug.min_disp_clk_khz;
+		/* Clamp the requested clock to PMFW based on their limit. */
+		if (dc->debug.min_disp_clk_khz > 0 && requested_dispclk_khz < dc->debug.min_disp_clk_khz)
+			requested_dispclk_khz = dc->debug.min_disp_clk_khz;
 
+		dcn35_smu_set_dispclk(clk_mgr, requested_dispclk_khz);
 		clk_mgr_base->clks.dispclk_khz = new_clocks->dispclk_khz;
-		dcn35_smu_set_dispclk(clk_mgr, clk_mgr_base->clks.dispclk_khz);
+
 		dcn35_disable_otg_wa(clk_mgr_base, context, safe_to_lower, false);
 
 		update_dispclk = true;
@@ -434,7 +538,6 @@ static int get_vco_frequency_from_reg(struct clk_mgr_internal *clk_mgr)
 	struct fixed31_32 pll_req;
 	unsigned int fbmult_frac_val = 0;
 	unsigned int fbmult_int_val = 0;
-	struct dc_context *ctx = clk_mgr->base.ctx;
 
 	/*
 	 * Register value of fbmult is in 8.16 format, we are converting to 314.32
@@ -486,30 +589,141 @@ bool dcn35_are_clock_states_equal(struct dc_clocks *a,
 	return true;
 }
 
-static void dcn35_dump_clk_registers(struct clk_state_registers_and_bypass *regs_and_bypass,
+static void dcn35_save_clk_registers_internal(struct dcn35_clk_internal *internal, struct clk_mgr *clk_mgr_base)
+{
+	struct clk_mgr_internal *clk_mgr = TO_CLK_MGR_INTERNAL(clk_mgr_base);
+
+	// read dtbclk
+	internal->CLK1_CLK4_CURRENT_CNT = REG_READ(CLK1_CLK4_CURRENT_CNT);
+	internal->CLK1_CLK4_BYPASS_CNTL = REG_READ(CLK1_CLK4_BYPASS_CNTL);
+
+	// read dcfclk
+	internal->CLK1_CLK3_CURRENT_CNT = REG_READ(CLK1_CLK3_CURRENT_CNT);
+	internal->CLK1_CLK3_BYPASS_CNTL = REG_READ(CLK1_CLK3_BYPASS_CNTL);
+
+	// read dcf deep sleep divider
+	internal->CLK1_CLK3_DS_CNTL = REG_READ(CLK1_CLK3_DS_CNTL);
+	internal->CLK1_CLK3_ALLOW_DS = REG_READ(CLK1_CLK3_ALLOW_DS);
+
+	// read dppclk
+	internal->CLK1_CLK1_CURRENT_CNT = REG_READ(CLK1_CLK1_CURRENT_CNT);
+	internal->CLK1_CLK1_BYPASS_CNTL = REG_READ(CLK1_CLK1_BYPASS_CNTL);
+
+	// read dprefclk
+	internal->CLK1_CLK2_CURRENT_CNT = REG_READ(CLK1_CLK2_CURRENT_CNT);
+	internal->CLK1_CLK2_BYPASS_CNTL = REG_READ(CLK1_CLK2_BYPASS_CNTL);
+
+	// read dispclk
+	internal->CLK1_CLK0_CURRENT_CNT = REG_READ(CLK1_CLK0_CURRENT_CNT);
+	internal->CLK1_CLK0_BYPASS_CNTL = REG_READ(CLK1_CLK0_BYPASS_CNTL);
+}
+
+static void dcn35_save_clk_registers(struct clk_state_registers_and_bypass *regs_and_bypass,
 		struct clk_mgr_dcn35 *clk_mgr)
 {
+	struct dcn35_clk_internal internal = {0};
+	char *bypass_clks[5] = {"0x0 DFS", "0x1 REFCLK", "0x2 ERROR", "0x3 400 FCH", "0x4 600 FCH"};
+
+	dcn35_save_clk_registers_internal(&internal, &clk_mgr->base.base);
+
+	regs_and_bypass->dcfclk = internal.CLK1_CLK3_CURRENT_CNT / 10;
+	regs_and_bypass->dcf_deep_sleep_divider = internal.CLK1_CLK3_DS_CNTL / 10;
+	regs_and_bypass->dcf_deep_sleep_allow = internal.CLK1_CLK3_ALLOW_DS;
+	regs_and_bypass->dprefclk = internal.CLK1_CLK2_CURRENT_CNT / 10;
+	regs_and_bypass->dispclk = internal.CLK1_CLK0_CURRENT_CNT / 10;
+	regs_and_bypass->dppclk = internal.CLK1_CLK1_CURRENT_CNT / 10;
+	regs_and_bypass->dtbclk = internal.CLK1_CLK4_CURRENT_CNT / 10;
+
+	regs_and_bypass->dppclk_bypass = internal.CLK1_CLK1_BYPASS_CNTL & 0x0007;
+	if (regs_and_bypass->dppclk_bypass < 0 || regs_and_bypass->dppclk_bypass > 4)
+		regs_and_bypass->dppclk_bypass = 0;
+	regs_and_bypass->dcfclk_bypass = internal.CLK1_CLK3_BYPASS_CNTL & 0x0007;
+	if (regs_and_bypass->dcfclk_bypass < 0 || regs_and_bypass->dcfclk_bypass > 4)
+		regs_and_bypass->dcfclk_bypass = 0;
+	regs_and_bypass->dispclk_bypass = internal.CLK1_CLK0_BYPASS_CNTL & 0x0007;
+	if (regs_and_bypass->dispclk_bypass < 0 || regs_and_bypass->dispclk_bypass > 4)
+		regs_and_bypass->dispclk_bypass = 0;
+	regs_and_bypass->dprefclk_bypass = internal.CLK1_CLK2_BYPASS_CNTL & 0x0007;
+	if (regs_and_bypass->dprefclk_bypass < 0 || regs_and_bypass->dprefclk_bypass > 4)
+		regs_and_bypass->dprefclk_bypass = 0;
+
+	if (clk_mgr->base.base.ctx->dc->debug.pstate_enabled) {
+		DC_LOG_SMU("clk_type,clk_value,deepsleep_cntl,deepsleep_allow,bypass\n");
+
+		DC_LOG_SMU("dcfclk,%d,%d,%d,%s\n",
+				   regs_and_bypass->dcfclk,
+				   regs_and_bypass->dcf_deep_sleep_divider,
+				   regs_and_bypass->dcf_deep_sleep_allow,
+				   bypass_clks[(int) regs_and_bypass->dcfclk_bypass]);
+
+		DC_LOG_SMU("dprefclk,%d,N/A,N/A,%s\n",
+			regs_and_bypass->dprefclk,
+			bypass_clks[(int) regs_and_bypass->dprefclk_bypass]);
+
+		DC_LOG_SMU("dispclk,%d,N/A,N/A,%s\n",
+			regs_and_bypass->dispclk,
+			bypass_clks[(int) regs_and_bypass->dispclk_bypass]);
+
+		// REGISTER VALUES
+		DC_LOG_SMU("reg_name,value,clk_type");
+
+		DC_LOG_SMU("CLK1_CLK3_CURRENT_CNT,%d,dcfclk",
+				internal.CLK1_CLK3_CURRENT_CNT);
+
+		DC_LOG_SMU("CLK1_CLK4_CURRENT_CNT,%d,dtbclk",
+					internal.CLK1_CLK4_CURRENT_CNT);
+
+		DC_LOG_SMU("CLK1_CLK3_DS_CNTL,%d,dcf_deep_sleep_divider",
+					internal.CLK1_CLK3_DS_CNTL);
+
+		DC_LOG_SMU("CLK1_CLK3_ALLOW_DS,%d,dcf_deep_sleep_allow",
+					internal.CLK1_CLK3_ALLOW_DS);
+
+		DC_LOG_SMU("CLK1_CLK2_CURRENT_CNT,%d,dprefclk",
+					internal.CLK1_CLK2_CURRENT_CNT);
+
+		DC_LOG_SMU("CLK1_CLK0_CURRENT_CNT,%d,dispclk",
+					internal.CLK1_CLK0_CURRENT_CNT);
+
+		DC_LOG_SMU("CLK1_CLK1_CURRENT_CNT,%d,dppclk",
+					internal.CLK1_CLK1_CURRENT_CNT);
+
+		DC_LOG_SMU("CLK1_CLK3_BYPASS_CNTL,%d,dcfclk_bypass",
+					internal.CLK1_CLK3_BYPASS_CNTL);
+
+		DC_LOG_SMU("CLK1_CLK2_BYPASS_CNTL,%d,dprefclk_bypass",
+					internal.CLK1_CLK2_BYPASS_CNTL);
+
+		DC_LOG_SMU("CLK1_CLK0_BYPASS_CNTL,%d,dispclk_bypass",
+					internal.CLK1_CLK0_BYPASS_CNTL);
+
+		DC_LOG_SMU("CLK1_CLK1_BYPASS_CNTL,%d,dppclk_bypass",
+					internal.CLK1_CLK1_BYPASS_CNTL);
+
+	}
 }
 
 static bool dcn35_is_spll_ssc_enabled(struct clk_mgr *clk_mgr_base)
 {
 	struct clk_mgr_internal *clk_mgr = TO_CLK_MGR_INTERNAL(clk_mgr_base);
-	struct dc_context *ctx = clk_mgr->base.ctx;
+
 	uint32_t ssc_enable;
 
-	REG_GET(CLK5_0_CLK5_spll_field_8, spll_ssc_en, &ssc_enable);
+	if (clk_mgr_base->ctx->dce_version == DCN_VERSION_3_51) {
+		ssc_enable = REG_READ(CLK6_spll_field_8) & CLK6_spll_field_8__spll_ssc_en_MASK;
+	} else {
+		ssc_enable = REG_READ(CLK5_spll_field_8) & CLK5_spll_field_8__spll_ssc_en_MASK;
+	}
 
-	return ssc_enable == 1;
+	return ssc_enable != 0;
 }
 
 static void init_clk_states(struct clk_mgr *clk_mgr)
 {
-	struct clk_mgr_internal *clk_mgr_int = TO_CLK_MGR_INTERNAL(clk_mgr);
 	uint32_t ref_dtbclk = clk_mgr->clks.ref_dtbclk_khz;
+
 	memset(&(clk_mgr->clks), 0, sizeof(struct dc_clocks));
 
-	if (clk_mgr_int->smu_ver >= SMU_VER_THRESHOLD)
-		clk_mgr->clks.dtbclk_en = true; // request DTBCLK disable on first commit
 	clk_mgr->clks.ref_dtbclk_khz = ref_dtbclk;	// restore ref_dtbclk
 	clk_mgr->clks.p_state_change_support = true;
 	clk_mgr->clks.prev_p_state_change_support = true;
@@ -520,6 +734,8 @@ static void init_clk_states(struct clk_mgr *clk_mgr)
 void dcn35_init_clocks(struct clk_mgr *clk_mgr)
 {
 	struct clk_mgr_internal *clk_mgr_int = TO_CLK_MGR_INTERNAL(clk_mgr);
+	struct clk_mgr_dcn35 *clk_mgr_dcn35 = TO_CLK_MGR_DCN35(clk_mgr_int);
+
 	init_clk_states(clk_mgr);
 
 	// to adjust dp_dto reference clock if ssc is enable otherwise to apply dprefclk
@@ -529,6 +745,13 @@ void dcn35_init_clocks(struct clk_mgr *clk_mgr)
 	else
 		clk_mgr->dp_dto_source_clock_in_khz = clk_mgr->dprefclk_khz;
 
+	dcn35_save_clk_registers(&clk_mgr->boot_snapshot, clk_mgr_dcn35);
+
+	clk_mgr->clks.ref_dtbclk_khz =  clk_mgr->boot_snapshot.dtbclk * 10;
+	if (clk_mgr->boot_snapshot.dtbclk > 59000) {
+		/*dtbclk enabled based on */
+		clk_mgr->clks.dtbclk_en = true;
+	}
 }
 static struct clk_bw_params dcn35_bw_params = {
 	.vram_type = Ddr4MemType,
@@ -614,6 +837,7 @@ static struct wm_table lpddr5_wm_table = {
 };
 
 static DpmClocks_t_dcn35 dummy_clocks;
+static DpmClocks_t_dcn351 dummy_clocks_dcn351;
 
 static struct dcn35_watermarks dummy_wms = { 0 };
 
@@ -624,10 +848,10 @@ static struct dcn35_ss_info_table ss_info_table = {
 
 static void dcn35_read_ss_info_from_lut(struct clk_mgr_internal *clk_mgr)
 {
-	struct dc_context *ctx = clk_mgr->base.ctx;
-	uint32_t clock_source;
+	uint32_t clock_source = 0;
 
-	REG_GET(CLK1_CLK2_BYPASS_CNTL, CLK2_BYPASS_SEL, &clock_source);
+	clock_source = REG_READ(CLK1_CLK2_BYPASS_CNTL) & CLK1_CLK2_BYPASS_CNTL__CLK2_BYPASS_SEL_MASK;
+
 	// If it's DFS mode, clock_source is 0.
 	if (dcn35_is_spll_ssc_enabled(&clk_mgr->base) && (clock_source < ARRAY_SIZE(ss_info_table.ss_percentage))) {
 		clk_mgr->dprefclk_ss_percentage = ss_info_table.ss_percentage[clock_source];
@@ -737,6 +961,22 @@ static void dcn35_get_dpm_table_from_smu(struct clk_mgr_internal *clk_mgr,
 	dcn35_smu_transfer_dpm_table_smu_2_dram(clk_mgr);
 }
 
+static void dcn351_get_dpm_table_from_smu(struct clk_mgr_internal *clk_mgr,
+		struct dcn351_smu_dpm_clks *smu_dpm_clks)
+{
+	DpmClocks_t_dcn351 *table = smu_dpm_clks->dpm_clks;
+
+	if (!clk_mgr->smu_ver)
+		return;
+	if (!table || smu_dpm_clks->mc_address.quad_part == 0)
+		return;
+	memset(table, 0, sizeof(*table));
+	dcn35_smu_set_dram_addr_high(clk_mgr,
+			smu_dpm_clks->mc_address.high_part);
+	dcn35_smu_set_dram_addr_low(clk_mgr,
+			smu_dpm_clks->mc_address.low_part);
+	dcn35_smu_transfer_dpm_table_smu_2_dram(clk_mgr);
+}
 static uint32_t find_max_clk_value(const uint32_t clocks[], uint32_t num_clocks)
 {
 	uint32_t max = 0;
@@ -975,11 +1215,8 @@ static void dcn35_exit_low_power_state(struct clk_mgr *clk_mgr_base)
 static bool dcn35_is_ips_supported(struct clk_mgr *clk_mgr_base)
 {
 	struct clk_mgr_internal *clk_mgr = TO_CLK_MGR_INTERNAL(clk_mgr_base);
-	bool ips_supported = true;
 
-	ips_supported = dcn35_smu_get_ips_supported(clk_mgr) ? true : false;
-
-	return ips_supported;
+	return dcn35_smu_get_ips_supported(clk_mgr) ? true : false;
 }
 
 static void dcn35_init_clocks_fpga(struct clk_mgr *clk_mgr)
@@ -1078,6 +1315,57 @@ struct clk_mgr_funcs dcn35_fpga_funcs = {
 	.get_dtb_ref_clk_frequency = dcn31_get_dtb_ref_freq_khz,
 };
 
+static void translate_to_DpmClocks_t_dcn35(struct dcn351_smu_dpm_clks *smu_dpm_clks_a,
+		struct dcn35_smu_dpm_clks *smu_dpm_clks_b)
+{
+	/*translate two structures and only take need clock tables*/
+	uint8_t i;
+
+	if (smu_dpm_clks_a == NULL || smu_dpm_clks_b == NULL ||
+		smu_dpm_clks_a->dpm_clks == NULL || smu_dpm_clks_b->dpm_clks == NULL)
+		return;
+
+	for (i = 0; i < NUM_DCFCLK_DPM_LEVELS; i++)
+		smu_dpm_clks_b->dpm_clks->DcfClocks[i] = smu_dpm_clks_a->dpm_clks->DcfClocks[i];
+
+	for (i = 0; i < NUM_DISPCLK_DPM_LEVELS; i++)
+		smu_dpm_clks_b->dpm_clks->DispClocks[i] = smu_dpm_clks_a->dpm_clks->DispClocks[i];
+
+	for (i = 0; i < NUM_DPPCLK_DPM_LEVELS; i++)
+		smu_dpm_clks_b->dpm_clks->DppClocks[i] = smu_dpm_clks_a->dpm_clks->DppClocks[i];
+
+	for (i = 0; i < NUM_FCLK_DPM_LEVELS; i++) {
+		smu_dpm_clks_b->dpm_clks->FclkClocks_Freq[i] = smu_dpm_clks_a->dpm_clks->FclkClocks_Freq[i];
+		smu_dpm_clks_b->dpm_clks->FclkClocks_Voltage[i] = smu_dpm_clks_a->dpm_clks->FclkClocks_Voltage[i];
+	}
+	for (i = 0; i < NUM_MEM_PSTATE_LEVELS; i++) {
+		smu_dpm_clks_b->dpm_clks->MemPstateTable[i].MemClk =
+			smu_dpm_clks_a->dpm_clks->MemPstateTable[i].MemClk;
+		smu_dpm_clks_b->dpm_clks->MemPstateTable[i].UClk =
+			smu_dpm_clks_a->dpm_clks->MemPstateTable[i].UClk;
+		smu_dpm_clks_b->dpm_clks->MemPstateTable[i].Voltage =
+			smu_dpm_clks_a->dpm_clks->MemPstateTable[i].Voltage;
+		smu_dpm_clks_b->dpm_clks->MemPstateTable[i].WckRatio =
+			smu_dpm_clks_a->dpm_clks->MemPstateTable[i].WckRatio;
+	}
+	smu_dpm_clks_b->dpm_clks->MaxGfxClk = smu_dpm_clks_a->dpm_clks->MaxGfxClk;
+	smu_dpm_clks_b->dpm_clks->MinGfxClk = smu_dpm_clks_a->dpm_clks->MinGfxClk;
+	smu_dpm_clks_b->dpm_clks->NumDcfClkLevelsEnabled =
+		smu_dpm_clks_a->dpm_clks->NumDcfClkLevelsEnabled;
+	smu_dpm_clks_b->dpm_clks->NumDispClkLevelsEnabled =
+		smu_dpm_clks_a->dpm_clks->NumDispClkLevelsEnabled;
+	smu_dpm_clks_b->dpm_clks->NumFclkLevelsEnabled =
+		smu_dpm_clks_a->dpm_clks->NumFclkLevelsEnabled;
+	smu_dpm_clks_b->dpm_clks->NumMemPstatesEnabled =
+		smu_dpm_clks_a->dpm_clks->NumMemPstatesEnabled;
+	smu_dpm_clks_b->dpm_clks->NumSocClkLevelsEnabled =
+		smu_dpm_clks_a->dpm_clks->NumSocClkLevelsEnabled;
+
+	for (i = 0; i < NUM_SOC_VOLTAGE_LEVELS; i++) {
+		smu_dpm_clks_b->dpm_clks->SocClocks[i] = smu_dpm_clks_a->dpm_clks->SocClocks[i];
+		smu_dpm_clks_b->dpm_clks->SocVoltage[i] = smu_dpm_clks_a->dpm_clks->SocVoltage[i];
+	}
+}
 void dcn35_clk_mgr_construct(
 		struct dc_context *ctx,
 		struct clk_mgr_dcn35 *clk_mgr,
@@ -1085,6 +1373,7 @@ void dcn35_clk_mgr_construct(
 		struct dccg *dccg)
 {
 	struct dcn35_smu_dpm_clks smu_dpm_clks = { 0 };
+	struct dcn351_smu_dpm_clks smu_dpm_clks_dcn351 = { 0 };
 	clk_mgr->base.base.ctx = ctx;
 	clk_mgr->base.base.funcs = &dcn35_funcs;
 
@@ -1097,6 +1386,12 @@ void dcn35_clk_mgr_construct(
 	clk_mgr->base.dprefclk_ss_divider = 1000;
 	clk_mgr->base.ss_on_dprefclk = false;
 	clk_mgr->base.dfs_ref_freq_khz = 48000;
+	if (ctx->dce_version != DCN_VERSION_3_51) {
+		clk_mgr->base.regs = &clk_mgr_regs_dcn35;
+		clk_mgr->base.clk_mgr_shift = &clk_mgr_shift_dcn35;
+		clk_mgr->base.clk_mgr_mask = &clk_mgr_mask_dcn35;
+	}
+
 
 	clk_mgr->smu_wm_set.wm_set = (struct dcn35_watermarks *)dm_helpers_allocate_gpu_mem(
 				clk_mgr->base.base.ctx,
@@ -1115,13 +1410,23 @@ void dcn35_clk_mgr_construct(
 				DC_MEM_ALLOC_TYPE_GART,
 				sizeof(DpmClocks_t_dcn35),
 				&smu_dpm_clks.mc_address.quad_part);
-
 	if (smu_dpm_clks.dpm_clks == NULL) {
 		smu_dpm_clks.dpm_clks = &dummy_clocks;
 		smu_dpm_clks.mc_address.quad_part = 0;
 	}
-
 	ASSERT(smu_dpm_clks.dpm_clks);
+
+	if (ctx->dce_version == DCN_VERSION_3_51) {
+		smu_dpm_clks_dcn351.dpm_clks = (DpmClocks_t_dcn351 *)dm_helpers_allocate_gpu_mem(
+				clk_mgr->base.base.ctx,
+				DC_MEM_ALLOC_TYPE_GART,
+				sizeof(DpmClocks_t_dcn351),
+				&smu_dpm_clks_dcn351.mc_address.quad_part);
+		if (smu_dpm_clks_dcn351.dpm_clks == NULL) {
+			smu_dpm_clks_dcn351.dpm_clks = &dummy_clocks_dcn351;
+			smu_dpm_clks_dcn351.mc_address.quad_part = 0;
+		}
+	}
 
 	clk_mgr->base.smu_ver = dcn35_smu_get_smu_version(&clk_mgr->base);
 
@@ -1137,7 +1442,7 @@ void dcn35_clk_mgr_construct(
 		dcn35_bw_params.wm_table = ddr5_wm_table;
 	}
 	/* Saved clocks configured at boot for debug purposes */
-	dcn35_dump_clk_registers(&clk_mgr->base.base.boot_snapshot, clk_mgr);
+	dcn35_save_clk_registers(&clk_mgr->base.base.boot_snapshot, clk_mgr);
 
 	clk_mgr->base.base.dprefclk_khz = dcn35_smu_get_dprefclk(&clk_mgr->base);
 	clk_mgr->base.base.clks.ref_dtbclk_khz = 600000;
@@ -1151,7 +1456,11 @@ void dcn35_clk_mgr_construct(
 
 	if (clk_mgr->base.base.ctx->dc->debug.pstate_enabled) {
 		int i;
-		dcn35_get_dpm_table_from_smu(&clk_mgr->base, &smu_dpm_clks);
+		if (ctx->dce_version == DCN_VERSION_3_51) {
+			dcn351_get_dpm_table_from_smu(&clk_mgr->base, &smu_dpm_clks_dcn351);
+			translate_to_DpmClocks_t_dcn35(&smu_dpm_clks_dcn351, &smu_dpm_clks);
+		} else
+			dcn35_get_dpm_table_from_smu(&clk_mgr->base, &smu_dpm_clks);
 		DC_LOG_SMU("NumDcfClkLevelsEnabled: %d\n"
 				   "NumDispClkLevelsEnabled: %d\n"
 				   "NumSocClkLevelsEnabled: %d\n"
@@ -1212,6 +1521,10 @@ void dcn35_clk_mgr_construct(
 		dm_helpers_free_gpu_mem(clk_mgr->base.base.ctx, DC_MEM_ALLOC_TYPE_GART,
 				smu_dpm_clks.dpm_clks);
 
+	if (smu_dpm_clks_dcn351.dpm_clks && smu_dpm_clks_dcn351.mc_address.quad_part != 0)
+		dm_helpers_free_gpu_mem(clk_mgr->base.base.ctx, DC_MEM_ALLOC_TYPE_GART,
+				smu_dpm_clks_dcn351.dpm_clks);
+
 	if (ctx->dc->config.disable_ips != DMUB_IPS_DISABLE_ALL) {
 		bool ips_support = false;
 
@@ -1225,7 +1538,7 @@ void dcn35_clk_mgr_construct(
 
 			/* Disable dynamic IPS2 in older PMFW (93.12) for Z8 interop. */
 			if (ctx->dc->config.disable_ips == DMUB_IPS_ENABLE &&
-			    ctx->dce_version == DCN_VERSION_3_5 &&
+			    ctx->dce_version != DCN_VERSION_3_51 &&
 			    ((clk_mgr->base.smu_ver & 0x00FFFFFF) <= 0x005d0c00))
 				ctx->dc->config.disable_ips = DMUB_IPS_RCG_IN_ACTIVE_IPS2_IN_OFF;
 		} else {

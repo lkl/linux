@@ -864,8 +864,6 @@ void rpc_signal_task(struct rpc_task *task)
 	if (!rpc_task_set_rpc_status(task, -ERESTARTSYS))
 		return;
 	trace_rpc_task_signalled(task, task->tk_action);
-	set_bit(RPC_TASK_SIGNALLED, &task->tk_runstate);
-	smp_mb__after_atomic();
 	queue = READ_ONCE(task->tk_waitqueue);
 	if (queue)
 		rpc_wake_up_queued_task(queue, task);
@@ -1076,7 +1074,6 @@ int rpc_malloc(struct rpc_task *task)
 	rqst->rq_rbuffer = (char *)rqst->rq_buffer + rqst->rq_callsize;
 	return 0;
 }
-EXPORT_SYMBOL_GPL(rpc_malloc);
 
 /**
  * rpc_free - free RPC buffer resources allocated via rpc_malloc
@@ -1097,7 +1094,6 @@ void rpc_free(struct rpc_task *task)
 	else
 		kfree(buf);
 }
-EXPORT_SYMBOL_GPL(rpc_free);
 
 /*
  * Creation and deletion of RPC task structures

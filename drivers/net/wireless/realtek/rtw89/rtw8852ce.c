@@ -20,6 +20,7 @@ static const struct rtw89_pci_bd_idx_addr rtw8852c_bd_idx_addr_low_power = {
 
 static const struct rtw89_pci_info rtw8852c_pci_info = {
 	.gen_def		= &rtw89_pci_gen_ax,
+	.isr_def		= &rtw89_pci_isr_ax,
 	.txbd_trunc_mode	= MAC_AX_BD_TRUNC,
 	.rxbd_trunc_mode	= MAC_AX_BD_TRUNC,
 	.rxbd_mode		= MAC_AX_RXBD_PKT,
@@ -36,6 +37,9 @@ static const struct rtw89_pci_info rtw8852c_pci_info = {
 	.io_rcy_tmr		= MAC_AX_IO_RCY_ANA_TMR_6MS,
 	.rx_ring_eq_is_full	= false,
 	.check_rx_tag		= false,
+	.no_rxbd_fs		= false,
+	.group_bd_addr		= false,
+	.rpp_fmt_size		= sizeof(struct rtw89_pci_rpp_fmt),
 
 	.init_cfg_reg		= R_AX_HAXI_INIT_CFG1,
 	.txhci_en_bit		= B_AX_TXHCI_EN_V1,
@@ -63,10 +67,13 @@ static const struct rtw89_pci_info rtw8852c_pci_info = {
 
 	.ltr_set		= rtw89_pci_ltr_set_v1,
 	.fill_txaddr_info	= rtw89_pci_fill_txaddr_info_v1,
+	.parse_rpp		= rtw89_pci_parse_rpp,
 	.config_intr_mask	= rtw89_pci_config_intr_mask_v1,
 	.enable_intr		= rtw89_pci_enable_intr_v1,
 	.disable_intr		= rtw89_pci_disable_intr_v1,
 	.recognize_intrs	= rtw89_pci_recognize_intrs_v1,
+
+	.ssid_quirks		= NULL,
 };
 
 static const struct dmi_system_id rtw8852c_pci_quirks[] = {
@@ -93,6 +100,7 @@ static const struct dmi_system_id rtw8852c_pci_quirks[] = {
 
 static const struct rtw89_driver_info rtw89_8852ce_info = {
 	.chip = &rtw8852c_chip_info,
+	.variant = NULL,
 	.quirks = rtw8852c_pci_quirks,
 	.bus = {
 		.pci = &rtw8852c_pci_info,
@@ -114,6 +122,7 @@ static struct pci_driver rtw89_8852ce_driver = {
 	.probe		= rtw89_pci_probe,
 	.remove		= rtw89_pci_remove,
 	.driver.pm	= &rtw89_pm_ops,
+	.err_handler    = &rtw89_pci_err_handler,
 };
 module_pci_driver(rtw89_8852ce_driver);
 

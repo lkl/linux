@@ -13,6 +13,7 @@
 #include <linux/ptrace.h>
 #include <linux/preempt.h>
 #include <linux/stop_machine.h>
+#include <linux/cpufeature.h>
 #include <linux/kdebug.h>
 #include <linux/uaccess.h>
 #include <linux/extable.h>
@@ -153,7 +154,7 @@ void arch_arm_kprobe(struct kprobe *p)
 {
 	struct swap_insn_args args = {.p = p, .arm_kprobe = 1};
 
-	if (MACHINE_HAS_SEQ_INSN) {
+	if (cpu_has_seq_insn()) {
 		swap_instruction(&args);
 		text_poke_sync();
 	} else {
@@ -166,7 +167,7 @@ void arch_disarm_kprobe(struct kprobe *p)
 {
 	struct swap_insn_args args = {.p = p, .arm_kprobe = 0};
 
-	if (MACHINE_HAS_SEQ_INSN) {
+	if (cpu_has_seq_insn()) {
 		swap_instruction(&args);
 		text_poke_sync();
 	} else {
@@ -487,6 +488,12 @@ NOKPROBE_SYMBOL(kprobe_exceptions_notify);
 int __init arch_init_kprobes(void)
 {
 	return 0;
+}
+
+int __init arch_populate_kprobe_blacklist(void)
+{
+	return kprobe_add_area_blacklist((unsigned long)__irqentry_text_start,
+					 (unsigned long)__irqentry_text_end);
 }
 
 int arch_trampoline_kprobe(struct kprobe *p)

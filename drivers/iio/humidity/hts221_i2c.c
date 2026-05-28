@@ -42,19 +42,19 @@ static int hts221_i2c_probe(struct i2c_client *client)
 
 static const struct acpi_device_id hts221_acpi_match[] = {
 	{"SMO9100", 0},
-	{ },
+	{ }
 };
 MODULE_DEVICE_TABLE(acpi, hts221_acpi_match);
 
 static const struct of_device_id hts221_i2c_of_match[] = {
 	{ .compatible = "st,hts221", },
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(of, hts221_i2c_of_match);
 
 static const struct i2c_device_id hts221_i2c_id_table[] = {
 	{ HTS221_DEV_NAME },
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, hts221_i2c_id_table);
 
@@ -73,4 +73,4 @@ module_i2c_driver(hts221_driver);
 MODULE_AUTHOR("Lorenzo Bianconi <lorenzo.bianconi@st.com>");
 MODULE_DESCRIPTION("STMicroelectronics hts221 i2c driver");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(IIO_HTS221);
+MODULE_IMPORT_NS("IIO_HTS221");

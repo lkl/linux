@@ -50,15 +50,13 @@ from 'scripts/dtc/of_unittest_expect --help'.
 
 The Device Tree Source file (drivers/of/unittest-data/testcases.dts) contains
 the test data required for executing the unit tests automated in
-drivers/of/unittest.c. Currently, following Device Tree Source Include files
-(.dtsi) are included in testcases.dts::
+drivers/of/unittest.c. See the content of the folder::
 
-    drivers/of/unittest-data/tests-interrupts.dtsi
-    drivers/of/unittest-data/tests-platform.dtsi
-    drivers/of/unittest-data/tests-phandle.dtsi
-    drivers/of/unittest-data/tests-match.dtsi
+    drivers/of/unittest-data/tests-*.dtsi
 
-When the kernel is build with OF_SELFTEST enabled, then the following make
+for the Device Tree Source Include files (.dtsi) included in testcases.dts.
+
+When the kernel is built with CONFIG_OF_UNITTEST enabled, then the following make
 rule::
 
     $(obj)/%.dtb: $(src)/%.dts FORCE
@@ -135,7 +133,7 @@ via the following kernel symbols::
     __dtb_testcases_end   - address marking the end of test data blob
 
 Secondly, it calls of_fdt_unflatten_tree() to unflatten the flattened
-blob. And finally, if the machine's device tree (i.e live tree) is present,
+blob. And finally, if the machine's device tree (i.e. live tree) is present,
 then it attaches the unflattened test data tree to the live tree, else it
 attaches itself as a live device tree.
 

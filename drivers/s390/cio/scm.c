@@ -7,6 +7,7 @@
  */
 
 #include <linux/device.h>
+#include <linux/export.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
@@ -91,7 +92,7 @@ static ssize_t show_##name(struct device *dev,				\
 	int ret;							\
 									\
 	device_lock(dev);						\
-	ret = sprintf(buf, "%u\n", scmdev->attrs.name);			\
+	ret = sysfs_emit(buf, "%u\n", scmdev->attrs.name);		\
 	device_unlock(dev);						\
 									\
 	return ret;							\

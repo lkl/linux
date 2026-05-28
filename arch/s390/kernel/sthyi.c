@@ -5,6 +5,8 @@
  * Copyright IBM Corp. 2016
  * Author(s): Janosch Frank <frankja@linux.vnet.ibm.com>
  */
+
+#include <linux/export.h>
 #include <linux/errno.h>
 #include <linux/pagemap.h>
 #include <linux/vmalloc.h>
@@ -17,6 +19,7 @@
 #include <asm/ebcdic.h>
 #include <asm/facility.h>
 #include <asm/sthyi.h>
+#include <asm/asm.h>
 #include "entry.h"
 
 #define DED_WEIGHT 0xffff
@@ -425,13 +428,12 @@ static int sthyi(u64 vaddr, u64 *rc)
 
 	asm volatile(
 		".insn   rre,0xB2560000,%[r1],%[r2]\n"
-		"ipm     %[cc]\n"
-		"srl     %[cc],28\n"
-		: [cc] "=&d" (cc), [r2] "+&d" (r2.pair)
+		CC_IPM(cc)
+		: CC_OUT(cc, cc), [r2] "+&d" (r2.pair)
 		: [r1] "d" (r1.pair)
-		: "memory", "cc");
+		: CC_CLOBBER_LIST("memory"));
 	*rc = r2.odd;
-	return cc;
+	return CC_TRANSFORM(cc);
 }
 
 static int fill_dst(void *dst, u64 *rc)

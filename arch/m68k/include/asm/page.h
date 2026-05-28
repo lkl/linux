@@ -6,13 +6,11 @@
 #include <asm/setup.h>
 #include <asm/page_offset.h>
 
-/* PAGE_SHIFT determines the page size */
-#define PAGE_SHIFT	CONFIG_PAGE_SHIFT
-#define PAGE_SIZE	(_AC(1, UL) << PAGE_SHIFT)
-#define PAGE_MASK	(~(PAGE_SIZE-1))
+#include <vdso/page.h>
+
 #define PAGE_OFFSET	(PAGE_OFFSET_RAW)
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 /*
  * These are used to make use of C type-checking..
@@ -50,7 +48,7 @@ extern unsigned long _rambase;
 extern unsigned long _ramstart;
 extern unsigned long _ramend;
 
-#endif /* !__ASSEMBLY__ */
+#endif /* !__ASSEMBLER__ */
 
 #ifdef CONFIG_MMU
 #include <asm/page_mm.h>

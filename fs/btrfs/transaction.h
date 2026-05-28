@@ -33,7 +33,7 @@ struct btrfs_path;
  */
 #define BTRFS_TRANS_DIO_WRITE_STUB	((void *) 1)
 
-/* Radix-tree tag for roots that are part of the trasaction. */
+/* Radix-tree tag for roots that are part of the transaction. */
 #define BTRFS_ROOT_TRANS_TAG			0
 
 enum btrfs_trans_state {
@@ -227,7 +227,21 @@ static inline void btrfs_clear_skip_qgroup(struct btrfs_trans_handle *trans)
 	delayed_refs->qgroup_to_skip = 0;
 }
 
-bool __cold abort_should_print_stack(int error);
+/*
+ * We want the transaction abort to print stack trace only for errors where the
+ * cause could be a bug, eg. due to ENOSPC, and not for common errors that are
+ * caused by external factors.
+ */
+static inline bool btrfs_abort_should_print_stack(int error)
+{
+	switch (error) {
+	case -EIO:
+	case -EROFS:
+	case -ENOMEM:
+		return false;
+	}
+	return true;
+}
 
 /*
  * Call btrfs_abort_transaction as early as possible when an error condition is
@@ -240,7 +254,7 @@ do {								\
 	if (!test_and_set_bit(BTRFS_FS_STATE_TRANS_ABORTED,	\
 			&((trans)->fs_info->fs_state))) {	\
 		__first = true;					\
-		if (WARN(abort_should_print_stack(error),	\
+		if (WARN(btrfs_abort_should_print_stack(error),	\
 			KERN_ERR				\
 			"BTRFS: Transaction aborted (error %d)\n",	\
 			(error))) {					\

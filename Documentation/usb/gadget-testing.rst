@@ -874,7 +874,7 @@ where uvc-gadget is this program:
 
 with these patches:
 
-	http://www.spinics.net/lists/linux-usb/msg99220.html
+	https://lore.kernel.org/r/1386675637-18243-1-git-send-email-r.baldyga@samsung.com/
 
 host::
 
@@ -1050,7 +1050,7 @@ Its attributes are:
 	midi1_num_groups	The number of groups for MIDI 1.0 (0-16)
 	ui_hint			UI-hint of this FB
 				0: unknown, 1: receiver, 2: sender, 3: both
-	midi_ci_verison		Supported MIDI-CI version number (8 bit)
+	midi_ci_version		Supported MIDI-CI version number (8 bit)
 	is_midi1		Legacy MIDI 1.0 device (0-2)
 				0: MIDI 2.0 device,
 				1: MIDI 1.0 without restriction, or

@@ -14,6 +14,7 @@
  * NFSv4 delegation
  */
 struct nfs_delegation {
+	struct hlist_node hash;
 	struct list_head super_list;
 	const struct cred *cred;
 	struct inode *inode;
@@ -49,6 +50,7 @@ void nfs_inode_reclaim_delegation(struct inode *inode, const struct cred *cred,
 				  unsigned long pagemod_limit, u32 deleg_type);
 int nfs4_inode_return_delegation(struct inode *inode);
 void nfs4_inode_return_delegation_on_close(struct inode *inode);
+void nfs4_inode_set_return_delegation_on_close(struct inode *inode);
 int nfs_async_inode_return_delegation(struct inode *inode, const nfs4_stateid *stateid);
 void nfs_inode_evict_delegation(struct inode *inode);
 
@@ -121,5 +123,7 @@ static inline int nfs_have_delegated_mtime(struct inode *inode)
 	return NFS_PROTO(inode)->have_delegation(inode, FMODE_WRITE,
 						 NFS_DELEGATION_FLAG_TIME);
 }
+
+int nfs4_delegation_hash_alloc(struct nfs_server *server);
 
 #endif

@@ -43,6 +43,10 @@ static umode_t acpi_fan_hwmon_is_visible(const void *drvdata, enum hwmon_sensor_
 		case hwmon_fan_input:
 			return 0444;
 		case hwmon_fan_target:
+			/* Only acpi4 fans support fan control. */
+			if (!fan->acpi4)
+				return 0;
+
 			/*
 			 * When in fine grain control mode, not every fan control value
 			 * has an associated fan performance state.
@@ -57,6 +61,10 @@ static umode_t acpi_fan_hwmon_is_visible(const void *drvdata, enum hwmon_sensor_
 	case hwmon_power:
 		switch (attr) {
 		case hwmon_power_input:
+			/* Only acpi4 fans support fan control. */
+			if (!fan->acpi4)
+				return 0;
+
 			/*
 			 * When in fine grain control mode, not every fan control value
 			 * has an associated fan performance state.
@@ -85,13 +93,12 @@ static umode_t acpi_fan_hwmon_is_visible(const void *drvdata, enum hwmon_sensor_
 static int acpi_fan_hwmon_read(struct device *dev, enum hwmon_sensor_types type, u32 attr,
 			       int channel, long *val)
 {
-	struct acpi_device *adev = to_acpi_device(dev->parent);
 	struct acpi_fan *fan = dev_get_drvdata(dev);
 	struct acpi_fan_fps *fps;
 	struct acpi_fan_fst fst;
 	int ret;
 
-	ret = acpi_fan_get_fst(adev, &fst);
+	ret = acpi_fan_get_fst(fan->handle, &fst);
 	if (ret < 0)
 		return ret;
 
@@ -159,12 +166,12 @@ static const struct hwmon_chip_info acpi_fan_hwmon_chip_info = {
 	.info = acpi_fan_hwmon_info,
 };
 
-int devm_acpi_fan_create_hwmon(struct acpi_device *device)
+int devm_acpi_fan_create_hwmon(struct device *dev)
 {
-	struct acpi_fan *fan = acpi_driver_data(device);
+	struct acpi_fan *fan = dev_get_drvdata(dev);
 	struct device *hdev;
 
-	hdev = devm_hwmon_device_register_with_info(&device->dev, "acpi_fan", fan,
-						    &acpi_fan_hwmon_chip_info, NULL);
+	hdev = devm_hwmon_device_register_with_info(dev, "acpi_fan", fan, &acpi_fan_hwmon_chip_info,
+						    NULL);
 	return PTR_ERR_OR_ZERO(hdev);
 }

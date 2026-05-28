@@ -221,12 +221,12 @@ static void tegra_hte_test_remove(struct platform_device *pdev)
 	free_irq(hte.gpio_in_irq, &hte);
 	gpiod_put(hte.gpio_in);
 	gpiod_put(hte.gpio_out);
-	del_timer_sync(&hte.timer);
+	timer_delete_sync(&hte.timer);
 }
 
 static struct platform_driver tegra_hte_test_driver = {
 	.probe = tegra_hte_test_probe,
-	.remove_new = tegra_hte_test_remove,
+	.remove = tegra_hte_test_remove,
 	.driver = {
 		.name = "tegra_hte_test",
 		.of_match_table = tegra_hte_test_of_match,

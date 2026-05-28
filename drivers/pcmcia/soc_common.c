@@ -204,14 +204,8 @@ static int soc_pcmcia_hw_init(struct soc_pcmcia_socket *skt)
 
 	for (i = 0; i < ARRAY_SIZE(skt->stat); i++) {
 		if (gpio_is_valid(skt->stat[i].gpio)) {
-			unsigned long flags = GPIOF_IN;
-
-			/* CD is active low by default */
-			if (i == SOC_STAT_CD)
-				flags |= GPIOF_ACTIVE_LOW;
-
 			ret = devm_gpio_request_one(skt->socket.dev.parent,
-						    skt->stat[i].gpio, flags,
+						    skt->stat[i].gpio, GPIOF_IN,
 						    skt->stat[i].name);
 			if (ret) {
 				__soc_pcmcia_hw_shutdown(skt, i);
@@ -219,6 +213,10 @@ static int soc_pcmcia_hw_init(struct soc_pcmcia_socket *skt)
 			}
 
 			skt->stat[i].desc = gpio_to_desc(skt->stat[i].gpio);
+
+			/* CD is active low by default */
+			if ((i == SOC_STAT_CD) ^ gpiod_is_active_low(skt->stat[i].desc))
+				gpiod_toggle_active_low(skt->stat[i].desc);
 		}
 
 		if (i < SOC_STAT_VS1 && skt->stat[i].desc) {
@@ -462,7 +460,7 @@ static void soc_common_check_status(struct soc_pcmcia_socket *skt)
 /* Let's poll for events in addition to IRQs since IRQ only is unreliable... */
 static void soc_common_pcmcia_poll_event(struct timer_list *t)
 {
-	struct soc_pcmcia_socket *skt = from_timer(skt, t, poll_timer);
+	struct soc_pcmcia_socket *skt = timer_container_of(skt, t, poll_timer);
 	debug(skt, 4, "polling for events\n");
 
 	mod_timer(&skt->poll_timer, jiffies + SOC_PCMCIA_POLL_PERIOD);
@@ -768,7 +766,7 @@ EXPORT_SYMBOL(soc_pcmcia_init_one);
 
 void soc_pcmcia_remove_one(struct soc_pcmcia_socket *skt)
 {
-	del_timer_sync(&skt->poll_timer);
+	timer_delete_sync(&skt->poll_timer);
 
 	pcmcia_unregister_socket(&skt->socket);
 
@@ -867,7 +865,7 @@ int soc_pcmcia_add_one(struct soc_pcmcia_socket *skt)
 	return ret;
 
  out_err_8:
-	del_timer_sync(&skt->poll_timer);
+	timer_delete_sync(&skt->poll_timer);
 	pcmcia_unregister_socket(&skt->socket);
 
  out_err_7:

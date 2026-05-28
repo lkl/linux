@@ -7,6 +7,8 @@
 #include <uapi/linux/in6.h>
 #include <linux/bitfield.h>
 
+struct in_addr;
+
 /*  The TCAM state definitions follow an expected ordering.
  *  They start out disabled, then move through the following states:
  *  Disabled  0	-> Add	      2
@@ -32,14 +34,30 @@ enum {
 #define FBNIC_RPC_TCAM_MACDA_WORD_LEN		3
 #define FBNIC_RPC_TCAM_MACDA_NUM_ENTRIES	32
 
+/* 8 IPSRC and IPDST TCAM Entries each
+ * 8 registers, Validate each
+ */
+#define FBNIC_RPC_TCAM_IP_ADDR_WORD_LEN		8
+#define FBNIC_RPC_TCAM_IP_ADDR_NUM_ENTRIES	8
+
 #define FBNIC_RPC_TCAM_ACT_WORD_LEN		11
 #define FBNIC_RPC_TCAM_ACT_NUM_ENTRIES		64
+
+#define FBNIC_TCE_TCAM_WORD_LEN			3
+#define FBNIC_TCE_TCAM_NUM_ENTRIES		8
 
 struct fbnic_mac_addr {
 	union {
 		unsigned char addr8[ETH_ALEN];
 		__be16 addr16[FBNIC_RPC_TCAM_MACDA_WORD_LEN];
 	} mask, value;
+	unsigned char state;
+	DECLARE_BITMAP(act_tcam, FBNIC_RPC_TCAM_ACT_NUM_ENTRIES);
+};
+
+struct fbnic_ip_addr {
+	struct in6_addr mask, value;
+	unsigned char version;
 	unsigned char state;
 	DECLARE_BITMAP(act_tcam, FBNIC_RPC_TCAM_ACT_NUM_ENTRIES);
 };
@@ -78,12 +96,20 @@ enum {
 #define FBNIC_RPC_ACT_TBL_BMC_OFFSET		0
 #define FBNIC_RPC_ACT_TBL_BMC_ALL_MULTI_OFFSET	1
 
+/* This should leave us with 48 total entries in the TCAM that can be used
+ * for NFC after also deducting the 14 needed for RSS table programming.
+ */
+#define FBNIC_RPC_ACT_TBL_NFC_OFFSET		2
+
 /* We reserve the last 14 entries for RSS rules on the host. The BMC
  * unicast rule will need to be populated above these and is expected to
  * use MACDA TCAM entry 23 to store the BMC MAC address.
  */
 #define FBNIC_RPC_ACT_TBL_RSS_OFFSET \
 	(FBNIC_RPC_ACT_TBL_NUM_ENTRIES - FBNIC_RSS_EN_NUM_ENTRIES)
+
+#define FBNIC_RPC_ACT_TBL_NFC_ENTRIES \
+	(FBNIC_RPC_ACT_TBL_RSS_OFFSET - FBNIC_RPC_ACT_TBL_NFC_OFFSET)
 
 /* Flags used to identify the owner for this MAC filter. Note that any
  * flags set for Broadcast thru Promisc indicate that the rule belongs
@@ -158,6 +184,7 @@ struct fbnic_net;
 
 void fbnic_bmc_rpc_init(struct fbnic_dev *fbd);
 void fbnic_bmc_rpc_all_multi_config(struct fbnic_dev *fbd, bool enable_host);
+void fbnic_bmc_rpc_check(struct fbnic_dev *fbd);
 
 void fbnic_reset_indir_tbl(struct fbnic_net *fbn);
 void fbnic_rss_key_fill(u32 *buffer);
@@ -165,6 +192,7 @@ void fbnic_rss_init_en_mask(struct fbnic_net *fbn);
 void fbnic_rss_disable_hw(struct fbnic_dev *fbd);
 void fbnic_rss_reinit_hw(struct fbnic_dev *fbd, struct fbnic_net *fbn);
 void fbnic_rss_reinit(struct fbnic_dev *fbd, struct fbnic_net *fbn);
+u16 fbnic_flow_hash_2_rss_en_mask(struct fbnic_net *fbn, int flow_type);
 
 int __fbnic_xc_unsync(struct fbnic_mac_addr *mac_addr, unsigned int tcam_idx);
 struct fbnic_mac_addr *__fbnic_uc_sync(struct fbnic_dev *fbd,
@@ -173,6 +201,20 @@ struct fbnic_mac_addr *__fbnic_mc_sync(struct fbnic_dev *fbd,
 				       const unsigned char *addr);
 void fbnic_sift_macda(struct fbnic_dev *fbd);
 void fbnic_write_macda(struct fbnic_dev *fbd);
+
+void fbnic_promisc_sync(struct fbnic_dev *fbd,
+			bool uc_promisc, bool mc_promisc);
+
+struct fbnic_ip_addr *__fbnic_ip4_sync(struct fbnic_dev *fbd,
+				       struct fbnic_ip_addr *ip_addr,
+				       const struct in_addr *addr,
+				       const struct in_addr *mask);
+struct fbnic_ip_addr *__fbnic_ip6_sync(struct fbnic_dev *fbd,
+				       struct fbnic_ip_addr *ip_addr,
+				       const struct in6_addr *addr,
+				       const struct in6_addr *mask);
+int __fbnic_ip_unsync(struct fbnic_ip_addr *ip_addr, unsigned int tcam_idx);
+void fbnic_write_ip_addr(struct fbnic_dev *fbd);
 
 static inline int __fbnic_uc_unsync(struct fbnic_mac_addr *mac_addr)
 {
@@ -186,4 +228,5 @@ static inline int __fbnic_mc_unsync(struct fbnic_mac_addr *mac_addr)
 
 void fbnic_clear_rules(struct fbnic_dev *fbd);
 void fbnic_write_rules(struct fbnic_dev *fbd);
+void fbnic_write_tce_tcam(struct fbnic_dev *fbd);
 #endif /* _FBNIC_RPC_H_ */

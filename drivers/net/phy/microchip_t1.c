@@ -6,13 +6,18 @@
 #include <linux/delay.h>
 #include <linux/mii.h>
 #include <linux/phy.h>
+#include <linux/sort.h>
 #include <linux/ethtool.h>
 #include <linux/ethtool_netlink.h>
 #include <linux/bitfield.h>
+#include "microchip_rds_ptp.h"
 
 #define PHY_ID_LAN87XX				0x0007c150
 #define PHY_ID_LAN937X				0x0007c180
 #define PHY_ID_LAN887X				0x0007c1f0
+
+#define MCHP_RDS_PTP_LTC_BASE_ADDR		0xe000
+#define MCHP_RDS_PTP_PORT_BASE_ADDR	    (MCHP_RDS_PTP_LTC_BASE_ADDR + 0x800)
 
 /* External Register Control Register */
 #define LAN87XX_EXT_REG_CTL                     (0x14)
@@ -226,6 +231,51 @@
 #define MICROCHIP_CABLE_MAX_TIME_DIFF	\
 	(MICROCHIP_CABLE_MIN_TIME_DIFF + MICROCHIP_CABLE_TIME_MARGIN)
 
+#define LAN887X_INT_STS				0xf000
+#define LAN887X_INT_MSK				0xf001
+#define LAN887X_INT_MSK_P1588_MOD_INT_MSK	BIT(3)
+#define LAN887X_INT_MSK_T1_PHY_INT_MSK		BIT(2)
+#define LAN887X_INT_MSK_LINK_UP_MSK		BIT(1)
+#define LAN887X_INT_MSK_LINK_DOWN_MSK		BIT(0)
+
+#define LAN887X_MX_CHIP_TOP_REG_CONTROL1	0xF002
+#define LAN887X_MX_CHIP_TOP_REG_CONTROL1_EVT_EN	BIT(8)
+
+#define LAN887X_MX_CHIP_TOP_LINK_MSK	(LAN887X_INT_MSK_LINK_UP_MSK |\
+					 LAN887X_INT_MSK_LINK_DOWN_MSK)
+
+#define LAN887X_MX_CHIP_TOP_ALL_MSK	(LAN887X_INT_MSK_T1_PHY_INT_MSK |\
+					 LAN887X_MX_CHIP_TOP_LINK_MSK)
+
+#define LAN887X_COEFF_PWR_DN_CONFIG_100		0x0404
+#define LAN887X_COEFF_PWR_DN_CONFIG_100_V	0x16d6
+#define LAN887X_SQI_CONFIG_100			0x042e
+#define LAN887X_SQI_CONFIG_100_V		0x9572
+#define LAN887X_SQI_MSE_100			0x483
+
+#define LAN887X_POKE_PEEK_100			0x040d
+#define LAN887X_POKE_PEEK_100_EN		BIT(0)
+
+#define LAN887X_COEFF_MOD_CONFIG		0x080d
+#define LAN887X_COEFF_MOD_CONFIG_DCQ_COEFF_EN	BIT(8)
+
+#define LAN887X_DCQ_SQI_STATUS			0x08b2
+
+/* SQI raw samples count */
+#define SQI_SAMPLES 200
+
+/* Samples percentage considered for SQI calculation */
+#define SQI_INLINERS_PERCENT 60
+
+/* Samples count considered for SQI calculation */
+#define SQI_INLIERS_NUM (SQI_SAMPLES * SQI_INLINERS_PERCENT / 100)
+
+/* Start offset of samples */
+#define SQI_INLIERS_START ((SQI_SAMPLES - SQI_INLIERS_NUM) / 2)
+
+/* End offset of samples */
+#define SQI_INLIERS_END (SQI_INLIERS_START + SQI_INLIERS_NUM)
+
 #define DRIVER_AUTHOR	"Nisar Sayed <nisar.sayed@microchip.com>"
 #define DRIVER_DESC	"Microchip LAN87XX/LAN937x/LAN887x T1 PHY driver"
 
@@ -277,6 +327,8 @@ struct lan887x_regwr_map {
 
 struct lan887x_priv {
 	u64 stats[ARRAY_SIZE(lan887x_hw_stats)];
+	struct mchp_rds_ptp_clock *clock;
+	bool init_done;
 };
 
 static int lan937x_dsp_workaround(struct phy_device *phydev, u16 ereg, u8 bank)
@@ -1227,7 +1279,27 @@ static int lan887x_get_features(struct phy_device *phydev)
 
 static int lan887x_phy_init(struct phy_device *phydev)
 {
+	struct lan887x_priv *priv = phydev->priv;
 	int ret;
+
+	if (!priv->init_done && phy_interrupt_is_valid(phydev)) {
+		priv->clock = mchp_rds_ptp_probe(phydev, MDIO_MMD_VEND1,
+						 MCHP_RDS_PTP_LTC_BASE_ADDR,
+						 MCHP_RDS_PTP_PORT_BASE_ADDR);
+		if (IS_ERR(priv->clock))
+			return PTR_ERR(priv->clock);
+
+		/* Enable pin mux for EVT */
+		phy_modify_mmd(phydev, MDIO_MMD_VEND1,
+			       LAN887X_MX_CHIP_TOP_REG_CONTROL1,
+			       LAN887X_MX_CHIP_TOP_REG_CONTROL1_EVT_EN,
+			       LAN887X_MX_CHIP_TOP_REG_CONTROL1_EVT_EN);
+
+		/* Initialize pin numbers specific to PEROUT */
+		priv->clock->event_pin = 3;
+
+		priv->init_done = true;
+	}
 
 	/* Clear loopback */
 	ret = phy_clear_bits_mmd(phydev, MDIO_MMD_VEND1,
@@ -1428,6 +1500,7 @@ static int lan887x_probe(struct phy_device *phydev)
 	if (!priv)
 		return -ENOMEM;
 
+	priv->init_done = false;
 	phydev->priv = priv;
 
 	return lan887x_phy_setup(phydev);
@@ -1474,6 +1547,65 @@ static void lan887x_get_strings(struct phy_device *phydev, u8 *data)
 		ethtool_puts(&data, lan887x_hw_stats[i].string);
 }
 
+static int lan887x_config_intr(struct phy_device *phydev)
+{
+	struct lan887x_priv *priv = phydev->priv;
+	int rc;
+
+	if (phydev->interrupts == PHY_INTERRUPT_ENABLED) {
+		/* Clear the interrupt status before enabling interrupts */
+		rc = phy_read_mmd(phydev, MDIO_MMD_VEND1, LAN887X_INT_STS);
+		if (rc < 0)
+			return rc;
+
+		/* Unmask for enabling interrupt */
+		rc = phy_write_mmd(phydev, MDIO_MMD_VEND1, LAN887X_INT_MSK,
+				   (u16)~LAN887X_MX_CHIP_TOP_ALL_MSK);
+	} else {
+		rc = phy_write_mmd(phydev, MDIO_MMD_VEND1, LAN887X_INT_MSK,
+				   GENMASK(15, 0));
+		if (rc < 0)
+			return rc;
+
+		rc = phy_read_mmd(phydev, MDIO_MMD_VEND1, LAN887X_INT_STS);
+	}
+	if (rc < 0)
+		return rc;
+
+	if (phy_is_default_hwtstamp(phydev)) {
+		return mchp_rds_ptp_top_config_intr(priv->clock,
+					LAN887X_INT_MSK,
+					LAN887X_INT_MSK_P1588_MOD_INT_MSK,
+					(phydev->interrupts ==
+					 PHY_INTERRUPT_ENABLED));
+	}
+
+	return 0;
+}
+
+static irqreturn_t lan887x_handle_interrupt(struct phy_device *phydev)
+{
+	struct lan887x_priv *priv = phydev->priv;
+	int rc = IRQ_NONE;
+	int irq_status;
+
+	irq_status = phy_read_mmd(phydev, MDIO_MMD_VEND1, LAN887X_INT_STS);
+	if (irq_status < 0) {
+		phy_error(phydev);
+		return IRQ_NONE;
+	}
+
+	if (irq_status & LAN887X_MX_CHIP_TOP_LINK_MSK) {
+		phy_trigger_machine(phydev);
+		rc = IRQ_HANDLED;
+	}
+
+	if (irq_status & LAN887X_INT_MSK_P1588_MOD_INT_MSK)
+		rc = mchp_rds_ptp_handle_interrupt(priv->clock);
+
+	return rc;
+}
+
 static int lan887x_cd_reset(struct phy_device *phydev,
 			    enum cable_diag_state cd_done)
 {
@@ -1501,6 +1633,10 @@ static int lan887x_cd_reset(struct phy_device *phydev,
 			return rc;
 
 		rc = lan887x_phy_init(phydev);
+		if (rc < 0)
+			return rc;
+
+		rc = lan887x_config_intr(phydev);
 		if (rc < 0)
 			return rc;
 
@@ -1830,6 +1966,145 @@ static int lan887x_cable_test_get_status(struct phy_device *phydev,
 	return lan887x_cable_test_report(phydev);
 }
 
+/* Compare block to sort in ascending order */
+static int sqi_compare(const void *a, const void *b)
+{
+	return  *(u16 *)a - *(u16 *)b;
+}
+
+static int lan887x_get_sqi_100M(struct phy_device *phydev)
+{
+	u16 rawtable[SQI_SAMPLES];
+	u32 sqiavg = 0;
+	u8 sqinum = 0;
+	int rc, i;
+
+	/* Configuration of SQI 100M */
+	rc = phy_write_mmd(phydev, MDIO_MMD_VEND1,
+			   LAN887X_COEFF_PWR_DN_CONFIG_100,
+			   LAN887X_COEFF_PWR_DN_CONFIG_100_V);
+	if (rc < 0)
+		return rc;
+
+	rc = phy_write_mmd(phydev, MDIO_MMD_VEND1, LAN887X_SQI_CONFIG_100,
+			   LAN887X_SQI_CONFIG_100_V);
+	if (rc < 0)
+		return rc;
+
+	rc = phy_read_mmd(phydev, MDIO_MMD_VEND1, LAN887X_SQI_CONFIG_100);
+	if (rc != LAN887X_SQI_CONFIG_100_V)
+		return -EINVAL;
+
+	rc = phy_modify_mmd(phydev, MDIO_MMD_VEND1, LAN887X_POKE_PEEK_100,
+			    LAN887X_POKE_PEEK_100_EN,
+			    LAN887X_POKE_PEEK_100_EN);
+	if (rc < 0)
+		return rc;
+
+	/* Required before reading register
+	 * otherwise it will return high value
+	 */
+	msleep(50);
+
+	/* Link check before raw readings */
+	rc = genphy_c45_read_link(phydev);
+	if (rc < 0)
+		return rc;
+
+	if (!phydev->link)
+		return -ENETDOWN;
+
+	/* Get 200 SQI raw readings */
+	for (i = 0; i < SQI_SAMPLES; i++) {
+		rc = phy_write_mmd(phydev, MDIO_MMD_VEND1,
+				   LAN887X_POKE_PEEK_100,
+				   LAN887X_POKE_PEEK_100_EN);
+		if (rc < 0)
+			return rc;
+
+		rc = phy_read_mmd(phydev, MDIO_MMD_VEND1,
+				  LAN887X_SQI_MSE_100);
+		if (rc < 0)
+			return rc;
+
+		rawtable[i] = (u16)rc;
+	}
+
+	/* Link check after raw readings */
+	rc = genphy_c45_read_link(phydev);
+	if (rc < 0)
+		return rc;
+
+	if (!phydev->link)
+		return -ENETDOWN;
+
+	/* Sort SQI raw readings in ascending order */
+	sort(rawtable, SQI_SAMPLES, sizeof(u16), sqi_compare, NULL);
+
+	/* Keep inliers and discard outliers */
+	for (i = SQI_INLIERS_START; i < SQI_INLIERS_END; i++)
+		sqiavg += rawtable[i];
+
+	/* Handle invalid samples */
+	if (sqiavg != 0) {
+		/* Get SQI average */
+		sqiavg /= SQI_INLIERS_NUM;
+
+		if (sqiavg < 75)
+			sqinum = 7;
+		else if (sqiavg < 94)
+			sqinum = 6;
+		else if (sqiavg < 119)
+			sqinum = 5;
+		else if (sqiavg < 150)
+			sqinum = 4;
+		else if (sqiavg < 189)
+			sqinum = 3;
+		else if (sqiavg < 237)
+			sqinum = 2;
+		else if (sqiavg < 299)
+			sqinum = 1;
+		else
+			sqinum = 0;
+	}
+
+	return sqinum;
+}
+
+static int lan887x_get_sqi(struct phy_device *phydev)
+{
+	int rc, val;
+
+	if (phydev->speed != SPEED_1000 &&
+	    phydev->speed != SPEED_100)
+		return -ENETDOWN;
+
+	if (phydev->speed == SPEED_100)
+		return lan887x_get_sqi_100M(phydev);
+
+	/* Writing DCQ_COEFF_EN to trigger a SQI read */
+	rc = phy_set_bits_mmd(phydev, MDIO_MMD_VEND1,
+			      LAN887X_COEFF_MOD_CONFIG,
+			      LAN887X_COEFF_MOD_CONFIG_DCQ_COEFF_EN);
+	if (rc < 0)
+		return rc;
+
+	/* Wait for DCQ done */
+	rc = phy_read_mmd_poll_timeout(phydev, MDIO_MMD_VEND1,
+				       LAN887X_COEFF_MOD_CONFIG, val, ((val &
+				       LAN887X_COEFF_MOD_CONFIG_DCQ_COEFF_EN) !=
+				       LAN887X_COEFF_MOD_CONFIG_DCQ_COEFF_EN),
+				       10, 200, true);
+	if (rc < 0)
+		return rc;
+
+	rc = phy_read_mmd(phydev, MDIO_MMD_VEND1, LAN887X_DCQ_SQI_STATUS);
+	if (rc < 0)
+		return rc;
+
+	return FIELD_GET(T1_DCQ_SQI_MSK, rc);
+}
+
 static struct phy_driver microchip_t1_phy_driver[] = {
 	{
 		PHY_ID_MATCH_MODEL(PHY_ID_LAN87XX),
@@ -1881,6 +2156,11 @@ static struct phy_driver microchip_t1_phy_driver[] = {
 		.read_status	= genphy_c45_read_status,
 		.cable_test_start = lan887x_cable_test_start,
 		.cable_test_get_status = lan887x_cable_test_get_status,
+		.config_intr    = lan887x_config_intr,
+		.handle_interrupt = lan887x_handle_interrupt,
+		.get_sqi	= lan887x_get_sqi,
+		.get_sqi_max	= lan87xx_get_sqi_max,
+		.set_loopback	= genphy_c45_loopback,
 	}
 };
 

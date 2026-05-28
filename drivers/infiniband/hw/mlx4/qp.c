@@ -925,8 +925,12 @@ static int create_rq(struct ib_pd *pd, struct ib_qp_init_attr *init_attr,
 	}
 
 	shift = mlx4_ib_umem_calc_optimal_mtt_size(qp->umem, 0, &n);
-	err = mlx4_mtt_init(dev->dev, n, shift, &qp->mtt);
+	if (shift < 0) {
+		err = shift;
+		goto err_buf;
+	}
 
+	err = mlx4_mtt_init(dev->dev, n, shift, &qp->mtt);
 	if (err)
 		goto err_buf;
 
@@ -1108,8 +1112,12 @@ static int create_qp_common(struct ib_pd *pd, struct ib_qp_init_attr *init_attr,
 		}
 
 		shift = mlx4_ib_umem_calc_optimal_mtt_size(qp->umem, 0, &n);
-		err = mlx4_mtt_init(dev->dev, n, shift, &qp->mtt);
+		if (shift < 0) {
+			err = shift;
+			goto err_buf;
+		}
 
+		err = mlx4_mtt_init(dev->dev, n, shift, &qp->mtt);
 		if (err)
 			goto err_buf;
 
@@ -1644,7 +1652,8 @@ int mlx4_ib_create_qp(struct ib_qp *ibqp, struct ib_qp_init_attr *init_attr,
 			sqp->roce_v2_gsi = ib_create_qp(pd, init_attr);
 
 			if (IS_ERR(sqp->roce_v2_gsi)) {
-				pr_err("Failed to create GSI QP for RoCEv2 (%ld)\n", PTR_ERR(sqp->roce_v2_gsi));
+				pr_err("Failed to create GSI QP for RoCEv2 (%pe)\n",
+				       sqp->roce_v2_gsi);
 				sqp->roce_v2_gsi = NULL;
 			} else {
 				to_mqp(sqp->roce_v2_gsi)->flags |=

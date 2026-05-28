@@ -298,7 +298,7 @@ static int max77650_charger_probe(struct platform_device *pdev)
 
 	chg->dev = dev;
 
-	pscfg.of_node = dev->of_node;
+	pscfg.fwnode = dev_fwnode(dev);
 	pscfg.drv_data = chg;
 
 	chg_irq = platform_get_irq_byname(pdev, "CHG");
@@ -364,7 +364,7 @@ static struct platform_driver max77650_charger_driver = {
 		.of_match_table = max77650_charger_of_match,
 	},
 	.probe = max77650_charger_probe,
-	.remove_new = max77650_charger_remove,
+	.remove = max77650_charger_remove,
 };
 module_platform_driver(max77650_charger_driver);
 

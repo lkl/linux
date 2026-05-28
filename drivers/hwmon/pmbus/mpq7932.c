@@ -51,8 +51,8 @@ static const struct regulator_desc mpq7932_regulators_desc[] = {
 };
 
 static const struct regulator_desc mpq7932_regulators_desc_one[] = {
-	PMBUS_REGULATOR_STEP_ONE("buck", MPQ7932_N_VOLTAGES,
-				 MPQ7932_UV_STEP, MPQ7932_BUCK_UV_MIN),
+	PMBUS_REGULATOR_STEP_ONE_NODE("buck", MPQ7932_N_VOLTAGES,
+				      MPQ7932_UV_STEP, MPQ7932_BUCK_UV_MIN),
 };
 #endif
 
@@ -164,4 +164,4 @@ module_i2c_driver(mpq7932_regulator_driver);
 MODULE_AUTHOR("Saravanan Sekar <saravanan@linumiz.com>");
 MODULE_DESCRIPTION("MPQ7932 PMIC regulator driver");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(PMBUS);
+MODULE_IMPORT_NS("PMBUS");

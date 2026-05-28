@@ -2645,7 +2645,7 @@ static int i91u_bus_reset(struct scsi_cmnd * cmnd)
 /**
  *	i91u_biosparam			-	return the "logical geometry
  *	@sdev: SCSI device
- *	@dev: Matching block device
+ *	@unused: Matching gendisk
  *	@capacity: Sector size of drive
  *	@info_array: Return space for BIOS geometry
  *
@@ -2655,7 +2655,7 @@ static int i91u_bus_reset(struct scsi_cmnd * cmnd)
  *	FIXME: limited to 2^32 sector devices.
  */
 
-static int i91u_biosparam(struct scsi_device *sdev, struct block_device *dev,
+static int i91u_biosparam(struct scsi_device *sdev, struct gendisk *unused,
 		sector_t capacity, int *info_array)
 {
 	struct initio_host *host;		/* Point to Host adapter control block */
@@ -2941,7 +2941,7 @@ static void initio_remove_one(struct pci_dev *pdev)
 
 MODULE_LICENSE("GPL");
 
-static struct pci_device_id initio_pci_tbl[] = {
+static const struct pci_device_id initio_pci_tbl[] = {
 	{PCI_VENDOR_ID_INIT, 0x9500, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{PCI_VENDOR_ID_INIT, 0x9400, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{PCI_VENDOR_ID_INIT, 0x9401, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},

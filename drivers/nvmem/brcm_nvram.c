@@ -22,7 +22,7 @@
  *
  * @dev:		NVMEM device pointer
  * @nvmem_size:		Size of the whole space available for NVRAM
- * @data:		NVRAM data copy stored to avoid poking underlaying flash controller
+ * @data:		NVRAM data copy stored to avoid poking underlying flash controller
  * @data_len:		NVRAM data size
  * @padding_byte:	Padding value used to fill remaining space
  * @cells:		Array of discovered NVMEM cells
@@ -100,7 +100,7 @@ static int brcm_nvram_read_post_process_macaddr(void *context, const char *id, i
 {
 	u8 mac[ETH_ALEN];
 
-	if (bytes != 3 * ETH_ALEN - 1)
+	if (bytes != MAC_ADDR_STR_LEN)
 		return -EINVAL;
 
 	if (!mac_pton(buf, mac))

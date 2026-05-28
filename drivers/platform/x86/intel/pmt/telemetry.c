@@ -9,13 +9,21 @@
  */
 
 #include <linux/auxiliary_bus.h>
+#include <linux/bitops.h>
+#include <linux/cleanup.h>
+#include <linux/err.h>
+#include <linux/intel_pmt_features.h>
 #include <linux/intel_vsec.h>
 #include <linux/kernel.h>
+#include <linux/kref.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
+#include <linux/overflow.h>
 #include <linux/pci.h>
 #include <linux/slab.h>
+#include <linux/types.h>
 #include <linux/uaccess.h>
-#include <linux/overflow.h>
+#include <linux/xarray.h>
 
 #include "class.h"
 
@@ -153,7 +161,7 @@ unsigned long pmt_telem_get_next_endpoint(unsigned long start)
 
 	return found_idx == start ? 0 : found_idx;
 }
-EXPORT_SYMBOL_NS_GPL(pmt_telem_get_next_endpoint, INTEL_PMT_TELEMETRY);
+EXPORT_SYMBOL_NS_GPL(pmt_telem_get_next_endpoint, "INTEL_PMT_TELEMETRY");
 
 struct telem_endpoint *pmt_telem_register_endpoint(int devid)
 {
@@ -172,13 +180,13 @@ struct telem_endpoint *pmt_telem_register_endpoint(int devid)
 
 	return entry->ep;
 }
-EXPORT_SYMBOL_NS_GPL(pmt_telem_register_endpoint, INTEL_PMT_TELEMETRY);
+EXPORT_SYMBOL_NS_GPL(pmt_telem_register_endpoint, "INTEL_PMT_TELEMETRY");
 
 void pmt_telem_unregister_endpoint(struct telem_endpoint *ep)
 {
 	kref_put(&ep->kref, pmt_telem_ep_release);
 }
-EXPORT_SYMBOL_NS_GPL(pmt_telem_unregister_endpoint, INTEL_PMT_TELEMETRY);
+EXPORT_SYMBOL_NS_GPL(pmt_telem_unregister_endpoint, "INTEL_PMT_TELEMETRY");
 
 int pmt_telem_get_endpoint_info(int devid, struct telem_endpoint_info *info)
 {
@@ -204,7 +212,88 @@ unlock:
 	return err;
 
 }
-EXPORT_SYMBOL_NS_GPL(pmt_telem_get_endpoint_info, INTEL_PMT_TELEMETRY);
+EXPORT_SYMBOL_NS_GPL(pmt_telem_get_endpoint_info, "INTEL_PMT_TELEMETRY");
+
+static int pmt_copy_region(struct telemetry_region *region,
+			   struct intel_pmt_entry *entry)
+{
+
+	struct oobmsm_plat_info *plat_info;
+
+	plat_info = intel_vsec_get_mapping(entry->ep->pcidev);
+	if (IS_ERR(plat_info))
+		return PTR_ERR(plat_info);
+
+	region->plat_info = *plat_info;
+	region->guid = entry->guid;
+	region->addr = entry->ep->base;
+	region->size = entry->size;
+	region->num_rmids = entry->num_rmids;
+
+	return 0;
+}
+
+static void pmt_feature_group_release(struct kref *kref)
+{
+	struct pmt_feature_group *feature_group;
+
+	feature_group = container_of(kref, struct pmt_feature_group, kref);
+	kfree(feature_group);
+}
+
+struct pmt_feature_group *intel_pmt_get_regions_by_feature(enum pmt_feature_id id)
+{
+	struct pmt_feature_group *feature_group __free(kfree) = NULL;
+	struct telemetry_region *region;
+	struct intel_pmt_entry *entry;
+	unsigned long idx;
+	int count = 0;
+	size_t size;
+
+	if (!pmt_feature_id_is_valid(id))
+		return ERR_PTR(-EINVAL);
+
+	guard(mutex)(&ep_lock);
+	xa_for_each(&telem_array, idx, entry) {
+		if (entry->feature_flags & BIT(id))
+			count++;
+	}
+
+	if (!count)
+		return ERR_PTR(-ENOENT);
+
+	size = struct_size(feature_group, regions, count);
+	feature_group = kzalloc(size, GFP_KERNEL);
+	if (!feature_group)
+		return ERR_PTR(-ENOMEM);
+
+	feature_group->count = count;
+
+	region = feature_group->regions;
+	xa_for_each(&telem_array, idx, entry) {
+		int ret;
+
+		if (!(entry->feature_flags & BIT(id)))
+			continue;
+
+		ret = pmt_copy_region(region, entry);
+		if (ret)
+			return ERR_PTR(ret);
+
+		region++;
+	}
+
+	kref_init(&feature_group->kref);
+
+	return no_free_ptr(feature_group);
+}
+EXPORT_SYMBOL(intel_pmt_get_regions_by_feature);
+
+void intel_pmt_put_feature_group(struct pmt_feature_group *feature_group)
+{
+	kref_put(&feature_group->kref, pmt_feature_group_release);
+}
+EXPORT_SYMBOL(intel_pmt_put_feature_group);
 
 int pmt_telem_read(struct telem_endpoint *ep, u32 id, u64 *data, u32 count)
 {
@@ -219,12 +308,12 @@ int pmt_telem_read(struct telem_endpoint *ep, u32 id, u64 *data, u32 count)
 	if (offset + NUM_BYTES_QWORD(count) > size)
 		return -EINVAL;
 
-	pmt_telem_read_mmio(ep->pcidev, ep->cb, ep->header.guid, data, ep->base + offset,
+	pmt_telem_read_mmio(ep->pcidev, ep->cb, ep->header.guid, data, ep->base, offset,
 			    NUM_BYTES_QWORD(count));
 
 	return ep->present ? 0 : -EPIPE;
 }
-EXPORT_SYMBOL_NS_GPL(pmt_telem_read, INTEL_PMT_TELEMETRY);
+EXPORT_SYMBOL_NS_GPL(pmt_telem_read, "INTEL_PMT_TELEMETRY");
 
 int pmt_telem_read32(struct telem_endpoint *ep, u32 id, u32 *data, u32 count)
 {
@@ -243,7 +332,7 @@ int pmt_telem_read32(struct telem_endpoint *ep, u32 id, u32 *data, u32 count)
 
 	return ep->present ? 0 : -EPIPE;
 }
-EXPORT_SYMBOL_NS_GPL(pmt_telem_read32, INTEL_PMT_TELEMETRY);
+EXPORT_SYMBOL_NS_GPL(pmt_telem_read32, "INTEL_PMT_TELEMETRY");
 
 struct telem_endpoint *
 pmt_telem_find_and_register_endpoint(struct pci_dev *pcidev, u32 guid, u16 pos)
@@ -268,7 +357,7 @@ pmt_telem_find_and_register_endpoint(struct pci_dev *pcidev, u32 guid, u16 pos)
 
 	return ERR_PTR(-ENXIO);
 }
-EXPORT_SYMBOL_NS_GPL(pmt_telem_find_and_register_endpoint, INTEL_PMT_TELEMETRY);
+EXPORT_SYMBOL_NS_GPL(pmt_telem_find_and_register_endpoint, "INTEL_PMT_TELEMETRY");
 
 static void pmt_telem_remove(struct auxiliary_device *auxdev)
 {
@@ -311,6 +400,8 @@ static int pmt_telem_probe(struct auxiliary_device *auxdev, const struct auxilia
 			continue;
 
 		priv->num_entries++;
+
+		intel_pmt_get_features(entry);
 	}
 
 	return 0;
@@ -347,4 +438,5 @@ module_exit(pmt_telem_exit);
 MODULE_AUTHOR("David E. Box <david.e.box@linux.intel.com>");
 MODULE_DESCRIPTION("Intel PMT Telemetry driver");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(INTEL_PMT);
+MODULE_IMPORT_NS("INTEL_PMT");
+MODULE_IMPORT_NS("INTEL_VSEC");

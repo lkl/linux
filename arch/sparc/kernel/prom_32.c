@@ -28,9 +28,7 @@ void * __init prom_early_alloc(unsigned long size)
 {
 	void *ret;
 
-	ret = memblock_alloc(size, SMP_CACHE_BYTES);
-	if (!ret)
-		panic("%s: Failed to allocate %lu bytes\n", __func__, size);
+	ret = memblock_alloc_or_panic(size, SMP_CACHE_BYTES);
 
 	prom_early_allocated += size;
 
@@ -189,14 +187,16 @@ char * __init build_path_component(struct device_node *dp)
 {
 	const char *name = of_get_property(dp, "name", NULL);
 	char tmp_buf[64], *n;
+	size_t n_sz;
 
 	tmp_buf[0] = '\0';
 	__build_path_component(dp, tmp_buf);
 	if (tmp_buf[0] == '\0')
-		strcpy(tmp_buf, name);
+		strscpy(tmp_buf, name);
 
-	n = prom_early_alloc(strlen(tmp_buf) + 1);
-	strcpy(n, tmp_buf);
+	n_sz = strlen(tmp_buf) + 1;
+	n = prom_early_alloc(n_sz);
+	strscpy(n, tmp_buf, n_sz);
 
 	return n;
 }
@@ -206,13 +206,14 @@ extern void restore_current(void);
 void __init of_console_init(void)
 {
 	char *msg = "OF stdout device is: %s\n";
+	const size_t of_console_path_sz = 256;
 	struct device_node *dp;
 	unsigned long flags;
 	const char *type;
 	phandle node;
 	int skip, tmp, fd;
 
-	of_console_path = prom_early_alloc(256);
+	of_console_path = prom_early_alloc(of_console_path_sz);
 
 	switch (prom_vers) {
 	case PROM_V0:
@@ -299,7 +300,7 @@ void __init of_console_init(void)
 				prom_printf("No stdout-path in root node.\n");
 				prom_halt();
 			}
-			strcpy(of_console_path, path);
+			strscpy(of_console_path, path, of_console_path_sz);
 		}
 		break;
 	}

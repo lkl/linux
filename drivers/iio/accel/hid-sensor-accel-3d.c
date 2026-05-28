@@ -28,7 +28,7 @@ struct accel_3d_state {
 	/* Ensure timestamp is naturally aligned */
 	struct {
 		u32 accel_val[3];
-		s64 timestamp __aligned(8);
+		aligned_s64 timestamp;
 	} scan;
 	int scale_pre_decml;
 	int scale_post_decml;
@@ -228,7 +228,7 @@ static void hid_sensor_push_data(struct iio_dev *indio_dev, void *data,
 				 int len, int64_t timestamp)
 {
 	dev_dbg(&indio_dev->dev, "hid_sensor_push_data\n");
-	iio_push_to_buffers_with_timestamp(indio_dev, data, timestamp);
+	iio_push_to_buffers_with_ts(indio_dev, data, len, timestamp);
 }
 
 /* Callback handler to send event after all samples are received and captured */
@@ -328,14 +328,13 @@ static int accel_3d_parse_report(struct platform_device *pdev,
 /* Function to initialize the processing for usage id */
 static int hid_accel_3d_probe(struct platform_device *pdev)
 {
+	struct hid_sensor_hub_device *hsdev = dev_get_platdata(&pdev->dev);
 	int ret = 0;
 	const char *name;
 	struct iio_dev *indio_dev;
 	struct accel_3d_state *accel_state;
 	const struct iio_chan_spec *channel_spec;
 	int channel_size;
-
-	struct hid_sensor_hub_device *hsdev = pdev->dev.platform_data;
 
 	indio_dev = devm_iio_device_alloc(&pdev->dev,
 					  sizeof(struct accel_3d_state));
@@ -424,7 +423,7 @@ error_remove_trigger:
 /* Function to deinitialize the processing for usage id */
 static void hid_accel_3d_remove(struct platform_device *pdev)
 {
-	struct hid_sensor_hub_device *hsdev = pdev->dev.platform_data;
+	struct hid_sensor_hub_device *hsdev = dev_get_platdata(&pdev->dev);
 	struct iio_dev *indio_dev = platform_get_drvdata(pdev);
 	struct accel_3d_state *accel_state = iio_priv(indio_dev);
 
@@ -441,7 +440,7 @@ static const struct platform_device_id hid_accel_3d_ids[] = {
 	{	/* gravity sensor */
 		.name = "HID-SENSOR-20007b",
 	},
-	{ /* sentinel */ }
+	{ }
 };
 MODULE_DEVICE_TABLE(platform, hid_accel_3d_ids);
 
@@ -452,11 +451,11 @@ static struct platform_driver hid_accel_3d_platform_driver = {
 		.pm	= &hid_sensor_pm_ops,
 	},
 	.probe		= hid_accel_3d_probe,
-	.remove_new	= hid_accel_3d_remove,
+	.remove		= hid_accel_3d_remove,
 };
 module_platform_driver(hid_accel_3d_platform_driver);
 
 MODULE_DESCRIPTION("HID Sensor Accel 3D");
 MODULE_AUTHOR("Srinivas Pandruvada <srinivas.pandruvada@intel.com>");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(IIO_HID);
+MODULE_IMPORT_NS("IIO_HID");

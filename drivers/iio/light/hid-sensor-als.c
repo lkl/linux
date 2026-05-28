@@ -31,7 +31,7 @@ struct als_state {
 	struct iio_chan_spec channels[CHANNEL_SCAN_INDEX_MAX + 1];
 	struct {
 		u32 illum[CHANNEL_SCAN_INDEX_MAX];
-		u64 timestamp __aligned(8);
+		aligned_s64 timestamp;
 	} scan;
 	int scale_pre_decml;
 	int scale_post_decml;
@@ -262,8 +262,9 @@ static int als_proc_event(struct hid_sensor_hub_device *hsdev,
 		if (!als_state->timestamp)
 			als_state->timestamp = iio_get_time_ns(indio_dev);
 
-		iio_push_to_buffers_with_timestamp(indio_dev, &als_state->scan,
-						   als_state->timestamp);
+		iio_push_to_buffers_with_ts(indio_dev, &als_state->scan,
+					    sizeof(als_state->scan),
+					    als_state->timestamp);
 		als_state->timestamp = 0;
 	}
 
@@ -356,11 +357,11 @@ static int als_parse_report(struct platform_device *pdev,
 /* Function to initialize the processing for usage id */
 static int hid_als_probe(struct platform_device *pdev)
 {
+	struct hid_sensor_hub_device *hsdev = dev_get_platdata(&pdev->dev);
 	int ret = 0;
 	static const char *name = "als";
 	struct iio_dev *indio_dev;
 	struct als_state *als_state;
-	struct hid_sensor_hub_device *hsdev = pdev->dev.platform_data;
 
 	indio_dev = devm_iio_device_alloc(&pdev->dev, sizeof(struct als_state));
 	if (!indio_dev)
@@ -438,7 +439,7 @@ error_remove_trigger:
 /* Function to deinitialize the processing for usage id */
 static void hid_als_remove(struct platform_device *pdev)
 {
-	struct hid_sensor_hub_device *hsdev = pdev->dev.platform_data;
+	struct hid_sensor_hub_device *hsdev = dev_get_platdata(&pdev->dev);
 	struct iio_dev *indio_dev = platform_get_drvdata(pdev);
 	struct als_state *als_state = iio_priv(indio_dev);
 
@@ -456,7 +457,7 @@ static const struct platform_device_id hid_als_ids[] = {
 		/* Format: HID-SENSOR-custom_sensor_tag-usage_id_in_hex_lowercase */
 		.name = "HID-SENSOR-LISS-0041",
 	},
-	{ /* sentinel */ }
+	{ }
 };
 MODULE_DEVICE_TABLE(platform, hid_als_ids);
 
@@ -467,11 +468,11 @@ static struct platform_driver hid_als_platform_driver = {
 		.pm	= &hid_sensor_pm_ops,
 	},
 	.probe		= hid_als_probe,
-	.remove_new	= hid_als_remove,
+	.remove		= hid_als_remove,
 };
 module_platform_driver(hid_als_platform_driver);
 
 MODULE_DESCRIPTION("HID Sensor ALS");
 MODULE_AUTHOR("Srinivas Pandruvada <srinivas.pandruvada@intel.com>");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(IIO_HID);
+MODULE_IMPORT_NS("IIO_HID");

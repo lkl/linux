@@ -78,24 +78,21 @@
 		pinctrl-0 = <&keyboard_pins>;
 
 		key-1 {
-			interrupt-parent = <&irqc>;
-			interrupts = <3 IRQ_TYPE_EDGE_BOTH>;
+			interrupts-extended = <&irqc 3 IRQ_TYPE_EDGE_BOTH>;
 			linux,code = <KEY_1>;
 			label = "SW1";
 			wakeup-source;
 		};
 
 		key-2 {
-			interrupt-parent = <&irqc>;
-			interrupts = <2 IRQ_TYPE_EDGE_BOTH>;
+			interrupts-extended = <&irqc 2 IRQ_TYPE_EDGE_BOTH>;
 			linux,code = <KEY_2>;
 			label = "SW2";
 			wakeup-source;
 		};
 
 		key-3 {
-			interrupt-parent = <&irqc>;
-			interrupts = <5 IRQ_TYPE_EDGE_BOTH>;
+			interrupts-extended = <&irqc 5 IRQ_TYPE_EDGE_BOTH>;
 			linux,code = <KEY_3>;
 			label = "SW3";
 			wakeup-source;
@@ -202,6 +199,7 @@
 
 	/* Serial Console */
 	scif2_pins: serial2 {
+		bootph-all;
 		pinmux = <RZA1_PINMUX(3, 0, 6)>,	/* TxD2 */
 			 <RZA1_PINMUX(3, 2, 4)>;	/* RxD2 */
 	};
@@ -267,6 +265,7 @@
 };
 
 &ostm0 {
+	bootph-all;
 	status = "okay";
 };
 
@@ -281,5 +280,11 @@
 &scif2 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&scif2_pins>;
+	bootph-all;
+	status = "okay";
+};
+
+&wdt {
+	timeout-sec = <60>;
 	status = "okay";
 };

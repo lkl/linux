@@ -10,80 +10,6 @@ maintainers:
   - Bjorn Andersson <bjorn.andersson@linaro.org>
 
 description: |
-  For devices using the Qualcomm SoC the "compatible" properties consists of
-  one or several "manufacturer,model" strings, describing the device itself,
-  followed by one or several "qcom,<SoC>" strings, describing the SoC used in
-  the device.
-
-  The 'SoC' element must be one of the following strings:
-
-        apq8016
-        apq8026
-        apq8074
-        apq8084
-        apq8096
-        ipq4018
-        ipq5018
-        ipq5332
-        ipq6018
-        ipq8074
-        ipq9574
-        mdm9615
-        msm8226
-        msm8916
-        msm8939
-        msm8953
-        msm8956
-        msm8960
-        msm8974
-        msm8976
-        msm8992
-        msm8994
-        msm8996
-        msm8998
-        qcs404
-        qcs8550
-        qcm2290
-        qcm6490
-        qdu1000
-        qrb2210
-        qrb4210
-        qru1000
-        sa8155p
-        sa8540p
-        sa8775p
-        sc7180
-        sc7280
-        sc8180x
-        sc8280xp
-        sda660
-        sdm450
-        sdm630
-        sdm632
-        sdm636
-        sdm660
-        sdm670
-        sdm845
-        sdx55
-        sdx65
-        sdx75
-        sm4250
-        sm4450
-        sm6115
-        sm6115p
-        sm6125
-        sm6350
-        sm6375
-        sm7125
-        sm7225
-        sm8150
-        sm8250
-        sm8350
-        sm8450
-        sm8550
-        sm8650
-        x1e80100
-
   There are many devices in the list below that run the standard ChromeOS
   bootloader setup and use the open source depthcharge bootloader to boot the
   OS. These devices use the bootflow explained at
@@ -185,10 +111,17 @@ properties:
 
       - items:
           - enum:
+              - sony,huashan
+          - const: qcom,msm8960t
+          - const: qcom,msm8960
+
+      - items:
+          - enum:
               - lge,hammerhead
               - samsung,hlte
               - sony,xperia-amami
               - sony,xperia-honami
+              - sony,xperia-togari
           - const: qcom,msm8974
 
       - items:
@@ -209,6 +142,11 @@ properties:
           - const: samsung,klte
           - const: qcom,msm8974pro
           - const: qcom,msm8974
+
+      - items:
+          - enum:
+              - longcheer,l9360
+          - const: qcom,msm8976
 
       - items:
           - enum:
@@ -250,6 +188,12 @@ properties:
 
       - items:
           - enum:
+              - xiaomi,riva
+          - const: qcom,msm8917
+
+      - items:
+          - enum:
+              - flipkart,rimob
               - motorola,potter
               - xiaomi,daisy
               - xiaomi,mido
@@ -352,6 +296,11 @@ properties:
 
       - items:
           - enum:
+              - qcom,ipq5424-rdp466
+          - const: qcom,ipq5424
+
+      - items:
+          - enum:
               - mikrotik,rb3011
               - qcom,ipq8064-ap148
           - const: qcom,ipq8064
@@ -388,6 +337,7 @@ properties:
       - items:
           - enum:
               - fairphone,fp5
+              - particle,tachyon
               - qcom,qcm6490-idp
               - qcom,qcs6490-rb3gen2
               - shift,otter
@@ -405,6 +355,12 @@ properties:
           - enum:
               - qcom,qru1000-idp
           - const: qcom,qru1000
+
+      - description: Qualcomm AR2 Gen1 platform
+        items:
+          - enum:
+              - qcom,qar2130p
+          - const: qcom,sar2130p
 
       - items:
           - enum:
@@ -820,7 +776,10 @@ properties:
 
       - items:
           - enum:
+              - huawei,gaokun3
               - lenovo,thinkpad-x13s
+              - microsoft,arcata
+              - microsoft,blackrock
               - qcom,sc8280xp-crd
               - qcom,sc8280xp-qrd
           - const: qcom,sc8280xp
@@ -897,6 +856,18 @@ properties:
 
       - items:
           - enum:
+              - qcom,monaco-evk
+              - qcom,qcs8300-ride
+          - const: qcom,qcs8300
+
+      - items:
+          - enum:
+              - qcom,qcs615-ride
+          - const: qcom,qcs615
+          - const: qcom,sm6150
+
+      - items:
+          - enum:
               - qcom,sa8155p-adp
           - const: qcom,sa8155p
 
@@ -914,9 +885,14 @@ properties:
 
       - items:
           - enum:
-              - google,cheza
-              - google,cheza-rev1
-              - google,cheza-rev2
+              - qcom,lemans-evk
+              - qcom,qcs9100-ride
+              - qcom,qcs9100-ride-r3
+          - const: qcom,qcs9100
+          - const: qcom,sa8775p
+
+      - items:
+          - enum:
               - lenovo,yoga-c630
               - lg,judyln
               - lg,judyp
@@ -965,6 +941,7 @@ properties:
       - items:
           - enum:
               - sony,pdx201
+              - xiaomi,ginkgo
               - xiaomi,laurel-sprout
           - const: qcom,sm6125
 
@@ -986,8 +963,18 @@ properties:
 
       - items:
           - enum:
+              - google,sunfish
+          - const: qcom,sm7150
+
+      - items:
+          - enum:
               - fairphone,fp4
           - const: qcom,sm7225
+
+      - items:
+          - enum:
+              - nothing,spacewar
+          - const: qcom,sm7325
 
       - items:
           - enum:
@@ -1003,6 +990,8 @@ properties:
               - qcom,qrb5165-rb5
               - qcom,sm8250-hdk
               - qcom,sm8250-mtp
+              - samsung,r8q
+              - samsung,x1q
               - sony,pdx203-generic
               - sony,pdx206-generic
               - xiaomi,elish
@@ -1022,6 +1011,7 @@ properties:
           - enum:
               - qcom,sm8450-hdk
               - qcom,sm8450-qrd
+              - samsung,r0q
               - sony,pdx223
               - sony,pdx224
           - const: qcom,sm8450
@@ -1051,19 +1041,53 @@ properties:
 
       - items:
           - enum:
-              - lenovo,thinkpad-t14s
+              - qcom,sm8750-mtp
+              - qcom,sm8750-qrd
+          - const: qcom,sm8750
+
+      - items:
+          - enum:
+              - qcom,x1e001de-devkit
+          - const: qcom,x1e001de
+          - const: qcom,x1e80100
+
+      - items:
+          - enum:
+              - lenovo,thinkpad-t14s-lcd
+              - lenovo,thinkpad-t14s-oled
+          - const: lenovo,thinkpad-t14s
           - const: qcom,x1e78100
           - const: qcom,x1e80100
 
       - items:
           - enum:
               - asus,vivobook-s15
+              - asus,zenbook-a14-ux3407ra
+              - dell,inspiron-14-plus-7441
+              - dell,latitude-7455
+              - dell,xps13-9345
+              - hp,elitebook-ultra-g1q
+              - hp,omnibook-x14
               - lenovo,yoga-slim7x
               - microsoft,romulus13
               - microsoft,romulus15
               - qcom,x1e80100-crd
               - qcom,x1e80100-qcp
           - const: qcom,x1e80100
+
+      - items:
+          - enum:
+              - qcom,hamoa-iot-evk
+          - const: qcom,hamoa-iot-som
+          - const: qcom,x1e80100
+
+      - items:
+          - enum:
+              - asus,zenbook-a14-ux3407qa
+              - hp,omnibook-x14-fe1
+              - lenovo,thinkbook-16
+              - qcom,x1p42100-crd
+          - const: qcom,x1p42100
 
   # Board compatibles go above
 
@@ -1142,6 +1166,7 @@ allOf:
               - qcom,apq8026
               - qcom,apq8094
               - qcom,apq8096
+              - qcom,msm8917
               - qcom,msm8939
               - qcom,msm8953
               - qcom,msm8956

@@ -388,7 +388,7 @@ static int telem_device_probe(struct platform_device *pdev)
 	dev_set_name(&dev_data->dev, TELEM_DEV_NAME_FMT, minor);
 	device_initialize(&dev_data->dev);
 
-	/* Initialize the character device and add it to userspace */;
+	/* Initialize the character device and add it to userspace */
 	cdev_init(&dev_data->cdev, &telem_fops);
 	error = cdev_device_add(&dev_data->cdev, &dev_data->dev);
 	if (error) {
@@ -417,7 +417,7 @@ MODULE_DEVICE_TABLE(platform, telem_id);
 
 static struct platform_driver telem_driver = {
 	.probe = telem_device_probe,
-	.remove_new = telem_device_remove,
+	.remove = telem_device_remove,
 	.driver = {
 		.name = DRV_NAME,
 	},

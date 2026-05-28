@@ -33,6 +33,15 @@ static unsigned int nvdimm_count;
 #define	MASK26	0x3FFFFFF		/* Mask for 2^26 */
 #define MASK29	0x1FFFFFFF		/* Mask for 2^29 */
 
+static struct res_config skx_cfg = {
+	.type			= SKX,
+	.decs_did		= 0x2016,
+	.busno_cfg_offset	= 0xcc,
+	.ddr_imc_num		= 2,
+	.ddr_chan_num		= 3,
+	.ddr_dimm_num		= 2,
+};
+
 static struct skx_dev *get_skx_dev(struct pci_bus *bus, u8 idx)
 {
 	struct skx_dev *d;
@@ -52,7 +61,7 @@ enum munittype {
 
 struct munit {
 	u16	did;
-	u16	devfn[SKX_NUM_IMC];
+	u16	devfn[2];
 	u8	busidx;
 	u8	per_socket;
 	enum munittype mtype;
@@ -89,11 +98,11 @@ static int get_all_munits(const struct munit *m)
 		if (!pdev)
 			break;
 		ndev++;
-		if (m->per_socket == SKX_NUM_IMC) {
-			for (i = 0; i < SKX_NUM_IMC; i++)
+		if (m->per_socket == skx_cfg.ddr_imc_num) {
+			for (i = 0; i < skx_cfg.ddr_imc_num; i++)
 				if (m->devfn[i] == pdev->devfn)
 					break;
-			if (i == SKX_NUM_IMC)
+			if (i == skx_cfg.ddr_imc_num)
 				goto fail;
 		}
 		d = get_skx_dev(pdev->bus, m->busidx);
@@ -157,14 +166,8 @@ fail:
 	return -ENODEV;
 }
 
-static struct res_config skx_cfg = {
-	.type			= SKX,
-	.decs_did		= 0x2016,
-	.busno_cfg_offset	= 0xcc,
-};
-
 static const struct x86_cpu_id skx_cpuids[] = {
-	X86_MATCH_VFM_STEPPINGS(INTEL_SKYLAKE_X, X86_STEPPINGS(0x0, 0xf), &skx_cfg),
+	X86_MATCH_VFM(INTEL_SKYLAKE_X, &skx_cfg),
 	{ }
 };
 MODULE_DEVICE_TABLE(x86cpu, skx_cpuids);
@@ -186,11 +189,11 @@ static int skx_get_dimm_config(struct mem_ctl_info *mci, struct res_config *cfg)
 	/* Only the mcmtr on the first channel is effective */
 	pci_read_config_dword(imc->chan[0].cdev, 0x87c, &mcmtr);
 
-	for (i = 0; i < SKX_NUM_CHANNELS; i++) {
+	for (i = 0; i < cfg->ddr_chan_num; i++) {
 		ndimms = 0;
 		pci_read_config_dword(imc->chan[i].cdev, 0x8C, &amap);
 		pci_read_config_dword(imc->chan[i].cdev, 0x400, &mcddrtcfg);
-		for (j = 0; j < SKX_NUM_DIMMS; j++) {
+		for (j = 0; j < cfg->ddr_dimm_num; j++) {
 			dimm = edac_get_dimm(mci, i, j, 0);
 			pci_read_config_dword(imc->chan[i].cdev,
 					      0x80 + 4 * j, &mtr);
@@ -600,7 +603,7 @@ static int __init skx_init(void)
 	const struct munit *m;
 	const char *owner;
 	int rc = 0, i, off[3] = {0xd0, 0xd4, 0xd8};
-	u8 mc = 0, src_id, node_id;
+	u8 mc = 0, src_id;
 	struct skx_dev *d;
 
 	edac_dbg(2, "\n");
@@ -620,6 +623,7 @@ static int __init skx_init(void)
 		return -ENODEV;
 
 	cfg = (struct res_config *)id->driver_data;
+	skx_set_res_cfg(cfg);
 
 	rc = skx_get_hi_lo(0x2034, off, &skx_tolm, &skx_tohm);
 	if (rc)
@@ -650,15 +654,15 @@ static int __init skx_init(void)
 		rc = skx_get_src_id(d, 0xf0, &src_id);
 		if (rc < 0)
 			goto fail;
-		rc = skx_get_node_id(d, &node_id);
-		if (rc < 0)
-			goto fail;
-		edac_dbg(2, "src_id=%d node_id=%d\n", src_id, node_id);
-		for (i = 0; i < SKX_NUM_IMC; i++) {
+
+		edac_dbg(2, "src_id = %d\n", src_id);
+		for (i = 0; i < cfg->ddr_imc_num; i++) {
 			d->imc[i].mc = mc++;
 			d->imc[i].lmc = i;
 			d->imc[i].src_id = src_id;
-			d->imc[i].node_id = node_id;
+			d->imc[i].num_channels = cfg->ddr_chan_num;
+			d->imc[i].num_dimms    = cfg->ddr_dimm_num;
+
 			rc = skx_register_mci(&d->imc[i], d->imc[i].chan[0].cdev,
 					      "Skylake Socket", EDAC_MOD_STR,
 					      skx_get_dimm_config, cfg);

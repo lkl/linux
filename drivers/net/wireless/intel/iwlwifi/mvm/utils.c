@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2012-2014, 2018-2024 Intel Corporation
+ * Copyright (C) 2012-2014, 2018-2025 Intel Corporation
  * Copyright (C) 2013-2014 Intel Mobile Communications GmbH
  * Copyright (C) 2015-2017 Intel Deutschland GmbH
  */
@@ -21,11 +21,6 @@
 int iwl_mvm_send_cmd(struct iwl_mvm *mvm, struct iwl_host_cmd *cmd)
 {
 	int ret;
-
-#if defined(CONFIG_IWLWIFI_DEBUGFS) && defined(CONFIG_PM_SLEEP)
-	if (WARN_ON(mvm->d3_test_active))
-		return -EIO;
-#endif
 
 	/*
 	 * Synchronous commands from this op-mode must hold
@@ -78,11 +73,6 @@ int iwl_mvm_send_cmd_status(struct iwl_mvm *mvm, struct iwl_host_cmd *cmd,
 	int ret, resp_len;
 
 	lockdep_assert_held(&mvm->mutex);
-
-#if defined(CONFIG_IWLWIFI_DEBUGFS) && defined(CONFIG_PM_SLEEP)
-	if (WARN_ON(mvm->d3_test_active))
-		return -EIO;
-#endif
 
 	/*
 	 * Only synchronous commands can wait for status,
@@ -142,7 +132,7 @@ int iwl_mvm_legacy_hw_idx_to_mac80211_idx(u32 rate_n_flags,
 	int rate = rate_n_flags & RATE_LEGACY_RATE_MSK;
 	bool is_LB = band == NL80211_BAND_2GHZ;
 
-	if (format == RATE_MCS_LEGACY_OFDM_MSK)
+	if (format == RATE_MCS_MOD_TYPE_LEGACY_OFDM)
 		return is_LB ? rate + IWL_FIRST_OFDM_RATE :
 			rate;
 
@@ -261,7 +251,7 @@ int iwl_mvm_send_lq_cmd(struct iwl_mvm *mvm, struct iwl_lq_cmd *lq)
 		.data = { lq, },
 	};
 
-	if (WARN_ON(lq->sta_id == IWL_MVM_INVALID_STA ||
+	if (WARN_ON(lq->sta_id == IWL_INVALID_STA ||
 		    iwl_mvm_has_tlc_offload(mvm)))
 		return -EINVAL;
 
@@ -679,10 +669,8 @@ struct ieee80211_vif *iwl_mvm_get_bss_vif(struct iwl_mvm *mvm)
 		mvm->hw, IEEE80211_IFACE_ITER_NORMAL,
 		iwl_mvm_bss_iface_iterator, &bss_iter_data);
 
-	if (bss_iter_data.error) {
-		IWL_ERR(mvm, "More than one managed interface active!\n");
+	if (bss_iter_data.error)
 		return ERR_PTR(-EINVAL);
-	}
 
 	return bss_iter_data.vif;
 }
@@ -750,7 +738,7 @@ unsigned int iwl_mvm_get_wd_timeout(struct iwl_mvm *mvm,
 				    struct ieee80211_vif *vif)
 {
 	unsigned int default_timeout =
-		mvm->trans->trans_cfg->base_params->wd_timeout;
+		mvm->trans->mac_cfg->base->wd_timeout;
 
 	/*
 	 * We can't know when the station is asleep or awake, so we
@@ -1189,9 +1177,9 @@ u32 iwl_mvm_get_systime(struct iwl_mvm *mvm)
 {
 	u32 reg_addr = DEVICE_SYSTEM_TIME_REG;
 
-	if (mvm->trans->trans_cfg->device_family >= IWL_DEVICE_FAMILY_22000 &&
-	    mvm->trans->cfg->gp2_reg_addr)
-		reg_addr = mvm->trans->cfg->gp2_reg_addr;
+	if (mvm->trans->mac_cfg->device_family >= IWL_DEVICE_FAMILY_22000 &&
+	    mvm->trans->mac_cfg->base->gp2_reg_addr)
+		reg_addr = mvm->trans->mac_cfg->base->gp2_reg_addr;
 
 	return iwl_read_prph(mvm->trans, reg_addr);
 }

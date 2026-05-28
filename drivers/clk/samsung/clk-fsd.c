@@ -8,10 +8,10 @@
  * Common Clock Framework support for FSD SoC.
  */
 
-#include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/mod_devicetable.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
 
@@ -81,6 +81,15 @@
 #define GAT_CMU_AXI2APB_CMU_IPCLKPORT_ACLK		0x2058
 #define GAT_CMU_NS_BRDG_CMU_IPCLKPORT_CLK__PSOC_CMU__CLK_CMU	0x205c
 #define GAT_CMU_SYSREG_CMU_IPCLKPORT_PCLK		0x2060
+
+/* NOTE: Must be equal to the last clock ID increased by one */
+#define CLKS_NR_CMU		(GAT_CMU_FSYS0_SHARED0DIV4 + 1)
+#define CLKS_NR_PERIC		(PERIC_DOUT_RGMII_CLK + 1)
+#define CLKS_NR_FSYS0		(FSYS0_DOUT_FSYS0_PERIBUS_GRP + 1)
+#define CLKS_NR_FSYS1		(PCIE_LINK1_IPCLKPORT_SLV_ACLK + 1)
+#define CLKS_NR_IMEM		(IMEM_TMU_GT_IPCLKPORT_I_CLK_TS + 1)
+#define CLKS_NR_MFC		(MFC_MFC_IPCLKPORT_ACLK + 1)
+#define CLKS_NR_CAM_CSI		(CAM_CSI2_3_IPCLKPORT_I_PCLK + 1)
 
 static const unsigned long cmu_clk_regs[] __initconst = {
 	PLL_LOCKTIME_PLL_SHARED0,
@@ -300,7 +309,7 @@ static const struct samsung_cmu_info cmu_cmu_info __initconst = {
 	.nr_div_clks		= ARRAY_SIZE(cmu_div_clks),
 	.gate_clks		= cmu_gate_clks,
 	.nr_gate_clks		= ARRAY_SIZE(cmu_gate_clks),
-	.nr_clk_ids		= CMU_NR_CLK,
+	.nr_clk_ids		= CLKS_NR_CMU,
 	.clk_regs		= cmu_clk_regs,
 	.nr_clk_regs		= ARRAY_SIZE(cmu_clk_regs),
 };
@@ -665,7 +674,7 @@ static const struct samsung_cmu_info peric_cmu_info __initconst = {
 	.nr_gate_clks		= ARRAY_SIZE(peric_gate_clks),
 	.fixed_clks		= peric_fixed_clks,
 	.nr_fixed_clks		= ARRAY_SIZE(peric_fixed_clks),
-	.nr_clk_ids		= PERIC_NR_CLK,
+	.nr_clk_ids		= CLKS_NR_PERIC,
 	.clk_regs		= peric_clk_regs,
 	.nr_clk_regs		= ARRAY_SIZE(peric_clk_regs),
 	.clk_name		= "dout_cmu_pll_shared0_div4",
@@ -964,7 +973,7 @@ static const struct samsung_cmu_info fsys0_cmu_info __initconst = {
 	.nr_gate_clks		= ARRAY_SIZE(fsys0_gate_clks),
 	.fixed_clks		= fsys0_fixed_clks,
 	.nr_fixed_clks		= ARRAY_SIZE(fsys0_fixed_clks),
-	.nr_clk_ids		= FSYS0_NR_CLK,
+	.nr_clk_ids		= CLKS_NR_FSYS0,
 	.clk_regs		= fsys0_clk_regs,
 	.nr_clk_regs		= ARRAY_SIZE(fsys0_clk_regs),
 	.clk_name		= "dout_cmu_fsys0_shared1div4",
@@ -1136,7 +1145,7 @@ static const struct samsung_cmu_info fsys1_cmu_info __initconst = {
 	.nr_gate_clks		= ARRAY_SIZE(fsys1_gate_clks),
 	.fixed_clks		= fsys1_fixed_clks,
 	.nr_fixed_clks		= ARRAY_SIZE(fsys1_fixed_clks),
-	.nr_clk_ids		= FSYS1_NR_CLK,
+	.nr_clk_ids		= CLKS_NR_FSYS1,
 	.clk_regs		= fsys1_clk_regs,
 	.nr_clk_regs		= ARRAY_SIZE(fsys1_clk_regs),
 	.clk_name		= "dout_cmu_fsys1_shared0div4",
@@ -1413,7 +1422,7 @@ static const struct samsung_cmu_info imem_cmu_info __initconst = {
 	.nr_div_clks		= ARRAY_SIZE(imem_div_clks),
 	.gate_clks		= imem_gate_clks,
 	.nr_gate_clks		= ARRAY_SIZE(imem_gate_clks),
-	.nr_clk_ids		= IMEM_NR_CLK,
+	.nr_clk_ids		= CLKS_NR_IMEM,
 	.clk_regs		= imem_clk_regs,
 	.nr_clk_regs		= ARRAY_SIZE(imem_clk_regs),
 };
@@ -1538,7 +1547,7 @@ static const struct samsung_cmu_info mfc_cmu_info __initconst = {
 	.nr_div_clks		= ARRAY_SIZE(mfc_div_clks),
 	.gate_clks		= mfc_gate_clks,
 	.nr_gate_clks		= ARRAY_SIZE(mfc_gate_clks),
-	.nr_clk_ids		= MFC_NR_CLK,
+	.nr_clk_ids		= CLKS_NR_MFC,
 	.clk_regs		= mfc_clk_regs,
 	.nr_clk_regs		= ARRAY_SIZE(mfc_clk_regs),
 };
@@ -1637,7 +1646,7 @@ static const struct samsung_pll_rate_table pll_cam_csi_rate_table[] __initconst 
 };
 
 static const struct samsung_pll_clock cam_csi_pll_clks[] __initconst = {
-	PLL(pll_142xx, 0, "fout_pll_cam_csi", "fin_pll",
+	PLL(pll_142xx, CAM_CSI_PLL, "fout_pll_cam_csi", "fin_pll",
 	    PLL_LOCKTIME_PLL_CAM_CSI, PLL_CON0_PLL_CAM_CSI, pll_cam_csi_rate_table),
 };
 
@@ -1673,51 +1682,51 @@ static const struct samsung_gate_clock cam_csi_gate_clks[] __initconst = {
 	     GAT_CAM_CSI_BUS_D_CAM_CSI_IPCLKPORT_CLK__SYSTEM__NOC, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CAM_CSI0_0_IPCLKPORT_I_ACLK, "cam_csi0_0_ipclkport_i_aclk", "dout_cam_csi0_aclk",
 	     GAT_CAM_CSI0_0_IPCLKPORT_I_ACLK, 21, CLK_IGNORE_UNUSED, 0),
-	GATE(0, "cam_csi0_0_ipclkport_i_pclk", "dout_cam_csi_busp",
+	GATE(CAM_CSI0_0_IPCLKPORT_I_PCLK, "cam_csi0_0_ipclkport_i_pclk", "dout_cam_csi_busp",
 	     GAT_CAM_CSI0_0_IPCLKPORT_I_PCLK, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CAM_CSI0_1_IPCLKPORT_I_ACLK, "cam_csi0_1_ipclkport_i_aclk", "dout_cam_csi0_aclk",
 	     GAT_CAM_CSI0_1_IPCLKPORT_I_ACLK, 21, CLK_IGNORE_UNUSED, 0),
-	GATE(0, "cam_csi0_1_ipclkport_i_pclk", "dout_cam_csi_busp",
+	GATE(CAM_CSI0_1_IPCLKPORT_I_PCLK, "cam_csi0_1_ipclkport_i_pclk", "dout_cam_csi_busp",
 	     GAT_CAM_CSI0_1_IPCLKPORT_I_PCLK, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CAM_CSI0_2_IPCLKPORT_I_ACLK, "cam_csi0_2_ipclkport_i_aclk", "dout_cam_csi0_aclk",
 	     GAT_CAM_CSI0_2_IPCLKPORT_I_ACLK, 21, CLK_IGNORE_UNUSED, 0),
-	GATE(0, "cam_csi0_2_ipclkport_i_pclk", "dout_cam_csi_busp",
+	GATE(CAM_CSI0_2_IPCLKPORT_I_PCLK, "cam_csi0_2_ipclkport_i_pclk", "dout_cam_csi_busp",
 	     GAT_CAM_CSI0_2_IPCLKPORT_I_PCLK, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CAM_CSI0_3_IPCLKPORT_I_ACLK, "cam_csi0_3_ipclkport_i_aclk", "dout_cam_csi0_aclk",
 	     GAT_CAM_CSI0_3_IPCLKPORT_I_ACLK, 21, CLK_IGNORE_UNUSED, 0),
-	GATE(0, "cam_csi0_3_ipclkport_i_pclk", "dout_cam_csi_busp",
+	GATE(CAM_CSI0_3_IPCLKPORT_I_PCLK, "cam_csi0_3_ipclkport_i_pclk", "dout_cam_csi_busp",
 	     GAT_CAM_CSI0_3_IPCLKPORT_I_PCLK, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CAM_CSI1_0_IPCLKPORT_I_ACLK, "cam_csi1_0_ipclkport_i_aclk", "dout_cam_csi1_aclk",
 	     GAT_CAM_CSI1_0_IPCLKPORT_I_ACLK, 21, CLK_IGNORE_UNUSED, 0),
-	GATE(0, "cam_csi1_0_ipclkport_i_pclk", "dout_cam_csi_busp",
+	GATE(CAM_CSI1_0_IPCLKPORT_I_PCLK, "cam_csi1_0_ipclkport_i_pclk", "dout_cam_csi_busp",
 	     GAT_CAM_CSI1_0_IPCLKPORT_I_PCLK, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CAM_CSI1_1_IPCLKPORT_I_ACLK, "cam_csi1_1_ipclkport_i_aclk", "dout_cam_csi1_aclk",
 	     GAT_CAM_CSI1_1_IPCLKPORT_I_ACLK, 21, CLK_IGNORE_UNUSED, 0),
-	GATE(0, "cam_csi1_1_ipclkport_i_pclk", "dout_cam_csi_busp",
+	GATE(CAM_CSI1_1_IPCLKPORT_I_PCLK, "cam_csi1_1_ipclkport_i_pclk", "dout_cam_csi_busp",
 	     GAT_CAM_CSI1_1_IPCLKPORT_I_PCLK, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CAM_CSI1_2_IPCLKPORT_I_ACLK, "cam_csi1_2_ipclkport_i_aclk", "dout_cam_csi1_aclk",
 	     GAT_CAM_CSI1_2_IPCLKPORT_I_ACLK, 21, CLK_IGNORE_UNUSED, 0),
-	GATE(0, "cam_csi1_2_ipclkport_i_pclk", "dout_cam_csi_busp",
+	GATE(CAM_CSI1_2_IPCLKPORT_I_PCLK, "cam_csi1_2_ipclkport_i_pclk", "dout_cam_csi_busp",
 	     GAT_CAM_CSI1_2_IPCLKPORT_I_PCLK, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CAM_CSI1_3_IPCLKPORT_I_ACLK, "cam_csi1_3_ipclkport_i_aclk", "dout_cam_csi1_aclk",
 	     GAT_CAM_CSI1_3_IPCLKPORT_I_ACLK, 21, CLK_IGNORE_UNUSED, 0),
-	GATE(0, "cam_csi1_3_ipclkport_i_pclk", "dout_cam_csi_busp",
+	GATE(CAM_CSI1_3_IPCLKPORT_I_PCLK, "cam_csi1_3_ipclkport_i_pclk", "dout_cam_csi_busp",
 	     GAT_CAM_CSI1_3_IPCLKPORT_I_PCLK, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CAM_CSI2_0_IPCLKPORT_I_ACLK, "cam_csi2_0_ipclkport_i_aclk", "dout_cam_csi2_aclk",
 	     GAT_CAM_CSI2_0_IPCLKPORT_I_ACLK, 21, CLK_IGNORE_UNUSED, 0),
-	GATE(0, "cam_csi2_0_ipclkport_i_pclk", "dout_cam_csi_busp",
+	GATE(CAM_CSI2_0_IPCLKPORT_I_PCLK, "cam_csi2_0_ipclkport_i_pclk", "dout_cam_csi_busp",
 	     GAT_CAM_CSI2_0_IPCLKPORT_I_PCLK, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CAM_CSI2_1_IPCLKPORT_I_ACLK, "cam_csi2_1_ipclkport_i_aclk", "dout_cam_csi2_aclk",
 	     GAT_CAM_CSI2_1_IPCLKPORT_I_ACLK, 21, CLK_IGNORE_UNUSED, 0),
-	GATE(0, "cam_csi2_1_ipclkport_i_pclk", "dout_cam_csi_busp",
+	GATE(CAM_CSI2_1_IPCLKPORT_I_PCLK, "cam_csi2_1_ipclkport_i_pclk", "dout_cam_csi_busp",
 	     GAT_CAM_CSI2_1_IPCLKPORT_I_PCLK, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CAM_CSI2_2_IPCLKPORT_I_ACLK, "cam_csi2_2_ipclkport_i_aclk", "dout_cam_csi2_aclk",
 	     GAT_CAM_CSI2_2_IPCLKPORT_I_ACLK, 21, CLK_IGNORE_UNUSED, 0),
-	GATE(0, "cam_csi2_2_ipclkport_i_pclk", "dout_cam_csi_busp",
+	GATE(CAM_CSI2_2_IPCLKPORT_I_PCLK, "cam_csi2_2_ipclkport_i_pclk", "dout_cam_csi_busp",
 	     GAT_CAM_CSI2_2_IPCLKPORT_I_PCLK, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CAM_CSI2_3_IPCLKPORT_I_ACLK, "cam_csi2_3_ipclkport_i_aclk", "dout_cam_csi2_aclk",
 	     GAT_CAM_CSI2_3_IPCLKPORT_I_ACLK, 21, CLK_IGNORE_UNUSED, 0),
-	GATE(0, "cam_csi2_3_ipclkport_i_pclk", "dout_cam_csi_busp",
+	GATE(CAM_CSI2_3_IPCLKPORT_I_PCLK, "cam_csi2_3_ipclkport_i_pclk", "dout_cam_csi_busp",
 	     GAT_CAM_CSI2_3_IPCLKPORT_I_PCLK, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(0, "cam_ns_brdg_cam_csi_ipclkport_clk__psoc_cam_csi__clk_cam_csi_d",
 	     "dout_cam_csi_busd",
@@ -1742,7 +1751,7 @@ static const struct samsung_cmu_info cam_csi_cmu_info __initconst = {
 	.nr_div_clks		= ARRAY_SIZE(cam_csi_div_clks),
 	.gate_clks		= cam_csi_gate_clks,
 	.nr_gate_clks		= ARRAY_SIZE(cam_csi_gate_clks),
-	.nr_clk_ids		= CAM_CSI_NR_CLK,
+	.nr_clk_ids		= CLKS_NR_CAM_CSI,
 	.clk_regs		= cam_csi_clk_regs,
 	.nr_clk_regs		= ARRAY_SIZE(cam_csi_clk_regs),
 };

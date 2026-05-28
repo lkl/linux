@@ -339,8 +339,8 @@ out:
 }
 
 /***** Make a directory */
-static int msdos_mkdir(struct mnt_idmap *idmap, struct inode *dir,
-		       struct dentry *dentry, umode_t mode)
+static struct dentry *msdos_mkdir(struct mnt_idmap *idmap, struct inode *dir,
+				  struct dentry *dentry, umode_t mode)
 {
 	struct super_block *sb = dir->i_sb;
 	struct fat_slot_info sinfo;
@@ -389,13 +389,13 @@ static int msdos_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 
 	mutex_unlock(&MSDOS_SB(sb)->s_lock);
 	fat_flush_inodes(sb, dir, inode);
-	return 0;
+	return NULL;
 
 out_free:
 	fat_free_clusters(dir, cluster);
 out:
 	mutex_unlock(&MSDOS_SB(sb)->s_lock);
-	return err;
+	return ERR_PTR(err);
 }
 
 /***** Unlink a file */
@@ -646,7 +646,7 @@ static const struct inode_operations msdos_dir_inode_operations = {
 static void setup(struct super_block *sb)
 {
 	MSDOS_SB(sb)->dir_ops = &msdos_dir_inode_operations;
-	sb->s_d_op = &msdos_dentry_operations;
+	set_default_d_op(sb, &msdos_dentry_operations);
 	sb->s_flags |= SB_NOATIME;
 }
 

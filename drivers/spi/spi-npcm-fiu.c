@@ -13,6 +13,7 @@
 #include <linux/vmalloc.h>
 #include <linux/regmap.h>
 #include <linux/of.h>
+#include <linux/minmax.h>
 #include <linux/spi/spi-mem.h>
 #include <linux/mfd/syscon.h>
 
@@ -498,10 +499,7 @@ static int npcm_fiu_read(struct spi_mem *mem, const struct spi_mem_op *op)
 
 	do {
 		addr = ((u32)op->addr.val + i);
-		if (currlen < 16)
-			readlen = currlen;
-		else
-			readlen = 16;
+		readlen = min_t(int, currlen, 16);
 
 		buf_ptr = data + i;
 		ret = npcm_fiu_uma_read(mem, op, addr, true, buf_ptr,
@@ -549,11 +547,6 @@ static int npcm_fiu_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 	struct npcm_fiu_chip *chip = &fiu->chip[spi_get_chipselect(mem->spi, 0)];
 	int ret = 0;
 	u8 *buf;
-
-	dev_dbg(fiu->dev, "cmd:%#x mode:%d.%d.%d.%d addr:%#llx len:%#x\n",
-		op->cmd.opcode, op->cmd.buswidth, op->addr.buswidth,
-		op->dummy.buswidth, op->data.buswidth, op->addr.val,
-		op->data.nbytes);
 
 	if (fiu->spix_mode || op->addr.nbytes > 4)
 		return -EOPNOTSUPP;
@@ -766,12 +759,12 @@ MODULE_DEVICE_TABLE(of, npcm_fiu_dt_ids);
 
 static struct platform_driver npcm_fiu_driver = {
 	.driver = {
-		.name	= "NPCM-FIU",
-		.bus	= &platform_bus_type,
+		.name = "NPCM-FIU",
+		.bus = &platform_bus_type,
 		.of_match_table = npcm_fiu_dt_ids,
 	},
-	.probe      = npcm_fiu_probe,
-	.remove_new	    = npcm_fiu_remove,
+	.probe = npcm_fiu_probe,
+	.remove = npcm_fiu_remove,
 };
 module_platform_driver(npcm_fiu_driver);
 

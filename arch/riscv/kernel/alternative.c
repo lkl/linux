@@ -18,7 +18,7 @@
 #include <asm/sbi.h>
 #include <asm/csr.h>
 #include <asm/insn.h>
-#include <asm/patch.h>
+#include <asm/text-patching.h>
 
 struct cpu_manufacturer_info_t {
 	unsigned long vendor_id;
@@ -45,6 +45,11 @@ static void riscv_fill_cpu_mfr_info(struct cpu_manufacturer_info_t *cpu_mfr_info
 #ifdef CONFIG_ERRATA_ANDES
 	case ANDES_VENDOR_ID:
 		cpu_mfr_info->patch_func = andes_errata_patch_func;
+		break;
+#endif
+#ifdef CONFIG_ERRATA_MIPS
+	case MIPS_VENDOR_ID:
+		cpu_mfr_info->patch_func = mips_errata_patch_func;
 		break;
 #endif
 #ifdef CONFIG_ERRATA_SIFIVE

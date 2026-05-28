@@ -179,9 +179,9 @@ static void rtl88e_deinit_sw_vars(struct ieee80211_hw *hw)
 	}
 
 	if (rtlpriv->psc.low_power_enable)
-		del_timer_sync(&rtlpriv->works.fw_clockoff_timer);
+		timer_delete_sync(&rtlpriv->works.fw_clockoff_timer);
 
-	del_timer_sync(&rtlpriv->works.fast_antenna_training_timer);
+	timer_delete_sync(&rtlpriv->works.fast_antenna_training_timer);
 }
 
 /* get bt coexist status */
@@ -190,7 +190,7 @@ static bool rtl88e_get_btc_status(void)
 	return false;
 }
 
-static struct rtl_hal_ops rtl8188ee_hal_ops = {
+static const struct rtl_hal_ops rtl8188ee_hal_ops = {
 	.init_sw_vars = rtl88e_init_sw_vars,
 	.deinit_sw_vars = rtl88e_deinit_sw_vars,
 	.read_eeprom_info = rtl88ee_read_eeprom_info,

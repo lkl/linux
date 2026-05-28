@@ -4,13 +4,14 @@
  * Author: Padmavathi Venna <padma.v@samsung.com>
  *
  * Common Clock Framework support for Audio Subsystem Clock Controller.
-*/
+ */
 
 #include <linux/slab.h>
 #include <linux/io.h>
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/of.h>
+#include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>

@@ -37,6 +37,7 @@
 #include <linux/kfifo.h>
 #include <linux/platform_device.h>
 #include <linux/gfp.h>
+#include <linux/string_choices.h>
 
 #include <linux/uaccess.h>
 #include <asm/io.h>
@@ -1268,12 +1269,12 @@ static void sonypi_display_info(void)
 	       "compat = %s, mask = 0x%08lx, useinput = %s, acpi = %s\n",
 	       sonypi_device.model,
 	       verbose,
-	       fnkeyinit ? "on" : "off",
-	       camera ? "on" : "off",
-	       compat ? "on" : "off",
+	       str_on_off(fnkeyinit),
+	       str_on_off(camera),
+	       str_on_off(compat),
 	       mask,
-	       useinput ? "on" : "off",
-	       SONYPI_ACPI_ACTIVE ? "on" : "off");
+	       str_on_off(useinput),
+	       str_on_off(SONYPI_ACPI_ACTIVE));
 	printk(KERN_INFO "sonypi: enabled at irq=%d, port1=0x%x, port2=0x%x\n",
 	       sonypi_device.irq,
 	       sonypi_device.ioport1, sonypi_device.ioport2);
@@ -1467,7 +1468,7 @@ static struct platform_driver sonypi_driver = {
 		.pm	= SONYPI_PM,
 	},
 	.probe		= sonypi_probe,
-	.remove_new	= sonypi_remove,
+	.remove		= sonypi_remove,
 	.shutdown	= sonypi_shutdown,
 };
 

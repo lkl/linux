@@ -70,6 +70,10 @@
 #define KEY_DESTROY		0xbd
 
 /********** net/core/page_pool.c **********/
+/*
+ * page_pool uses additional free bits within this value to store data, see the
+ * definition of PP_DMA_INDEX_MASK in mm.h
+ */
 #define PP_SIGNATURE		(0x40 + POISON_POINTER_DELTA)
 
 /********** net/core/skbuff.c **********/
@@ -85,5 +89,8 @@
 
 /********** lib/stackdepot.c **********/
 #define STACK_DEPOT_POISON ((void *)(0xD390 + POISON_POINTER_DELTA))
+
+/********** io_uring/ **********/
+#define IO_URING_PTR_POISON ((void *)(0x1091UL + POISON_POINTER_DELTA))
 
 #endif

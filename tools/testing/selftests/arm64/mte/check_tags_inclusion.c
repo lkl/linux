@@ -57,7 +57,7 @@ static int check_single_included_tags(int mem_type, int mode)
 		return KSFT_FAIL;
 
 	for (tag = 0; (tag < MT_TAG_COUNT) && (result == KSFT_PASS); tag++) {
-		ret = mte_switch_mode(mode, MT_INCLUDE_VALID_TAG(tag));
+		ret = mte_switch_mode(mode, MT_INCLUDE_VALID_TAG(tag), false);
 		if (ret != 0)
 			result = KSFT_FAIL;
 		/* Try to catch a excluded tag by a number of tries. */
@@ -65,7 +65,7 @@ static int check_single_included_tags(int mem_type, int mode)
 			ptr = mte_insert_tags(ptr, BUFFER_SIZE);
 			/* Check tag value */
 			if (MT_FETCH_TAG((uintptr_t)ptr) == tag) {
-				ksft_print_msg("FAIL: wrong tag = 0x%x with include mask=0x%x\n",
+				ksft_print_msg("FAIL: wrong tag = 0x%lx with include mask=0x%x\n",
 					       MT_FETCH_TAG((uintptr_t)ptr),
 					       MT_INCLUDE_VALID_TAG(tag));
 				result = KSFT_FAIL;
@@ -91,13 +91,13 @@ static int check_multiple_included_tags(int mem_type, int mode)
 
 	for (tag = 0; (tag < MT_TAG_COUNT - 1) && (result == KSFT_PASS); tag++) {
 		excl_mask |= 1 << tag;
-		mte_switch_mode(mode, MT_INCLUDE_VALID_TAGS(excl_mask));
+		mte_switch_mode(mode, MT_INCLUDE_VALID_TAGS(excl_mask), false);
 		/* Try to catch a excluded tag by a number of tries. */
 		for (run = 0; (run < RUNS) && (result == KSFT_PASS); run++) {
 			ptr = mte_insert_tags(ptr, BUFFER_SIZE);
 			/* Check tag value */
 			if (MT_FETCH_TAG((uintptr_t)ptr) < tag) {
-				ksft_print_msg("FAIL: wrong tag = 0x%x with include mask=0x%x\n",
+				ksft_print_msg("FAIL: wrong tag = 0x%lx with include mask=0x%lx\n",
 					       MT_FETCH_TAG((uintptr_t)ptr),
 					       MT_INCLUDE_VALID_TAGS(excl_mask));
 				result = KSFT_FAIL;
@@ -120,7 +120,7 @@ static int check_all_included_tags(int mem_type, int mode)
 				   mem_type, false) != KSFT_PASS)
 		return KSFT_FAIL;
 
-	ret = mte_switch_mode(mode, MT_INCLUDE_TAG_MASK);
+	ret = mte_switch_mode(mode, MT_INCLUDE_TAG_MASK, false);
 	if (ret != 0)
 		return KSFT_FAIL;
 	/* Try to catch a excluded tag by a number of tries. */
@@ -145,7 +145,7 @@ static int check_none_included_tags(int mem_type, int mode)
 	if (check_allocated_memory(ptr, BUFFER_SIZE, mem_type, false) != KSFT_PASS)
 		return KSFT_FAIL;
 
-	ret = mte_switch_mode(mode, MT_EXCLUDE_TAG_MASK);
+	ret = mte_switch_mode(mode, MT_EXCLUDE_TAG_MASK, false);
 	if (ret != 0)
 		return KSFT_FAIL;
 	/* Try to catch a excluded tag by a number of tries. */
@@ -180,7 +180,7 @@ int main(int argc, char *argv[])
 		return err;
 
 	/* Register SIGSEGV handler */
-	mte_register_signal(SIGSEGV, mte_default_handler);
+	mte_register_signal(SIGSEGV, mte_default_handler, false);
 
 	/* Set test plan */
 	ksft_set_plan(4);

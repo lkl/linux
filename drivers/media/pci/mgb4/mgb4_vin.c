@@ -143,8 +143,8 @@ static int get_timings(struct mgb4_vin_dev *vindev,
 
 	u32 status = mgb4_read_reg(video, regs->status);
 	u32 pclk = mgb4_read_reg(video, regs->pclk);
-	u32 signal = mgb4_read_reg(video, regs->signal);
-	u32 signal2 = mgb4_read_reg(video, regs->signal2);
+	u32 hsync = mgb4_read_reg(video, regs->hsync);
+	u32 vsync = mgb4_read_reg(video, regs->vsync);
 	u32 resolution = mgb4_read_reg(video, regs->resolution);
 
 	if (!(status & (1U << 2)))
@@ -161,12 +161,12 @@ static int get_timings(struct mgb4_vin_dev *vindev,
 	if (status & (1U << 13))
 		timings->bt.polarities |= V4L2_DV_VSYNC_POS_POL;
 	timings->bt.pixelclock = pclk * 1000;
-	timings->bt.hsync = (signal & 0x00FF0000) >> 16;
-	timings->bt.vsync = (signal2 & 0x00FF0000) >> 16;
-	timings->bt.hbackporch = (signal & 0x0000FF00) >> 8;
-	timings->bt.hfrontporch = signal & 0x000000FF;
-	timings->bt.vbackporch = (signal2 & 0x0000FF00) >> 8;
-	timings->bt.vfrontporch = signal2 & 0x000000FF;
+	timings->bt.hsync = (hsync & 0x00FF0000) >> 16;
+	timings->bt.vsync = (vsync & 0x00FF0000) >> 16;
+	timings->bt.hbackporch = (hsync & 0x0000FF00) >> 8;
+	timings->bt.hfrontporch = hsync & 0x000000FF;
+	timings->bt.vbackporch = (vsync & 0x0000FF00) >> 8;
+	timings->bt.vfrontporch = vsync & 0x000000FF;
 
 	return 0;
 }
@@ -260,6 +260,7 @@ static void buffer_queue(struct vb2_buffer *vb)
 static void stop_streaming(struct vb2_queue *vq)
 {
 	struct mgb4_vin_dev *vindev = vb2_get_drv_priv(vq);
+	struct mgb4_regs *video = &vindev->mgbdev->video;
 	const struct mgb4_vin_config *config = vindev->config;
 	int irq = xdma_get_user_irq(vindev->mgbdev->xdev, config->vin_irq);
 
@@ -273,6 +274,9 @@ static void stop_streaming(struct vb2_queue *vq)
 		mgb4_mask_reg(&vindev->mgbdev->video, config->regs.config, 0x2,
 			      0x0);
 
+	mgb4_write_reg(video, vindev->config->regs.padding, 0);
+	set_loopback_padding(vindev, 0);
+
 	cancel_work_sync(&vindev->dma_work);
 	return_all_buffers(vindev, VB2_BUF_STATE_ERROR);
 }
@@ -280,6 +284,7 @@ static void stop_streaming(struct vb2_queue *vq)
 static int start_streaming(struct vb2_queue *vq, unsigned int count)
 {
 	struct mgb4_vin_dev *vindev = vb2_get_drv_priv(vq);
+	struct mgb4_regs *video = &vindev->mgbdev->video;
 	const struct mgb4_vin_config *config = vindev->config;
 	int irq = xdma_get_user_irq(vindev->mgbdev->xdev, config->vin_irq);
 
@@ -291,6 +296,9 @@ static int start_streaming(struct vb2_queue *vq, unsigned int count)
 	if (!loopback_active(vindev))
 		mgb4_mask_reg(&vindev->mgbdev->video, config->regs.config, 0x2,
 			      0x2);
+
+	mgb4_write_reg(video, vindev->config->regs.padding, vindev->padding);
+	set_loopback_padding(vindev, vindev->padding);
 
 	xdma_enable_user_irq(vindev->mgbdev->xdev, irq);
 
@@ -304,8 +312,6 @@ static const struct vb2_ops queue_ops = {
 	.buf_queue = buffer_queue,
 	.start_streaming = start_streaming,
 	.stop_streaming = stop_streaming,
-	.wait_prepare = vb2_ops_wait_prepare,
-	.wait_finish = vb2_ops_wait_finish
 };
 
 static int fh_open(struct file *file)
@@ -324,34 +330,16 @@ static int fh_open(struct file *file)
 
 	if (get_timings(vindev, &vindev->timings) < 0)
 		vindev->timings = cea1080p60;
-	set_loopback_padding(vindev, vindev->padding);
 
 out:
 	mutex_unlock(&vindev->lock);
 	return rv;
 }
 
-static int fh_release(struct file *file)
-{
-	struct mgb4_vin_dev *vindev = video_drvdata(file);
-	int rv;
-
-	mutex_lock(&vindev->lock);
-
-	if (v4l2_fh_is_singular_file(file))
-		set_loopback_padding(vindev, 0);
-
-	rv = _vb2_fop_release(file, NULL);
-
-	mutex_unlock(&vindev->lock);
-
-	return rv;
-}
-
 static const struct v4l2_file_operations video_fops = {
 	.owner = THIS_MODULE,
 	.open = fh_open,
-	.release = fh_release,
+	.release = vb2_fop_release,
 	.unlocked_ioctl = video_ioctl2,
 	.read = vb2_fop_read,
 	.mmap = vb2_fop_mmap,
@@ -507,8 +495,6 @@ static int vidioc_s_fmt(struct file *file, void *priv, struct v4l2_format *f)
 
 	vindev->padding = (f->fmt.pix.bytesperline - (f->fmt.pix.width
 			   * pixelsize)) / pixelsize;
-	mgb4_write_reg(video, vindev->config->regs.padding, vindev->padding);
-	set_loopback_padding(vindev, vindev->padding);
 
 	return 0;
 }
@@ -624,8 +610,7 @@ static int vidioc_s_dv_timings(struct file *file, void *fh,
 	    timings->bt.height < video_timings_cap.bt.min_height ||
 	    timings->bt.height > video_timings_cap.bt.max_height)
 		return -EINVAL;
-	if (timings->bt.width == vindev->timings.bt.width &&
-	    timings->bt.height == vindev->timings.bt.height)
+	if (v4l2_match_dv_timings(timings, &vindev->timings, 0, false))
 		return 0;
 	if (vb2_is_busy(&vindev->queue))
 		return -EBUSY;
@@ -655,7 +640,14 @@ static int vidioc_query_dv_timings(struct file *file, void *fh,
 static int vidioc_enum_dv_timings(struct file *file, void *fh,
 				  struct v4l2_enum_dv_timings *timings)
 {
-	return v4l2_enum_dv_timings_cap(timings, &video_timings_cap, NULL, NULL);
+	struct mgb4_vin_dev *vindev = video_drvdata(file);
+
+	if (timings->index != 0)
+		return -EINVAL;
+	if (get_timings(vindev, &timings->timings) < 0)
+		return -ENODATA;
+
+	return 0;
 }
 
 static int vidioc_dv_timings_cap(struct file *file, void *fh,
@@ -763,14 +755,14 @@ static void signal_change(struct work_struct *work)
 	u32 width = resolution >> 16;
 	u32 height = resolution & 0xFFFF;
 
+	static const struct v4l2_event ev = {
+		.type = V4L2_EVENT_SOURCE_CHANGE,
+		.u.src_change.changes = V4L2_EVENT_SRC_CH_RESOLUTION,
+	};
+
+	v4l2_event_queue(&vindev->vdev, &ev);
+
 	if (timings->width != width || timings->height != height) {
-		static const struct v4l2_event ev = {
-			.type = V4L2_EVENT_SOURCE_CHANGE,
-			.u.src_change.changes = V4L2_EVENT_SRC_CH_RESOLUTION,
-		};
-
-		v4l2_event_queue(&vindev->vdev, &ev);
-
 		if (vb2_is_streaming(&vindev->queue))
 			vb2_queue_error(&vindev->queue);
 	}
@@ -853,14 +845,16 @@ static void fpga_init(struct mgb4_vin_dev *vindev)
 	mgb4_write_reg(video, regs->config, 1U << 9);
 }
 
-#ifdef CONFIG_DEBUG_FS
-static void debugfs_init(struct mgb4_vin_dev *vindev)
+static void create_debugfs(struct mgb4_vin_dev *vindev)
 {
+#ifdef CONFIG_DEBUG_FS
 	struct mgb4_regs *video = &vindev->mgbdev->video;
+	struct dentry *entry;
 
-	vindev->debugfs = debugfs_create_dir(vindev->vdev.name,
-					     vindev->mgbdev->debugfs);
-	if (!vindev->debugfs)
+	if (IS_ERR_OR_NULL(vindev->mgbdev->debugfs))
+		return;
+	entry = debugfs_create_dir(vindev->vdev.name, vindev->mgbdev->debugfs);
+	if (IS_ERR(entry))
 		return;
 
 	vindev->regs[0].name = "CONFIG";
@@ -876,9 +870,9 @@ static void debugfs_init(struct mgb4_vin_dev *vindev)
 	vindev->regs[5].name = "PCLK_FREQUENCY";
 	vindev->regs[5].offset = vindev->config->regs.pclk;
 	vindev->regs[6].name = "VIDEO_PARAMS_1";
-	vindev->regs[6].offset = vindev->config->regs.signal;
+	vindev->regs[6].offset = vindev->config->regs.hsync;
 	vindev->regs[7].name = "VIDEO_PARAMS_2";
-	vindev->regs[7].offset = vindev->config->regs.signal2;
+	vindev->regs[7].offset = vindev->config->regs.vsync;
 	vindev->regs[8].name = "PADDING_PIXELS";
 	vindev->regs[8].offset = vindev->config->regs.padding;
 	if (has_timeperframe(video)) {
@@ -892,10 +886,9 @@ static void debugfs_init(struct mgb4_vin_dev *vindev)
 	vindev->regset.base = video->membase;
 	vindev->regset.regs = vindev->regs;
 
-	debugfs_create_regset32("registers", 0444, vindev->debugfs,
-				&vindev->regset);
-}
+	debugfs_create_regset32("registers", 0444, entry, &vindev->regset);
 #endif
+}
 
 struct mgb4_vin_dev *mgb4_vin_create(struct mgb4_dev *mgbdev, int id)
 {
@@ -1001,9 +994,7 @@ struct mgb4_vin_dev *mgb4_vin_create(struct mgb4_dev *mgbdev, int id)
 		goto err_video_dev;
 	}
 
-#ifdef CONFIG_DEBUG_FS
-	debugfs_init(vindev);
-#endif
+	create_debugfs(vindev);
 
 	return vindev;
 
@@ -1033,10 +1024,6 @@ void mgb4_vin_free(struct mgb4_vin_dev *vindev)
 
 	free_irq(vin_irq, vindev);
 	free_irq(err_irq, vindev);
-
-#ifdef CONFIG_DEBUG_FS
-	debugfs_remove_recursive(vindev->debugfs);
-#endif
 
 	groups = MGB4_IS_GMSL(vindev->mgbdev)
 	  ? mgb4_gmsl_in_groups : mgb4_fpdl3_in_groups;

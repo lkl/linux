@@ -12,8 +12,11 @@
  *
  */
 
+#define pr_fmt(fmt) "cpqphp: " fmt
+
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/printk.h>
 #include <linux/types.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
@@ -132,18 +135,6 @@ int cpqhp_unconfigure_device(struct pci_func *func)
 	return 0;
 }
 
-static int PCI_RefinedAccessConfig(struct pci_bus *bus, unsigned int devfn, u8 offset, u32 *value)
-{
-	u32 vendID = 0;
-
-	if (pci_bus_read_config_dword(bus, devfn, PCI_VENDOR_ID, &vendID) == -1)
-		return -1;
-	if (PCI_POSSIBLE_ERROR(vendID))
-		return -1;
-	return pci_bus_read_config_dword(bus, devfn, offset, value);
-}
-
-
 /*
  * cpqhp_set_irq
  *
@@ -202,13 +193,16 @@ static int PCI_ScanBusForNonBridge(struct controller *ctrl, u8 bus_num, u8 *dev_
 {
 	u16 tdevice;
 	u32 work;
-	u8 tbus;
+	int ret = -1;
 
 	ctrl->pci_bus->number = bus_num;
 
 	for (tdevice = 0; tdevice < 0xFF; tdevice++) {
 		/* Scan for access first */
-		if (PCI_RefinedAccessConfig(ctrl->pci_bus, tdevice, 0x08, &work) == -1)
+		if (!pci_bus_read_dev_vendor_id(ctrl->pci_bus, tdevice, &work, 0))
+			continue;
+		ret = pci_bus_read_config_dword(ctrl->pci_bus, tdevice, PCI_CLASS_REVISION, &work);
+		if (ret)
 			continue;
 		dbg("Looking for nonbridge bus_num %d dev_num %d\n", bus_num, tdevice);
 		/* Yep we got one. Not a bridge ? */
@@ -216,23 +210,20 @@ static int PCI_ScanBusForNonBridge(struct controller *ctrl, u8 bus_num, u8 *dev_
 			*dev_num = tdevice;
 			dbg("found it !\n");
 			return 0;
-		}
-	}
-	for (tdevice = 0; tdevice < 0xFF; tdevice++) {
-		/* Scan for access first */
-		if (PCI_RefinedAccessConfig(ctrl->pci_bus, tdevice, 0x08, &work) == -1)
-			continue;
-		dbg("Looking for bridge bus_num %d dev_num %d\n", bus_num, tdevice);
-		/* Yep we got one. bridge ? */
-		if ((work >> 8) == PCI_TO_PCI_BRIDGE_CLASS) {
-			pci_bus_read_config_byte(ctrl->pci_bus, PCI_DEVFN(tdevice, 0), PCI_SECONDARY_BUS, &tbus);
-			/* XXX: no recursion, wtf? */
-			dbg("Recurse on bus_num %d tdevice %d\n", tbus, tdevice);
-			return 0;
+		} else {
+			/*
+			 * XXX: Code whose debug printout indicated
+			 * recursion to buses underneath bridges might be
+			 * necessary was removed because it never did
+			 * any recursion.
+			 */
+			ret = 0;
+			pr_warn("missing feature: bridge scan recursion not implemented\n");
 		}
 	}
 
-	return -1;
+
+	return ret;
 }
 
 
@@ -1311,7 +1302,7 @@ int cpqhp_find_available_resources(struct controller *ctrl, void __iomem *rom_st
 
 			dbg("found io_node(base, length) = %x, %x\n",
 					io_node->base, io_node->length);
-			dbg("populated slot =%d \n", populated_slot);
+			dbg("populated slot = %d\n", populated_slot);
 			if (!populated_slot) {
 				io_node->next = ctrl->io_head;
 				ctrl->io_head = io_node;
@@ -1334,7 +1325,7 @@ int cpqhp_find_available_resources(struct controller *ctrl, void __iomem *rom_st
 
 			dbg("found mem_node(base, length) = %x, %x\n",
 					mem_node->base, mem_node->length);
-			dbg("populated slot =%d \n", populated_slot);
+			dbg("populated slot = %d\n", populated_slot);
 			if (!populated_slot) {
 				mem_node->next = ctrl->mem_head;
 				ctrl->mem_head = mem_node;
@@ -1358,7 +1349,7 @@ int cpqhp_find_available_resources(struct controller *ctrl, void __iomem *rom_st
 			p_mem_node->length = pre_mem_length << 16;
 			dbg("found p_mem_node(base, length) = %x, %x\n",
 					p_mem_node->base, p_mem_node->length);
-			dbg("populated slot =%d \n", populated_slot);
+			dbg("populated slot = %d\n", populated_slot);
 
 			if (!populated_slot) {
 				p_mem_node->next = ctrl->p_mem_head;
@@ -1382,7 +1373,7 @@ int cpqhp_find_available_resources(struct controller *ctrl, void __iomem *rom_st
 			bus_node->length = max_bus - secondary_bus + 1;
 			dbg("found bus_node(base, length) = %x, %x\n",
 					bus_node->base, bus_node->length);
-			dbg("populated slot =%d \n", populated_slot);
+			dbg("populated slot = %d\n", populated_slot);
 			if (!populated_slot) {
 				bus_node->next = ctrl->bus_head;
 				ctrl->bus_head = bus_node;

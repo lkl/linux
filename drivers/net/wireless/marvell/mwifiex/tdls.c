@@ -1306,7 +1306,6 @@ int mwifiex_tdls_check_tx(struct mwifiex_private *priv, struct sk_buff *skb)
 							   peer->mac_addr,
 							   NL80211_TDLS_SETUP,
 							   0, GFP_ATOMIC);
-				peer->do_setup = false;
 				priv->check_tdls_tx = false;
 			} else if (peer->failure_count <
 				   MWIFIEX_TDLS_MAX_FAIL_COUNT &&
@@ -1416,7 +1415,8 @@ void mwifiex_auto_tdls_update_peer_signal(struct mwifiex_private *priv,
 
 void mwifiex_check_auto_tdls(struct timer_list *t)
 {
-	struct mwifiex_private *priv = from_timer(priv, t, auto_tdls_timer);
+	struct mwifiex_private *priv = timer_container_of(priv, t,
+							  auto_tdls_timer);
 	struct mwifiex_auto_tdls_peer *tdls_peer;
 	u16 reason = WLAN_REASON_TDLS_TEARDOWN_UNSPECIFIED;
 
@@ -1465,7 +1465,6 @@ void mwifiex_check_auto_tdls(struct timer_list *t)
 			   tdls_peer->failure_count <
 			   MWIFIEX_TDLS_MAX_FAIL_COUNT) {
 				priv->check_tdls_tx = true;
-				tdls_peer->do_setup = true;
 				mwifiex_dbg(priv->adapter, INFO,
 					    "check TDLS with peer=%pM\t"
 					    "rssi=%d\n", tdls_peer->mac_addr,
@@ -1492,7 +1491,7 @@ void mwifiex_clean_auto_tdls(struct mwifiex_private *priv)
 	    priv->adapter->auto_tdls &&
 	    priv->bss_type == MWIFIEX_BSS_TYPE_STA) {
 		priv->auto_tdls_timer_active = false;
-		del_timer(&priv->auto_tdls_timer);
+		timer_delete(&priv->auto_tdls_timer);
 		mwifiex_flush_auto_tdls_list(priv);
 	}
 }

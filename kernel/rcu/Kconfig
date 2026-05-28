@@ -18,7 +18,7 @@ config TREE_RCU
 
 config PREEMPT_RCU
 	bool
-	default y if PREEMPTION
+	default y if (PREEMPT || PREEMPT_RT || PREEMPT_DYNAMIC)
 	select TREE_RCU
 	help
 	  This option selects the RCU implementation that is
@@ -65,6 +65,19 @@ config TREE_SRCU
 	help
 	  This option selects the full-fledged version of SRCU.
 
+config FORCE_NEED_SRCU_NMI_SAFE
+	bool "Force selection of NEED_SRCU_NMI_SAFE"
+	depends on !TINY_SRCU
+	depends on RCU_EXPERT
+	depends on ARCH_HAS_NMI_SAFE_THIS_CPU_OPS
+	select NEED_SRCU_NMI_SAFE
+	default n
+	help
+	  This option forces selection of the NEED_SRCU_NMI_SAFE
+	  Kconfig option, allowing testing of srcu_read_lock_nmisafe()
+	  and srcu_read_unlock_nmisafe() on architectures (like x86)
+	  that select the ARCH_HAS_NMI_SAFE_THIS_CPU_OPS Kconfig option.
+
 config NEED_SRCU_NMI_SAFE
 	def_bool HAVE_NMI && !ARCH_HAS_NMI_SAFE_THIS_CPU_OPS && !TINY_SRCU
 
@@ -91,7 +104,7 @@ config NEED_TASKS_RCU
 
 config TASKS_RCU
 	bool
-	default NEED_TASKS_RCU && (PREEMPTION || PREEMPT_AUTO)
+	default NEED_TASKS_RCU && PREEMPTION
 	select IRQ_WORK
 
 config FORCE_TASKS_RUDE_RCU
@@ -249,16 +262,24 @@ config RCU_NOCB_CPU
 	  workloads will incur significant increases in context-switch
 	  rates.
 
-	  This option offloads callback invocation from the set of CPUs
-	  specified at boot time by the rcu_nocbs parameter.  For each
-	  such CPU, a kthread ("rcuox/N") will be created to invoke
-	  callbacks, where the "N" is the CPU being offloaded, and where
-	  the "x" is "p" for RCU-preempt (PREEMPTION kernels) and "s" for
-	  RCU-sched (!PREEMPTION kernels).  Nothing prevents this kthread
-	  from running on the specified CPUs, but (1) the kthreads may be
-	  preempted between each callback, and (2) affinity or cgroups can
-	  be used to force the kthreads to run on whatever set of CPUs is
-	  desired.
+	  This option offloads callback invocation from the set of
+	  CPUs specified at boot time by the rcu_nocbs parameter.
+	  For each such CPU, a kthread ("rcuox/N") will be created to
+	  invoke callbacks, where the "N" is the CPU being offloaded,
+	  and where the "x" is "p" for RCU-preempt (PREEMPTION kernels)
+	  and "s" for RCU-sched (!PREEMPTION kernels).	This option
+	  also creates another kthread for each sqrt(nr_cpu_ids) CPUs
+	  ("rcuog/N", where N is the first CPU in that group to come
+	  online), which handles grace periods for its group.  Nothing
+	  prevents these kthreads from running on the specified CPUs,
+	  but (1) the kthreads may be preempted between each callback,
+	  and (2) affinity or cgroups can be used to force the kthreads
+	  to run on whatever set of CPUs is desired.
+
+	  The sqrt(nr_cpu_ids) grouping may be overridden using the
+	  rcutree.rcu_nocb_gp_stride kernel boot parameter.  This can
+	  be especially helpful for smaller numbers of CPUs, where
+	  sqrt(nr_cpu_ids) can be a bit of a blunt instrument.
 
 	  Say Y here if you need reduced OS jitter, despite added overhead.
 	  Say N here if you are unsure.
@@ -315,21 +336,27 @@ config RCU_LAZY
 	depends on RCU_NOCB_CPU
 	default n
 	help
-	  To save power, batch RCU callbacks and flush after delay, memory
-	  pressure, or callback list growing too big.
+	  To save power, batch RCU callbacks and delay starting the
+	  corresponding grace  period for multiple seconds.  The grace
+	  period will be started after this delay, in case of memory
+	  pressure, or if the corresponding CPU's callback list grows
+	  too large.
 
-	  Requires rcu_nocbs=all to be set.
+	  These delays happen only on rcu_nocbs CPUs, that is, CPUs
+	  whose callbacks have been offloaded.
 
-	  Use rcutree.enable_rcu_lazy=0 to turn it off at boot time.
+	  Use the rcutree.enable_rcu_lazy=0 kernel-boot parameter to
+	  globally disable these delays.
 
 config RCU_LAZY_DEFAULT_OFF
 	bool "Turn RCU lazy invocation off by default"
 	depends on RCU_LAZY
 	default n
 	help
-	  Allows building the kernel with CONFIG_RCU_LAZY=y yet keep it default
-	  off. Boot time param rcutree.enable_rcu_lazy=1 can be used to switch
-	  it back on.
+	  Build the kernel with CONFIG_RCU_LAZY=y, but cause the kernel
+	  to boot with these energy-efficiency delays disabled.  Use the
+	  rcutree.enable_rcu_lazy=0 kernel-boot parameter to override
+	  the this option at boot time, thus re-enabling these delays.
 
 config RCU_DOUBLE_CHECK_CB_TIME
 	bool "RCU callback-batch backup time check"

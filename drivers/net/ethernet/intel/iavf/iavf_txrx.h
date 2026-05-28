@@ -4,6 +4,8 @@
 #ifndef _IAVF_TXRX_H_
 #define _IAVF_TXRX_H_
 
+#include <linux/net/intel/libie/pctype.h>
+
 /* Interrupt Throttling and Rate Limiting Goodies */
 #define IAVF_DEFAULT_IRQ_WORK      256
 
@@ -59,45 +61,26 @@ enum iavf_dyn_idx_t {
 #define IAVF_PE_ITR    IAVF_IDX_ITR2
 
 /* Supported RSS offloads */
-#define IAVF_DEFAULT_RSS_HENA ( \
-	BIT_ULL(IAVF_FILTER_PCTYPE_NONF_IPV4_UDP) | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_NONF_IPV4_SCTP) | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_NONF_IPV4_TCP) | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_NONF_IPV4_OTHER) | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_FRAG_IPV4) | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_NONF_IPV6_UDP) | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_NONF_IPV6_TCP) | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_NONF_IPV6_SCTP) | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_NONF_IPV6_OTHER) | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_FRAG_IPV6) | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_L2_PAYLOAD))
+#define IAVF_DEFAULT_RSS_HASHCFG ( \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_NONF_IPV4_UDP) | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_NONF_IPV4_SCTP) | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_NONF_IPV4_TCP) | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_NONF_IPV4_OTHER) | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_FRAG_IPV4) | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_NONF_IPV6_UDP) | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_NONF_IPV6_TCP) | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_NONF_IPV6_SCTP) | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_NONF_IPV6_OTHER) | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_FRAG_IPV6) | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_L2_PAYLOAD))
 
-#define IAVF_DEFAULT_RSS_HENA_EXPANDED (IAVF_DEFAULT_RSS_HENA | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_NONF_IPV4_TCP_SYN_NO_ACK) | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_NONF_UNICAST_IPV4_UDP) | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_NONF_MULTICAST_IPV4_UDP) | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_NONF_IPV6_TCP_SYN_NO_ACK) | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_NONF_UNICAST_IPV6_UDP) | \
-	BIT_ULL(IAVF_FILTER_PCTYPE_NONF_MULTICAST_IPV6_UDP))
-
-#define iavf_rx_desc iavf_32byte_rx_desc
-
-/**
- * iavf_test_staterr - tests bits in Rx descriptor status and error fields
- * @rx_desc: pointer to receive descriptor (in le64 format)
- * @stat_err_bits: value to mask
- *
- * This function does some fast chicanery in order to return the
- * value of the mask which is really only used for boolean tests.
- * The status_error_len doesn't need to be shifted because it begins
- * at offset zero.
- */
-static inline bool iavf_test_staterr(union iavf_rx_desc *rx_desc,
-				     const u64 stat_err_bits)
-{
-	return !!(rx_desc->wb.qword1.status_error_len &
-		  cpu_to_le64(stat_err_bits));
-}
+#define IAVF_DEFAULT_RSS_HASHCFG_EXPANDED (IAVF_DEFAULT_RSS_HASHCFG | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_NONF_IPV4_TCP_SYN_NO_ACK) | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_NONF_UNICAST_IPV4_UDP) | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_NONF_MULTICAST_IPV4_UDP) | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_NONF_IPV6_TCP_SYN_NO_ACK) | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_NONF_UNICAST_IPV6_UDP) | \
+	BIT_ULL(LIBIE_FILTER_PCTYPE_NONF_MULTICAST_IPV6_UDP))
 
 /* How many Rx Buffers do we bundle into one write to the hardware ? */
 #define IAVF_RX_INCREMENT(r, i) \
@@ -262,6 +245,8 @@ struct iavf_ring {
 	u16 next_to_use;
 	u16 next_to_clean;
 
+	u16 rxdid;		/* Rx descriptor format */
+
 	u16 flags;
 #define IAVF_TXR_FLAGS_WB_ON_ITR		BIT(0)
 #define IAVF_TXR_FLAGS_ARM_WB			BIT(1)
@@ -269,6 +254,7 @@ struct iavf_ring {
 #define IAVF_TXRX_FLAGS_VLAN_TAG_LOC_L2TAG1	BIT(3)
 #define IAVF_TXR_FLAGS_VLAN_TAG_LOC_L2TAG2	BIT(4)
 #define IAVF_RXR_FLAGS_VLAN_TAG_LOC_L2TAG2_2	BIT(5)
+#define IAVF_TXRX_FLAGS_HW_TSTAMP		BIT(6)
 
 	/* stats structs */
 	struct iavf_queue_stats	stats;
@@ -295,7 +281,11 @@ struct iavf_ring {
 					 * for this ring.
 					 */
 
+	struct iavf_ptp *ptp;
+
 	u32 rx_buf_len;
+	struct net_shaper q_shaper;
+	bool q_shaper_update;
 } ____cacheline_internodealigned_in_smp;
 
 #define IAVF_ITR_ADAPTIVE_MIN_INC	0x0002

@@ -11,6 +11,7 @@ ALL_TESTS="
 	ets_test_strict
 	ets_test_mixed
 	ets_test_dwrr
+	ets_test_plug
 	classifier_mode
 	ets_test_strict
 	ets_test_mixed
@@ -24,13 +25,8 @@ switch_create()
 	# Create a bottleneck so that the DWRR process can kick in.
 	tc qdisc add dev $swp2 root handle 1: tbf \
 	   rate 1Gbit burst 1Mbit latency 100ms
+	defer tc qdisc del dev $swp2 root
 	PARENT="parent 1:"
-}
-
-switch_destroy()
-{
-	ets_switch_destroy
-	tc qdisc del dev $swp2 root
 }
 
 # Callback from sch_ets_tests.sh

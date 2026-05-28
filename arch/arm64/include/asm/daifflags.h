@@ -128,11 +128,11 @@ static inline void local_daif_inherit(struct pt_regs *regs)
 {
 	unsigned long flags = regs->pstate & DAIF_MASK;
 
-	if (interrupts_enabled(regs))
+	if (!regs_irqs_disabled(regs))
 		trace_hardirqs_on();
 
 	if (system_uses_irq_prio_masking())
-		gic_write_pmr(regs->pmr_save);
+		gic_write_pmr(regs->pmr);
 
 	/*
 	 * We can't use local_daif_restore(regs->pstate) here as

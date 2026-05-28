@@ -12,7 +12,7 @@ static const char * const ucsi_cmd_strs[] = {
 	[UCSI_SET_NOTIFICATION_ENABLE]	= "SET_NOTIFICATION_ENABLE",
 	[UCSI_GET_CAPABILITY]		= "GET_CAPABILITY",
 	[UCSI_GET_CONNECTOR_CAPABILITY]	= "GET_CONNECTOR_CAPABILITY",
-	[UCSI_SET_UOM]			= "SET_UOM",
+	[UCSI_SET_CCOM]			= "SET_CCOM",
 	[UCSI_SET_UOR]			= "SET_UOR",
 	[UCSI_SET_PDM]			= "SET_PDM",
 	[UCSI_SET_PDR]			= "SET_PDR",
@@ -31,23 +31,6 @@ const char *ucsi_cmd_str(u64 raw_cmd)
 	u8 cmd = raw_cmd & GENMASK(7, 0);
 
 	return ucsi_cmd_strs[(cmd >= ARRAY_SIZE(ucsi_cmd_strs)) ? 0 : cmd];
-}
-
-const char *ucsi_cci_str(u32 cci)
-{
-	if (UCSI_CCI_CONNECTOR(cci)) {
-		if (cci & UCSI_CCI_ACK_COMPLETE)
-			return "Event pending (ACK completed)";
-		if (cci & UCSI_CCI_COMMAND_COMPLETE)
-			return "Event pending (command completed)";
-		return "Connector Change";
-	}
-	if (cci & UCSI_CCI_ACK_COMPLETE)
-		return "ACK completed";
-	if (cci & UCSI_CCI_COMMAND_COMPLETE)
-		return "Command completed";
-
-	return "";
 }
 
 static const char * const ucsi_recipient_strs[] = {

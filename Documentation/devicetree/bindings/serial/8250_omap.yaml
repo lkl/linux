@@ -64,19 +64,28 @@ properties:
   clock-names:
     const: fclk
 
-  rts-gpios: true
-  cts-gpios: true
-  dtr-gpios: true
-  dsr-gpios: true
-  rng-gpios: true
-  dcd-gpios: true
   rs485-rts-active-high: true
-  rts-gpio: true
   power-domains: true
   clock-frequency: true
   current-speed: true
   overrun-throttle-ms: true
   wakeup-source: true
+
+  pinctrl-0:
+    description: Default pinctrl state
+
+  pinctrl-1:
+    description: Wakeup pinctrl state
+
+  pinctrl-names:
+    description:
+      When present should contain at least "default" describing the default pin
+      states. The second state called "wakeup" describes the pins in their
+      wakeup configuration required to exit sleep states.
+    minItems: 1
+    items:
+      - const: default
+      - const: wakeup
 
 required:
   - compatible

@@ -10,9 +10,9 @@
 #include <linux/mutex.h>
 #include <asm/bug.h>
 #include <asm/cacheflush.h>
-#include <asm/patch.h>
+#include <asm/text-patching.h>
+#include <asm/insn-def.h>
 
-#define RISCV_INSN_NOP 0x00000013U
 #define RISCV_INSN_JAL 0x0000006fU
 
 bool arch_jump_label_transform_queue(struct jump_entry *entry,
@@ -33,12 +33,18 @@ bool arch_jump_label_transform_queue(struct jump_entry *entry,
 			(((u32)offset & GENMASK(10,  1)) << (21 -  1)) |
 			(((u32)offset & GENMASK(20, 20)) << (31 - 20));
 	} else {
-		insn = RISCV_INSN_NOP;
+		insn = RISCV_INSN_NOP4;
 	}
 
-	mutex_lock(&text_mutex);
-	patch_insn_write(addr, &insn, sizeof(insn));
-	mutex_unlock(&text_mutex);
+	if (early_boot_irqs_disabled) {
+		riscv_patch_in_stop_machine = 1;
+		patch_insn_write(addr, &insn, sizeof(insn));
+		riscv_patch_in_stop_machine = 0;
+	} else {
+		mutex_lock(&text_mutex);
+		patch_insn_write(addr, &insn, sizeof(insn));
+		mutex_unlock(&text_mutex);
+	}
 
 	return true;
 }

@@ -162,8 +162,8 @@ int aq_pci_func_alloc_irq(struct aq_nic_s *self, unsigned int i,
 		self->msix_entry_mask |= (1 << i);
 
 		if (pdev->msix_enabled && affinity_mask)
-			irq_set_affinity_hint(pci_irq_vector(pdev, i),
-					      affinity_mask);
+			irq_update_affinity_hint(pci_irq_vector(pdev, i),
+						 affinity_mask);
 	}
 
 	return err;
@@ -187,7 +187,7 @@ void aq_pci_func_free_irqs(struct aq_nic_s *self)
 			continue;
 
 		if (pdev->msix_enabled)
-			irq_set_affinity_hint(pci_irq_vector(pdev, i), NULL);
+			irq_update_affinity_hint(pci_irq_vector(pdev, i), NULL);
 		free_irq(pci_irq_vector(pdev, i), irq_data);
 		self->msix_entry_mask &= ~(1U << i);
 	}
@@ -463,7 +463,7 @@ static const struct dev_pm_ops aq_pm_ops = {
 };
 #endif
 
-static struct pci_driver aq_pci_ops = {
+static struct pci_driver aq_pci_driver = {
 	.name = AQ_CFG_DRV_NAME,
 	.id_table = aq_pci_tbl,
 	.probe = aq_pci_probe,
@@ -476,11 +476,11 @@ static struct pci_driver aq_pci_ops = {
 
 int aq_pci_func_register_driver(void)
 {
-	return pci_register_driver(&aq_pci_ops);
+	return pci_register_driver(&aq_pci_driver);
 }
 
 void aq_pci_func_unregister_driver(void)
 {
-	pci_unregister_driver(&aq_pci_ops);
+	pci_unregister_driver(&aq_pci_driver);
 }
 

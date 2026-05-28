@@ -614,7 +614,7 @@ static int act8945a_charger_probe(struct platform_device *pdev)
 	if (ret)
 		return -EINVAL;
 
-	psy_cfg.of_node	= pdev->dev.of_node;
+	psy_cfg.fwnode	= dev_fwnode(&pdev->dev);
 	psy_cfg.drv_data = charger;
 
 	charger->psy = devm_power_supply_register(&pdev->dev,
@@ -651,7 +651,7 @@ static struct platform_driver act8945a_charger_driver = {
 		.name = "act8945a-charger",
 	},
 	.probe	= act8945a_charger_probe,
-	.remove_new = act8945a_charger_remove,
+	.remove	= act8945a_charger_remove,
 };
 module_platform_driver(act8945a_charger_driver);
 

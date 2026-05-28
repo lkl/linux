@@ -266,7 +266,7 @@ static inline int dw100_dump_regs(struct seq_file *m)
 
 static inline struct dw100_ctx *dw100_file2ctx(struct file *file)
 {
-	return container_of(file->private_data, struct dw100_ctx, fh);
+	return container_of(file_to_v4l2_fh(file), struct dw100_ctx, fh);
 }
 
 static struct dw100_q_data *dw100_get_q_data(struct dw100_ctx *ctx,
@@ -558,8 +558,6 @@ static const struct vb2_ops dw100_qops = {
 	.buf_queue	 = dw100_buf_queue,
 	.start_streaming = dw100_start_streaming,
 	.stop_streaming  = dw100_stop_streaming,
-	.wait_prepare	 = vb2_ops_wait_prepare,
-	.wait_finish	 = vb2_ops_wait_finish,
 };
 
 static int dw100_m2m_queue_init(void *priv, struct vb2_queue *src_vq,
@@ -609,7 +607,6 @@ static int dw100_open(struct file *file)
 
 	mutex_init(&ctx->vq_mutex);
 	v4l2_fh_init(&ctx->fh, video_devdata(file));
-	file->private_data = &ctx->fh;
 	ctx->dw_dev = dw_dev;
 
 	ctx->q_data[DW100_QUEUE_SRC].fmt = &formats[0];
@@ -653,7 +650,7 @@ static int dw100_open(struct file *file)
 		goto err;
 	}
 
-	v4l2_fh_add(&ctx->fh);
+	v4l2_fh_add(&ctx->fh, file);
 
 	return 0;
 
@@ -670,7 +667,7 @@ static int dw100_release(struct file *file)
 {
 	struct dw100_ctx *ctx = dw100_file2ctx(file);
 
-	v4l2_fh_del(&ctx->fh);
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
 	v4l2_ctrl_handler_free(&ctx->hdl);
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
@@ -963,9 +960,9 @@ static int dw100_s_selection(struct file *file, void *fh,
 	src_q_data = dw100_get_q_data(ctx, V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE);
 
 	dev_dbg(&ctx->dw_dev->pdev->dev,
-		">>> Buffer Type: %u Target: %u Rect: %ux%u@%d.%d\n",
+		">>> Buffer Type: %u Target: %u Rect: (%d,%d)/%ux%u\n",
 		sel->type, sel->target,
-		sel->r.width, sel->r.height, sel->r.left, sel->r.top);
+		sel->r.left, sel->r.top, sel->r.width, sel->r.height);
 
 	switch (sel->target) {
 	case V4L2_SEL_TGT_CROP:
@@ -1027,9 +1024,9 @@ static int dw100_s_selection(struct file *file, void *fh,
 	}
 
 	dev_dbg(&ctx->dw_dev->pdev->dev,
-		"<<< Buffer Type: %u Target: %u Rect: %ux%u@%d.%d\n",
+		"<<< Buffer Type: %u Target: %u Rect: (%d,%d)/%ux%u\n",
 		sel->type, sel->target,
-		sel->r.width, sel->r.height, sel->r.left, sel->r.top);
+		sel->r.left, sel->r.top, sel->r.width, sel->r.height);
 
 	return 0;
 }
@@ -1311,7 +1308,7 @@ static void dw100_hw_set_destination(struct dw100_device *dw_dev,
 	}
 
 	dev_dbg(&dw_dev->pdev->dev,
-		"Set HW source registers for %ux%u - stride %u, pixfmt: %p4cc, dma:%pad\n",
+		"Set HW destination registers for %ux%u - stride %u, pixfmt: %p4cc, dma:%pad\n",
 		width, height, stride, &fourcc, &addr_y);
 
 	/* Pixel Format */
@@ -1688,7 +1685,7 @@ MODULE_DEVICE_TABLE(of, dw100_dt_ids);
 
 static struct platform_driver dw100_driver = {
 	.probe		= dw100_probe,
-	.remove_new	= dw100_remove,
+	.remove		= dw100_remove,
 	.driver		= {
 		.name	= DRV_NAME,
 		.pm = &dw100_pm,

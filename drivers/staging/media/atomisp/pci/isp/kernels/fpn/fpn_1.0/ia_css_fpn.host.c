@@ -2,16 +2,9 @@
 /*
  * Support for Intel Camera Imaging ISP subsystem.
  * Copyright (c) 2015, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
+
+#include <linux/math.h>
 
 #include <assert_support.h>
 #include <ia_css_frame_public.h>
@@ -80,9 +73,9 @@ int ia_css_fpn_configure(const struct ia_css_binary     *binary,
 		&my_info
 	};
 
-	my_info.res.width       = CEIL_DIV(info->res.width, 2);		/* Packed by 2x */
+	my_info.res.width       = DIV_ROUND_UP(info->res.width, 2);	/* Packed by 2x */
 	my_info.res.height      = info->res.height;
-	my_info.padded_width    = CEIL_DIV(info->padded_width, 2);	/* Packed by 2x */
+	my_info.padded_width    = DIV_ROUND_UP(info->padded_width, 2);	/* Packed by 2x */
 	my_info.format          = info->format;
 	my_info.raw_bit_depth   = FPN_BITS_PER_PIXEL;
 	my_info.raw_bayer_order = info->raw_bayer_order;

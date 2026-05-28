@@ -96,6 +96,13 @@ warnings:
 	the ``rcu_.*timer wakeup didn't happen for`` console-log message,
 	which will include additional debugging information.
 
+-	A timer issue causes time to appear to jump forward, so that RCU
+	believes that the RCU CPU stall-warning timeout has been exceeded
+	when in fact much less time has passed.  This could be due to
+	timer hardware bugs, timer driver bugs, or even corruption of
+	the "jiffies" global variable.	These sorts of timer hardware
+	and driver bugs are not uncommon when testing new hardware.
+
 -	A low-level kernel issue that either fails to invoke one of the
 	variants of rcu_eqs_enter(true), rcu_eqs_exit(true), ct_idle_enter(),
 	ct_idle_exit(), ct_irq_enter(), or ct_irq_exit() on the one
@@ -112,7 +119,7 @@ warnings:
 	uncommon in large datacenter.  In one memorable case some decades
 	back, a CPU failed in a running system, becoming unresponsive,
 	but not causing an immediate crash.  This resulted in a series
-	of RCU CPU stall warnings, eventually leading the realization
+	of RCU CPU stall warnings, eventually leading to the realization
 	that the CPU had failed.
 
 The RCU, RCU-sched, RCU-tasks, and RCU-tasks-trace implementations have
@@ -249,7 +256,7 @@ ticks this GP)" indicates that this CPU has not taken any scheduling-clock
 interrupts during the current stalled grace period.
 
 The "idle=" portion of the message prints the dyntick-idle state.
-The hex number before the first "/" is the low-order 12 bits of the
+The hex number before the first "/" is the low-order 16 bits of the
 dynticks counter, which will have an even-numbered value if the CPU
 is in dyntick-idle mode and an odd-numbered value otherwise.  The hex
 number between the two "/"s is the value of the nesting, which will be

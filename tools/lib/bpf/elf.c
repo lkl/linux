@@ -9,7 +9,6 @@
 #include <linux/kernel.h>
 
 #include "libbpf_internal.h"
-#include "str_error.h"
 
 /* A SHT_GNU_versym section holds 16-bit words. This bit is set if
  * the symbol is hidden and can only be seen when referenced using an
@@ -24,7 +23,6 @@
 
 int elf_open(const char *binary_path, struct elf_fd *elf_fd)
 {
-	char errmsg[STRERR_BUFSIZE];
 	int fd, ret;
 	Elf *elf;
 
@@ -38,8 +36,7 @@ int elf_open(const char *binary_path, struct elf_fd *elf_fd)
 	fd = open(binary_path, O_RDONLY | O_CLOEXEC);
 	if (fd < 0) {
 		ret = -errno;
-		pr_warn("elf: failed to open %s: %s\n", binary_path,
-			libbpf_strerror_r(ret, errmsg, sizeof(errmsg)));
+		pr_warn("elf: failed to open %s: %s\n", binary_path, errstr(ret));
 		return ret;
 	}
 	elf = elf_begin(fd, ELF_C_READ_MMAP, NULL);

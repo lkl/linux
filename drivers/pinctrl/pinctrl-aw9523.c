@@ -80,7 +80,7 @@ struct aw9523 {
 	struct regmap *regmap;
 	struct mutex i2c_lock;
 	struct gpio_desc *reset_gpio;
-	struct regulator *vio_vreg;
+	int vio_vreg;
 	struct pinctrl_dev *pctl;
 	struct gpio_chip gpio;
 	struct aw9523_irq *irq;
@@ -215,7 +215,7 @@ static int aw9523_pcfg_param_to_reg(enum pin_config_param pcp, int pin, u8 *r)
 	case PIN_CONFIG_OUTPUT_ENABLE:
 		reg = AW9523_REG_CONF_STATE(pin);
 		break;
-	case PIN_CONFIG_OUTPUT:
+	case PIN_CONFIG_LEVEL:
 		reg = AW9523_REG_OUT_STATE(pin);
 		break;
 	default:
@@ -249,7 +249,7 @@ static int aw9523_pconf_get(struct pinctrl_dev *pctldev, unsigned int pin,
 	switch (param) {
 	case PIN_CONFIG_BIAS_PULL_UP:
 	case PIN_CONFIG_INPUT_ENABLE:
-	case PIN_CONFIG_OUTPUT:
+	case PIN_CONFIG_LEVEL:
 		val &= BIT(regbit);
 		break;
 	case PIN_CONFIG_BIAS_PULL_DOWN:
@@ -301,7 +301,7 @@ static int aw9523_pconf_set(struct pinctrl_dev *pctldev, unsigned int pin,
 			goto end;
 
 		switch (param) {
-		case PIN_CONFIG_OUTPUT:
+		case PIN_CONFIG_LEVEL:
 			/* First, enable pin output */
 			rc = regmap_update_bits(awi->regmap,
 						AW9523_REG_CONF_STATE(pin),
@@ -550,10 +550,10 @@ static int aw9523_gpio_get(struct gpio_chip *chip, unsigned int offset)
 
 /**
  * _aw9523_gpio_get_multiple - Get I/O state for an entire port
- * @regmap: Regmap structure
- * @pin: gpiolib pin number
+ * @awi: Controller data
  * @regbit: hw pin index, used to retrieve port number
  * @state: returned port I/O state
+ * @mask: lines to read values for
  *
  * Return: Zero for success or negative number for error
  */
@@ -625,14 +625,14 @@ out:
 	return ret;
 }
 
-static void aw9523_gpio_set_multiple(struct gpio_chip *chip,
+static int aw9523_gpio_set_multiple(struct gpio_chip *chip,
 				    unsigned long *mask,
 				    unsigned long *bits)
 {
 	struct aw9523 *awi = gpiochip_get_data(chip);
 	u8 mask_lo, mask_hi, bits_lo, bits_hi;
 	unsigned int reg;
-	int ret;
+	int ret = 0;
 
 	mask_lo = *mask;
 	mask_hi = *mask >> 8;
@@ -644,27 +644,33 @@ static void aw9523_gpio_set_multiple(struct gpio_chip *chip,
 		reg = AW9523_REG_OUT_STATE(AW9523_PINS_PER_PORT);
 		ret = regmap_write_bits(awi->regmap, reg, mask_hi, bits_hi);
 		if (ret)
-			dev_warn(awi->dev, "Cannot write port1 out level\n");
+			goto out;
 	}
 	if (mask_lo) {
 		reg = AW9523_REG_OUT_STATE(0);
 		ret = regmap_write_bits(awi->regmap, reg, mask_lo, bits_lo);
 		if (ret)
-			dev_warn(awi->dev, "Cannot write port0 out level\n");
+			goto out;
 	}
+
+out:
 	mutex_unlock(&awi->i2c_lock);
+	return ret;
 }
 
-static void aw9523_gpio_set(struct gpio_chip *chip,
-			    unsigned int offset, int value)
+static int aw9523_gpio_set(struct gpio_chip *chip, unsigned int offset,
+			   int value)
 {
 	struct aw9523 *awi = gpiochip_get_data(chip);
 	u8 regbit = offset % AW9523_PINS_PER_PORT;
+	int ret;
 
 	mutex_lock(&awi->i2c_lock);
-	regmap_update_bits(awi->regmap, AW9523_REG_OUT_STATE(offset),
-			   BIT(regbit), value ? BIT(regbit) : 0);
+	ret = regmap_update_bits(awi->regmap, AW9523_REG_OUT_STATE(offset),
+				 BIT(regbit), value ? BIT(regbit) : 0);
 	mutex_unlock(&awi->i2c_lock);
+
+	return ret;
 }
 
 
@@ -784,7 +790,7 @@ static int aw9523_init_gpiochip(struct aw9523 *awi, unsigned int npins)
 	gc->set_config = gpiochip_generic_config;
 	gc->parent = dev;
 	gc->owner = THIS_MODULE;
-	gc->can_sleep = false;
+	gc->can_sleep = true;
 
 	return 0;
 }
@@ -972,29 +978,23 @@ static int aw9523_probe(struct i2c_client *client)
 	if (IS_ERR(awi->regmap))
 		return PTR_ERR(awi->regmap);
 
-	awi->vio_vreg = devm_regulator_get_optional(dev, "vio");
-	if (IS_ERR(awi->vio_vreg)) {
-		if (PTR_ERR(awi->vio_vreg) == -EPROBE_DEFER)
-			return -EPROBE_DEFER;
-		awi->vio_vreg = NULL;
-	} else {
-		ret = regulator_enable(awi->vio_vreg);
-		if (ret)
-			return ret;
-	}
+	awi->vio_vreg = devm_regulator_get_enable_optional(dev, "vio");
+	if (awi->vio_vreg && awi->vio_vreg != -ENODEV)
+		return awi->vio_vreg;
 
-	mutex_init(&awi->i2c_lock);
+	ret = devm_mutex_init(dev, &awi->i2c_lock);
+	if (ret)
+		return ret;
+
 	lockdep_set_subclass(&awi->i2c_lock, i2c_adapter_depth(client->adapter));
 
 	pdesc = devm_kzalloc(dev, sizeof(*pdesc), GFP_KERNEL);
-	if (!pdesc) {
-		ret = -ENOMEM;
-		goto err_disable_vregs;
-	}
+	if (!pdesc)
+		return -ENOMEM;
 
 	ret = aw9523_hw_init(awi);
 	if (ret)
-		goto err_disable_vregs;
+		return ret;
 
 	pdesc->name = dev_name(dev);
 	pdesc->owner = THIS_MODULE;
@@ -1006,31 +1006,20 @@ static int aw9523_probe(struct i2c_client *client)
 
 	ret = aw9523_init_gpiochip(awi, pdesc->npins);
 	if (ret)
-		goto err_disable_vregs;
+		return ret;
 
 	if (client->irq) {
 		ret = aw9523_init_irq(awi, client->irq);
 		if (ret)
-			goto err_disable_vregs;
+			return ret;
 	}
 
 	awi->pctl = devm_pinctrl_register(dev, pdesc, awi);
-	if (IS_ERR(awi->pctl)) {
-		ret = dev_err_probe(dev, PTR_ERR(awi->pctl), "Cannot register pinctrl");
-		goto err_disable_vregs;
-	}
+	if (IS_ERR(awi->pctl))
+		return dev_err_probe(dev, PTR_ERR(awi->pctl),
+				     "Cannot register pinctrl");
 
-	ret = devm_gpiochip_add_data(dev, &awi->gpio, awi);
-	if (ret)
-		goto err_disable_vregs;
-
-	return ret;
-
-err_disable_vregs:
-	if (awi->vio_vreg)
-		regulator_disable(awi->vio_vreg);
-	mutex_destroy(&awi->i2c_lock);
-	return ret;
+	return devm_gpiochip_add_data(dev, &awi->gpio, awi);
 }
 
 static void aw9523_remove(struct i2c_client *client)
@@ -1043,19 +1032,15 @@ static void aw9523_remove(struct i2c_client *client)
 	 * set the pins to hardware defaults before removing the driver
 	 * to leave it in a clean, safe and predictable state.
 	 */
-	if (awi->vio_vreg) {
-		regulator_disable(awi->vio_vreg);
-	} else {
+	if (awi->vio_vreg == -ENODEV) {
 		mutex_lock(&awi->i2c_lock);
 		aw9523_hw_init(awi);
 		mutex_unlock(&awi->i2c_lock);
 	}
-
-	mutex_destroy(&awi->i2c_lock);
 }
 
 static const struct i2c_device_id aw9523_i2c_id_table[] = {
-	{ "aw9523_i2c", 0 },
+	{ "aw9523_i2c" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, aw9523_i2c_id_table);

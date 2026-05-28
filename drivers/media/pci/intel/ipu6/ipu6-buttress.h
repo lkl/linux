@@ -26,7 +26,6 @@ struct ipu6_buttress_ctrl {
 	u32 freq_ctl, pwr_sts_shift, pwr_sts_mask, pwr_sts_on, pwr_sts_off;
 	unsigned int ratio;
 	unsigned int qos_floor;
-	bool started;
 };
 
 struct ipu6_buttress_ipc {
@@ -46,16 +45,10 @@ struct ipu6_buttress_ipc {
 struct ipu6_buttress {
 	struct mutex power_mutex, auth_mutex, cons_mutex, ipc_mutex;
 	struct ipu6_buttress_ipc cse;
-	struct ipu6_buttress_ipc ish;
 	struct list_head constraints;
 	u32 wdt_cached_value;
 	bool force_suspend;
 	u32 ref_clk;
-};
-
-enum ipu6_buttress_ipc_domain {
-	IPU6_BUTTRESS_IPC_CSE,
-	IPU6_BUTTRESS_IPC_ISH,
 };
 
 struct ipu6_ipc_buttress_bulk_msg {
@@ -72,8 +65,8 @@ int ipu6_buttress_map_fw_image(struct ipu6_bus_device *sys,
 			       struct sg_table *sgt);
 void ipu6_buttress_unmap_fw_image(struct ipu6_bus_device *sys,
 				  struct sg_table *sgt);
-int ipu6_buttress_power(struct device *dev, struct ipu6_buttress_ctrl *ctrl,
-			bool on);
+int ipu6_buttress_power(struct device *dev,
+			const struct ipu6_buttress_ctrl *ctrl, bool on);
 bool ipu6_buttress_get_secure_mode(struct ipu6_device *isp);
 int ipu6_buttress_authenticate(struct ipu6_device *isp);
 int ipu6_buttress_reset_authentication(struct ipu6_device *isp);

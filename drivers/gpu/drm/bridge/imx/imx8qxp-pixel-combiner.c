@@ -63,12 +63,11 @@ struct imx8qxp_pc_channel {
 	struct drm_bridge *next_bridge;
 	struct imx8qxp_pc *pc;
 	unsigned int stream_id;
-	bool is_available;
 };
 
 struct imx8qxp_pc {
 	struct device *dev;
-	struct imx8qxp_pc_channel ch[2];
+	struct imx8qxp_pc_channel *ch[2];
 	struct clk *clk_apb;
 	void __iomem *base;
 };
@@ -108,6 +107,7 @@ imx8qxp_pc_bridge_mode_valid(struct drm_bridge *bridge,
 }
 
 static int imx8qxp_pc_bridge_attach(struct drm_bridge *bridge,
+				    struct drm_encoder *encoder,
 				    enum drm_bridge_attach_flags flags)
 {
 	struct imx8qxp_pc_channel *ch = bridge->driver_private;
@@ -119,7 +119,7 @@ static int imx8qxp_pc_bridge_attach(struct drm_bridge *bridge,
 		return -EINVAL;
 	}
 
-	return drm_bridge_attach(bridge->encoder,
+	return drm_bridge_attach(encoder,
 				 ch->next_bridge, bridge,
 				 DRM_BRIDGE_ATTACH_NO_CONNECTOR);
 }
@@ -176,9 +176,8 @@ imx8qxp_pc_bridge_mode_set(struct drm_bridge *bridge,
 	clk_disable_unprepare(pc->clk_apb);
 }
 
-static void
-imx8qxp_pc_bridge_atomic_disable(struct drm_bridge *bridge,
-				 struct drm_bridge_state *old_bridge_state)
+static void imx8qxp_pc_bridge_atomic_disable(struct drm_bridge *bridge,
+					     struct drm_atomic_state *state)
 {
 	struct imx8qxp_pc_channel *ch = bridge->driver_private;
 	struct imx8qxp_pc *pc = ch->pc;
@@ -307,7 +306,14 @@ static int imx8qxp_pc_bridge_probe(struct platform_device *pdev)
 			goto free_child;
 		}
 
-		ch = &pc->ch[i];
+		ch = devm_drm_bridge_alloc(dev, struct imx8qxp_pc_channel, bridge,
+					   &imx8qxp_pc_bridge_funcs);
+		if (IS_ERR(ch)) {
+			ret = PTR_ERR(ch);
+			goto free_child;
+		}
+
+		pc->ch[i] = ch;
 		ch->pc = pc;
 		ch->stream_id = i;
 
@@ -333,9 +339,7 @@ static int imx8qxp_pc_bridge_probe(struct platform_device *pdev)
 		of_node_put(remote);
 
 		ch->bridge.driver_private = ch;
-		ch->bridge.funcs = &imx8qxp_pc_bridge_funcs;
 		ch->bridge.of_node = child;
-		ch->is_available = true;
 
 		drm_bridge_add(&ch->bridge);
 	}
@@ -345,8 +349,8 @@ static int imx8qxp_pc_bridge_probe(struct platform_device *pdev)
 free_child:
 	of_node_put(child);
 
-	if (i == 1 && pc->ch[0].next_bridge)
-		drm_bridge_remove(&pc->ch[0].bridge);
+	if (i == 1 && pc->ch[0]->next_bridge)
+		drm_bridge_remove(&pc->ch[0]->bridge);
 
 	pm_runtime_disable(dev);
 	return ret;
@@ -359,19 +363,16 @@ static void imx8qxp_pc_bridge_remove(struct platform_device *pdev)
 	int i;
 
 	for (i = 0; i < 2; i++) {
-		ch = &pc->ch[i];
+		ch = pc->ch[i];
 
-		if (!ch->is_available)
-			continue;
-
-		drm_bridge_remove(&ch->bridge);
-		ch->is_available = false;
+		if (ch)
+			drm_bridge_remove(&ch->bridge);
 	}
 
 	pm_runtime_disable(&pdev->dev);
 }
 
-static int __maybe_unused imx8qxp_pc_runtime_suspend(struct device *dev)
+static int imx8qxp_pc_runtime_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct imx8qxp_pc *pc = platform_get_drvdata(pdev);
@@ -393,7 +394,7 @@ static int __maybe_unused imx8qxp_pc_runtime_suspend(struct device *dev)
 	return ret;
 }
 
-static int __maybe_unused imx8qxp_pc_runtime_resume(struct device *dev)
+static int imx8qxp_pc_runtime_resume(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct imx8qxp_pc *pc = platform_get_drvdata(pdev);
@@ -415,8 +416,7 @@ static int __maybe_unused imx8qxp_pc_runtime_resume(struct device *dev)
 }
 
 static const struct dev_pm_ops imx8qxp_pc_pm_ops = {
-	SET_RUNTIME_PM_OPS(imx8qxp_pc_runtime_suspend,
-			   imx8qxp_pc_runtime_resume, NULL)
+	RUNTIME_PM_OPS(imx8qxp_pc_runtime_suspend, imx8qxp_pc_runtime_resume, NULL)
 };
 
 static const struct of_device_id imx8qxp_pc_dt_ids[] = {
@@ -428,9 +428,9 @@ MODULE_DEVICE_TABLE(of, imx8qxp_pc_dt_ids);
 
 static struct platform_driver imx8qxp_pc_bridge_driver = {
 	.probe	= imx8qxp_pc_bridge_probe,
-	.remove_new = imx8qxp_pc_bridge_remove,
+	.remove = imx8qxp_pc_bridge_remove,
 	.driver	= {
-		.pm = &imx8qxp_pc_pm_ops,
+		.pm = pm_ptr(&imx8qxp_pc_pm_ops),
 		.name = DRIVER_NAME,
 		.of_match_table = imx8qxp_pc_dt_ids,
 	},

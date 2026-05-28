@@ -4,7 +4,7 @@
  *
  *  Derived from ivtv-gpio.c
  *
- *  Copyright (C) 2007  Hans Verkuil <hverkuil@xs4all.nl>
+ *  Copyright (C) 2007  Hans Verkuil <hverkuil@kernel.org>
  *  Copyright (C) 2008  Andy Walls <awalls@md.metrocast.net>
  */
 
@@ -304,21 +304,6 @@ int cx18_gpio_register(struct cx18 *cx, u32 hw)
 	sd->grp_id = hw;
 	return v4l2_device_register_subdev(&cx->v4l2_dev, sd);
 }
-
-void cx18_reset_ir_gpio(void *data)
-{
-	struct cx18 *cx = to_cx18(data);
-
-	if (cx->card->gpio_i2c_slave_reset.ir_reset_mask == 0)
-		return;
-
-	CX18_DEBUG_INFO("Resetting IR microcontroller\n");
-
-	v4l2_subdev_call(&cx->sd_resetctrl,
-			 core, reset, CX18_GPIO_RESET_Z8F0811);
-}
-EXPORT_SYMBOL(cx18_reset_ir_gpio);
-/* This symbol is exported for use by lirc_pvr150 for the IR-blaster */
 
 /* Xceive tuner reset function */
 int cx18_reset_tuner_gpio(void *dev, int component, int cmd, int value)

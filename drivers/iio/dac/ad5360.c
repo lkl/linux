@@ -262,7 +262,7 @@ static int ad5360_update_ctrl(struct iio_dev *indio_dev, unsigned int set,
 	unsigned int clr)
 {
 	struct ad5360_state *st = iio_priv(indio_dev);
-	unsigned int ret;
+	int ret;
 
 	mutex_lock(&st->lock);
 
@@ -542,7 +542,7 @@ static const struct spi_device_id ad5360_ids[] = {
 	{ "ad5371", ID_AD5371 },
 	{ "ad5372", ID_AD5372 },
 	{ "ad5373", ID_AD5373 },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(spi, ad5360_ids);
 

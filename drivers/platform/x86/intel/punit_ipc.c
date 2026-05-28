@@ -131,39 +131,6 @@ static int intel_punit_ipc_check_status(IPC_DEV *ipcdev, IPC_TYPE type)
 }
 
 /**
- * intel_punit_ipc_simple_command() - Simple IPC command
- * @cmd:	IPC command code.
- * @para1:	First 8bit parameter, set 0 if not used.
- * @para2:	Second 8bit parameter, set 0 if not used.
- *
- * Send a IPC command to P-Unit when there is no data transaction
- *
- * Return:	IPC error code or 0 on success.
- */
-int intel_punit_ipc_simple_command(int cmd, int para1, int para2)
-{
-	IPC_DEV *ipcdev = punit_ipcdev;
-	IPC_TYPE type;
-	u32 val;
-	int ret;
-
-	mutex_lock(&ipcdev->lock);
-
-	reinit_completion(&ipcdev->cmd_complete);
-	type = (cmd & IPC_PUNIT_CMD_TYPE_MASK) >> IPC_TYPE_OFFSET;
-
-	val = cmd & ~IPC_PUNIT_CMD_TYPE_MASK;
-	val |= CMD_RUN | para2 << CMD_PARA2_SHIFT | para1 << CMD_PARA1_SHIFT;
-	ipc_write_cmd(ipcdev, type, val);
-	ret = intel_punit_ipc_check_status(ipcdev, type);
-
-	mutex_unlock(&ipcdev->lock);
-
-	return ret;
-}
-EXPORT_SYMBOL(intel_punit_ipc_simple_command);
-
-/**
  * intel_punit_ipc_command() - IPC command with data and pointers
  * @cmd:	IPC command code.
  * @para1:	First 8bit parameter, set 0 if not used.
@@ -283,7 +250,7 @@ static int intel_punit_ipc_probe(struct platform_device *pdev)
 	} else {
 		ret = devm_request_irq(&pdev->dev, irq, intel_punit_ioc,
 				       IRQF_NO_SUSPEND, "intel_punit_ipc",
-				       &punit_ipcdev);
+				       punit_ipcdev);
 		if (ret) {
 			dev_err(&pdev->dev, "Failed to request irq: %d\n", irq);
 			return ret;

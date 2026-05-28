@@ -34,13 +34,13 @@
 	gpio-keys {
 		compatible = "gpio-keys";
 
-		user-pb {
+		key-user-pb {
 			label = "user_pb";
 			gpios = <&gsc_gpio 0 GPIO_ACTIVE_LOW>;
 			linux,code = <BTN_0>;
 		};
 
-		user-pb1x {
+		key-user-pb1x {
 			label = "user_pb1x";
 			linux,code = <BTN_1>;
 			interrupt-parent = <&gsc>;
@@ -54,21 +54,21 @@
 			interrupts = <1>;
 		};
 
-		eeprom-wp {
+		key-eeprom-wp {
 			label = "eeprom_wp";
 			linux,code = <BTN_3>;
 			interrupt-parent = <&gsc>;
 			interrupts = <2>;
 		};
 
-		tamper {
+		key-tamper {
 			label = "tamper";
 			linux,code = <BTN_4>;
 			interrupt-parent = <&gsc>;
 			interrupts = <5>;
 		};
 
-		switch-hold {
+		key-switch-hold {
 			label = "switch_hold";
 			linux,code = <BTN_5>;
 			interrupt-parent = <&gsc>;
@@ -376,7 +376,7 @@
 		pagesize = <16>;
 	};
 
-	rtc: ds1672@68 {
+	rtc: rtc@68 {
 		compatible = "dallas,ds1672";
 		reg = <0x68>;
 	};
@@ -770,14 +770,14 @@
 		>;
 	};
 
-	pinctrl_pwm4_backlight: pwm4grpbacklight {
+	pinctrl_pwm4_backlight: pwm4backlightgrp {
 		fsl,pins = <
 			/* LVDS_PWM J6.5 */
 			MX6QDL_PAD_SD1_CMD__PWM4_OUT		0x1b0b1
 		>;
 	};
 
-	pinctrl_pwm4_dio: pwm4grpdio {
+	pinctrl_pwm4_dio: pwm4diogrp {
 		fsl,pins = <
 			/* DIO3 J16.4 */
 			MX6QDL_PAD_SD4_DAT2__PWM4_OUT		0x1b0b1

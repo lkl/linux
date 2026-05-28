@@ -25,7 +25,7 @@ struct ivpu_pm_info {
 void ivpu_pm_init(struct ivpu_device *vdev);
 void ivpu_pm_enable(struct ivpu_device *vdev);
 void ivpu_pm_disable(struct ivpu_device *vdev);
-void ivpu_pm_cancel_recovery(struct ivpu_device *vdev);
+void ivpu_pm_disable_recovery(struct ivpu_device *vdev);
 
 int ivpu_pm_suspend_cb(struct device *dev);
 int ivpu_pm_resume_cb(struct device *dev);
@@ -45,6 +45,6 @@ void ivpu_stop_job_timeout_detection(struct ivpu_device *vdev);
 int ivpu_pm_dct_init(struct ivpu_device *vdev);
 int ivpu_pm_dct_enable(struct ivpu_device *vdev, u8 active_percent);
 int ivpu_pm_dct_disable(struct ivpu_device *vdev);
-void ivpu_pm_dct_irq_thread_handler(struct ivpu_device *vdev);
+void ivpu_pm_irq_dct_work_fn(struct work_struct *work);
 
 #endif /* __IVPU_PM_H__ */

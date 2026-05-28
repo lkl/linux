@@ -203,6 +203,7 @@ amdgpu_devcoredump_read(char *buffer, loff_t offset, size_t count,
 	struct amdgpu_coredump_info *coredump = data;
 	struct drm_print_iterator iter;
 	struct amdgpu_vm_fault_info *fault_info;
+	struct amdgpu_ip_block *ip_block;
 	int ver;
 
 	iter.data = buffer;
@@ -219,10 +220,10 @@ amdgpu_devcoredump_read(char *buffer, loff_t offset, size_t count,
 	drm_printf(&p, "time: %lld.%09ld\n", coredump->reset_time.tv_sec,
 		   coredump->reset_time.tv_nsec);
 
-	if (coredump->reset_task_info.pid)
+	if (coredump->reset_task_info.task.pid)
 		drm_printf(&p, "process_name: %s PID: %d\n",
 			   coredump->reset_task_info.process_name,
-			   coredump->reset_task_info.pid);
+			   coredump->reset_task_info.task.pid);
 
 	/* SOC Information */
 	drm_printf(&p, "\nSOC Information\n");
@@ -282,13 +283,10 @@ amdgpu_devcoredump_read(char *buffer, loff_t offset, size_t count,
 	/* dump the ip state for each ip */
 	drm_printf(&p, "IP Dump\n");
 	for (int i = 0; i < coredump->adev->num_ip_blocks; i++) {
-		if (coredump->adev->ip_blocks[i].version->funcs->print_ip_state) {
-			drm_printf(&p, "IP: %s\n",
-				   coredump->adev->ip_blocks[i]
-					   .version->funcs->name);
-			coredump->adev->ip_blocks[i]
-				.version->funcs->print_ip_state(
-					(void *)coredump->adev, &p);
+		ip_block = &coredump->adev->ip_blocks[i];
+		if (ip_block->version->funcs->print_ip_state) {
+			drm_printf(&p, "IP: %s\n", ip_block->version->funcs->name);
+			ip_block->version->funcs->print_ip_state(ip_block, &p);
 			drm_printf(&p, "\n");
 		}
 	}
@@ -345,11 +343,10 @@ void amdgpu_coredump(struct amdgpu_device *adev, bool skip_vram_check,
 	coredump->skip_vram_check = skip_vram_check;
 	coredump->reset_vram_lost = vram_lost;
 
-	if (job && job->vm) {
-		struct amdgpu_vm *vm = job->vm;
+	if (job && job->pasid) {
 		struct amdgpu_task_info *ti;
 
-		ti = amdgpu_vm_get_task_info_vm(vm);
+		ti = amdgpu_vm_get_task_info_pasid(adev, job->pasid);
 		if (ti) {
 			coredump->reset_task_info = *ti;
 			amdgpu_vm_put_task_info(ti);
@@ -367,5 +364,9 @@ void amdgpu_coredump(struct amdgpu_device *adev, bool skip_vram_check,
 
 	dev_coredumpm(dev->dev, THIS_MODULE, coredump, 0, GFP_NOWAIT,
 		      amdgpu_devcoredump_read, amdgpu_devcoredump_free);
+
+	drm_info(dev, "AMDGPU device coredump file has been created\n");
+	drm_info(dev, "Check your /sys/class/drm/card%d/device/devcoredump/data\n",
+		 dev->primary->index);
 }
 #endif

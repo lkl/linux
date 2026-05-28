@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2010-2012 Stephane Grosjean <s.grosjean@peak-system.com>
- *
  * CAN driver for PEAK-System PCAN-PC Card
  * Derived from the PCAN project file driver/src/pcan_pccard.c
- * Copyright (C) 2006-2010 PEAK System-Technik GmbH
+ *
+ * Copyright (C) 2006-2025 PEAK System-Technik GmbH
+ * Author: Stéphane Grosjean <stephane.grosjean@hms-networks.com>
  */
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -19,7 +19,7 @@
 #include <linux/can/dev.h>
 #include "sja1000.h"
 
-MODULE_AUTHOR("Stephane Grosjean <s.grosjean@peak-system.com>");
+MODULE_AUTHOR("Stéphane Grosjean <stephane.grosjean@hms-networks.com>");
 MODULE_DESCRIPTION("CAN driver for PEAK-System PCAN-PC Cards");
 MODULE_LICENSE("GPL v2");
 
@@ -167,7 +167,7 @@ static void pcan_start_led_timer(struct pcan_pccard *card)
  */
 static void pcan_stop_led_timer(struct pcan_pccard *card)
 {
-	del_timer_sync(&card->led_timer);
+	timer_delete_sync(&card->led_timer);
 }
 
 /*
@@ -374,7 +374,7 @@ static inline void pcan_set_can_power(struct pcan_pccard *card, int onoff)
  */
 static void pcan_led_timer(struct timer_list *t)
 {
-	struct pcan_pccard *card = from_timer(card, t, led_timer);
+	struct pcan_pccard *card = timer_container_of(card, t, led_timer);
 	struct net_device *netdev;
 	int i, up_count = 0;
 	u8 ccr;

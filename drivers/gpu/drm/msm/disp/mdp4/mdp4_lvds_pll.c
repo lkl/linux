@@ -54,7 +54,7 @@ static const struct pll_rate *find_rate(unsigned long rate)
 	return &freqtbl[i-1];
 }
 
-static int mpd4_lvds_pll_enable(struct clk_hw *hw)
+static int mdp4_lvds_pll_enable(struct clk_hw *hw)
 {
 	struct mdp4_lvds_pll *lvds_pll = to_mdp4_lvds_pll(hw);
 	struct mdp4_kms *mdp4_kms = get_kms(lvds_pll);
@@ -80,7 +80,7 @@ static int mpd4_lvds_pll_enable(struct clk_hw *hw)
 	return 0;
 }
 
-static void mpd4_lvds_pll_disable(struct clk_hw *hw)
+static void mdp4_lvds_pll_disable(struct clk_hw *hw)
 {
 	struct mdp4_lvds_pll *lvds_pll = to_mdp4_lvds_pll(hw);
 	struct mdp4_kms *mdp4_kms = get_kms(lvds_pll);
@@ -91,21 +91,24 @@ static void mpd4_lvds_pll_disable(struct clk_hw *hw)
 	mdp4_write(mdp4_kms, REG_MDP4_LVDS_PHY_PLL_CTRL_0, 0x0);
 }
 
-static unsigned long mpd4_lvds_pll_recalc_rate(struct clk_hw *hw,
+static unsigned long mdp4_lvds_pll_recalc_rate(struct clk_hw *hw,
 				unsigned long parent_rate)
 {
 	struct mdp4_lvds_pll *lvds_pll = to_mdp4_lvds_pll(hw);
 	return lvds_pll->pixclk;
 }
 
-static long mpd4_lvds_pll_round_rate(struct clk_hw *hw, unsigned long rate,
-		unsigned long *parent_rate)
+static int mdp4_lvds_pll_determine_rate(struct clk_hw *hw,
+					struct clk_rate_request *req)
 {
-	const struct pll_rate *pll_rate = find_rate(rate);
-	return pll_rate->rate;
+	const struct pll_rate *pll_rate = find_rate(req->rate);
+
+	req->rate = pll_rate->rate;
+
+	return 0;
 }
 
-static int mpd4_lvds_pll_set_rate(struct clk_hw *hw, unsigned long rate,
+static int mdp4_lvds_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 		unsigned long parent_rate)
 {
 	struct mdp4_lvds_pll *lvds_pll = to_mdp4_lvds_pll(hw);
@@ -114,48 +117,67 @@ static int mpd4_lvds_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 }
 
 
-static const struct clk_ops mpd4_lvds_pll_ops = {
-	.enable = mpd4_lvds_pll_enable,
-	.disable = mpd4_lvds_pll_disable,
-	.recalc_rate = mpd4_lvds_pll_recalc_rate,
-	.round_rate = mpd4_lvds_pll_round_rate,
-	.set_rate = mpd4_lvds_pll_set_rate,
+static const struct clk_ops mdp4_lvds_pll_ops = {
+	.enable = mdp4_lvds_pll_enable,
+	.disable = mdp4_lvds_pll_disable,
+	.recalc_rate = mdp4_lvds_pll_recalc_rate,
+	.determine_rate = mdp4_lvds_pll_determine_rate,
+	.set_rate = mdp4_lvds_pll_set_rate,
 };
 
-static const char *mpd4_lvds_pll_parents[] = {
-	"pxo",
+static const struct clk_parent_data mdp4_lvds_pll_parents[] = {
+	{ .fw_name = "pxo", .name = "pxo", },
 };
 
 static struct clk_init_data pll_init = {
-	.name = "mpd4_lvds_pll",
-	.ops = &mpd4_lvds_pll_ops,
-	.parent_names = mpd4_lvds_pll_parents,
-	.num_parents = ARRAY_SIZE(mpd4_lvds_pll_parents),
+	.name = "mdp4_lvds_pll",
+	.ops = &mdp4_lvds_pll_ops,
+	.parent_data = mdp4_lvds_pll_parents,
+	.num_parents = ARRAY_SIZE(mdp4_lvds_pll_parents),
 };
 
-struct clk *mpd4_lvds_pll_init(struct drm_device *dev)
+static struct clk_hw *mdp4_lvds_pll_init(struct drm_device *dev)
 {
 	struct mdp4_lvds_pll *lvds_pll;
-	struct clk *clk;
 	int ret;
 
 	lvds_pll = devm_kzalloc(dev->dev, sizeof(*lvds_pll), GFP_KERNEL);
-	if (!lvds_pll) {
-		ret = -ENOMEM;
-		goto fail;
-	}
+	if (!lvds_pll)
+		return ERR_PTR(-ENOMEM);
 
 	lvds_pll->dev = dev;
 
 	lvds_pll->pll_hw.init = &pll_init;
-	clk = devm_clk_register(dev->dev, &lvds_pll->pll_hw);
-	if (IS_ERR(clk)) {
-		ret = PTR_ERR(clk);
-		goto fail;
+	ret = devm_clk_hw_register(dev->dev, &lvds_pll->pll_hw);
+	if (ret)
+		return ERR_PTR(ret);
+
+	ret = devm_of_clk_add_hw_provider(dev->dev, of_clk_hw_simple_get, &lvds_pll->pll_hw);
+	if (ret)
+		return ERR_PTR(ret);
+
+	return &lvds_pll->pll_hw;
+}
+
+struct clk *mdp4_get_lcdc_clock(struct drm_device *dev)
+{
+	struct clk_hw *hw;
+	struct clk *clk;
+
+
+	/* TODO: do we need different pll in other cases? */
+	hw = mdp4_lvds_pll_init(dev);
+	if (IS_ERR(hw)) {
+		DRM_DEV_ERROR(dev->dev, "failed to register LVDS PLL\n");
+		return ERR_CAST(hw);
+	}
+
+	clk = devm_clk_get(dev->dev, "lcdc_clk");
+	if (clk == ERR_PTR(-ENOENT)) {
+		drm_warn(dev, "can't get LCDC clock, using PLL directly\n");
+
+		return devm_clk_hw_get_clk(dev->dev, hw, "lcdc_clk");
 	}
 
 	return clk;
-
-fail:
-	return ERR_PTR(ret);
 }

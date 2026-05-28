@@ -247,10 +247,13 @@ static int load_misc_binary(struct linux_binprm *bprm)
 	if (retval < 0)
 		goto ret;
 
-	if (fmt->flags & MISC_FMT_OPEN_FILE)
+	if (fmt->flags & MISC_FMT_OPEN_FILE) {
 		interp_file = file_clone_open(fmt->interp_file);
-	else
+		if (!IS_ERR(interp_file))
+			deny_write_access(interp_file);
+	} else {
 		interp_file = open_exec(fmt->interpreter);
+	}
 	retval = PTR_ERR(interp_file);
 	if (IS_ERR(interp_file))
 		goto ret;
@@ -672,44 +675,6 @@ static void bm_evict_inode(struct inode *inode)
 }
 
 /**
- * unlink_binfmt_dentry - remove the dentry for the binary type handler
- * @dentry: dentry associated with the binary type handler
- *
- * Do the actual filesystem work to remove a dentry for a registered binary
- * type handler. Since binfmt_misc only allows simple files to be created
- * directly under the root dentry of the filesystem we ensure that we are
- * indeed passed a dentry directly beneath the root dentry, that the inode
- * associated with the root dentry is locked, and that it is a regular file we
- * are asked to remove.
- */
-static void unlink_binfmt_dentry(struct dentry *dentry)
-{
-	struct dentry *parent = dentry->d_parent;
-	struct inode *inode, *parent_inode;
-
-	/* All entries are immediate descendants of the root dentry. */
-	if (WARN_ON_ONCE(dentry->d_sb->s_root != parent))
-		return;
-
-	/* We only expect to be called on regular files. */
-	inode = d_inode(dentry);
-	if (WARN_ON_ONCE(!S_ISREG(inode->i_mode)))
-		return;
-
-	/* The parent inode must be locked. */
-	parent_inode = d_inode(parent);
-	if (WARN_ON_ONCE(!inode_is_locked(parent_inode)))
-		return;
-
-	if (simple_positive(dentry)) {
-		dget(dentry);
-		simple_unlink(parent_inode, dentry);
-		d_delete(dentry);
-		dput(dentry);
-	}
-}
-
-/**
  * remove_binfmt_handler - remove a binary type handler
  * @misc: handle to binfmt_misc instance
  * @e: binary type handler to remove
@@ -726,7 +691,7 @@ static void remove_binfmt_handler(struct binfmt_misc *misc, Node *e)
 	write_lock(&misc->entries_lock);
 	list_del_init(&e->list);
 	write_unlock(&misc->entries_lock);
-	unlink_binfmt_dentry(e->dentry);
+	locked_recursive_removal(e->dentry, NULL);
 }
 
 /* /<entry> */
@@ -769,7 +734,7 @@ static ssize_t bm_entry_write(struct file *file, const char __user *buffer,
 	case 3:
 		/* Delete this handler. */
 		inode = d_inode(inode->i_sb->s_root);
-		inode_lock(inode);
+		inode_lock_nested(inode, I_MUTEX_PARENT);
 
 		/*
 		 * In order to add new element or remove elements from the list
@@ -839,7 +804,7 @@ static ssize_t bm_register_write(struct file *file, const char __user *buffer,
 	}
 
 	inode_lock(d_inode(root));
-	dentry = lookup_one_len(e->name, root, strlen(e->name));
+	dentry = lookup_noperm(&QSTR(e->name), root);
 	err = PTR_ERR(dentry);
 	if (IS_ERR(dentry))
 		goto out;
@@ -872,8 +837,10 @@ out:
 	inode_unlock(d_inode(root));
 
 	if (err) {
-		if (f)
+		if (f) {
+			exe_file_allow_write_access(f);
 			filp_close(f, NULL);
+		}
 		kfree(e);
 		return err;
 	}
@@ -919,7 +886,7 @@ static ssize_t bm_status_write(struct file *file, const char __user *buffer,
 	case 3:
 		/* Delete all handlers. */
 		inode = d_inode(file_inode(file)->i_sb->s_root);
-		inode_lock(inode);
+		inode_lock_nested(inode, I_MUTEX_PARENT);
 
 		/*
 		 * In order to add new element or remove elements from the list
@@ -998,7 +965,7 @@ static int bm_fill_super(struct super_block *sb, struct fs_context *fc)
 		/*
 		 * If it turns out that most user namespaces actually want to
 		 * register their own binary type handler and therefore all
-		 * create their own separate binfm_misc mounts we should
+		 * create their own separate binfmt_misc mounts we should
 		 * consider turning this into a kmem cache.
 		 */
 		misc = kzalloc(sizeof(struct binfmt_misc), GFP_KERNEL);

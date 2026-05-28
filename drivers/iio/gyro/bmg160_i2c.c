@@ -17,7 +17,7 @@ static int bmg160_i2c_probe(struct i2c_client *client)
 {
 	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct regmap *regmap;
-	const char *name = NULL;
+	const char *name;
 
 	regmap = devm_regmap_init_i2c(client, &bmg160_regmap_i2c_conf);
 	if (IS_ERR(regmap)) {
@@ -28,6 +28,8 @@ static int bmg160_i2c_probe(struct i2c_client *client)
 
 	if (id)
 		name = id->name;
+	else
+		name = iio_get_acpi_device_name(&client->dev);
 
 	return bmg160_core_probe(&client->dev, regmap, client->irq, name);
 }
@@ -39,9 +41,7 @@ static void bmg160_i2c_remove(struct i2c_client *client)
 
 static const struct acpi_device_id bmg160_acpi_match[] = {
 	{"BMG0160", 0},
-	{"BMI055B", 0},
-	{"BMI088B", 0},
-	{},
+	{ }
 };
 
 MODULE_DEVICE_TABLE(acpi, bmg160_acpi_match);
@@ -50,7 +50,7 @@ static const struct i2c_device_id bmg160_i2c_id[] = {
 	{ "bmg160" },
 	{ "bmi055_gyro" },
 	{ "bmi088_gyro" },
-	{}
+	{ }
 };
 
 MODULE_DEVICE_TABLE(i2c, bmg160_i2c_id);
@@ -58,6 +58,7 @@ MODULE_DEVICE_TABLE(i2c, bmg160_i2c_id);
 static const struct of_device_id bmg160_of_match[] = {
 	{ .compatible = "bosch,bmg160" },
 	{ .compatible = "bosch,bmi055_gyro" },
+	{ .compatible = "bosch,bmi088_gyro" },
 	{ }
 };
 

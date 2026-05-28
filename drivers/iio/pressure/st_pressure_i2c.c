@@ -50,13 +50,13 @@ static const struct of_device_id st_press_of_match[] = {
 		.compatible = "st,lps22df",
 		.data = LPS22DF_PRESS_DEV_NAME,
 	},
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(of, st_press_of_match);
 
 static const struct acpi_device_id st_press_acpi_match[] = {
 	{"SNO9210", LPS22HB},
-	{ },
+	{ }
 };
 MODULE_DEVICE_TABLE(acpi, st_press_acpi_match);
 
@@ -69,7 +69,7 @@ static const struct i2c_device_id st_press_id_table[] = {
 	{ LPS35HW_PRESS_DEV_NAME, LPS35HW },
 	{ LPS22HH_PRESS_DEV_NAME, LPS22HH },
 	{ LPS22DF_PRESS_DEV_NAME, LPS22DF },
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, st_press_id_table);
 
@@ -121,4 +121,4 @@ module_i2c_driver(st_press_driver);
 MODULE_AUTHOR("Denis Ciocca <denis.ciocca@st.com>");
 MODULE_DESCRIPTION("STMicroelectronics pressures i2c driver");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(IIO_ST_SENSORS);
+MODULE_IMPORT_NS("IIO_ST_SENSORS");

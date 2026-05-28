@@ -2523,7 +2523,7 @@ static const struct hid_usage_entry hid_usage_table[] = {
 		{ 0x85, 0x0088, "iDeviceName" },
 		{ 0x85, 0x0089, "iDeviceChemistry" },
 		{ 0x85, 0x008a, "ManufacturerData" },
-		{ 0x85, 0x008b, "Rechargable" },
+		{ 0x85, 0x008b, "Rechargeable" },
 		{ 0x85, 0x008c, "WarningCapacityLimit" },
 		{ 0x85, 0x008d, "CapacityGranularity1" },
 		{ 0x85, 0x008e, "CapacityGranularity2" },
@@ -3291,6 +3291,8 @@ static const char *keys[KEY_MAX + 1] = {
 	[BTN_TR2] = "BtnTR2",			[BTN_SELECT] = "BtnSelect",
 	[BTN_START] = "BtnStart",		[BTN_MODE] = "BtnMode",
 	[BTN_THUMBL] = "BtnThumbL",		[BTN_THUMBR] = "BtnThumbR",
+	[BTN_GRIPL] = "BtnGripL",		[BTN_GRIPR] = "BtnGripR",
+	[BTN_GRIPL2] = "BtnGripL2",		[BTN_GRIPR2] = "BtnGripR2",
 	[BTN_TOOL_PEN] = "ToolPen",		[BTN_TOOL_RUBBER] = "ToolRubber",
 	[BTN_TOOL_BRUSH] = "ToolBrush",		[BTN_TOOL_PENCIL] = "ToolPencil",
 	[BTN_TOOL_AIRBRUSH] = "ToolAirbrush",	[BTN_TOOL_FINGER] = "ToolFinger",
@@ -3298,8 +3300,8 @@ static const char *keys[KEY_MAX + 1] = {
 	[BTN_TOUCH] = "Touch",			[BTN_STYLUS] = "Stylus",
 	[BTN_STYLUS2] = "Stylus2",		[BTN_TOOL_DOUBLETAP] = "ToolDoubleTap",
 	[BTN_TOOL_TRIPLETAP] = "ToolTripleTap",	[BTN_TOOL_QUADTAP] = "ToolQuadrupleTap",
-	[BTN_GEAR_DOWN] = "WheelBtn",
-	[BTN_GEAR_UP] = "Gear up",		[KEY_OK] = "Ok",
+	[BTN_GEAR_DOWN] = "BtnGearDown",	[BTN_GEAR_UP] = "BtnGearUp",
+						[KEY_OK] = "Ok",
 	[KEY_SELECT] = "Select",		[KEY_GOTO] = "Goto",
 	[KEY_CLEAR] = "Clear",			[KEY_POWER2] = "Power2",
 	[KEY_OPTION] = "Option",		[KEY_INFO] = "Info",
@@ -3309,9 +3311,9 @@ static const char *keys[KEY_MAX + 1] = {
 	[KEY_EPG] = "EPG",			[KEY_PVR] = "PVR",
 	[KEY_MHP] = "MHP",			[KEY_LANGUAGE] = "Language",
 	[KEY_TITLE] = "Title",			[KEY_SUBTITLE] = "Subtitle",
-	[KEY_ANGLE] = "Angle",			[KEY_ZOOM] = "Zoom",
+	[KEY_ANGLE] = "Angle",
 	[KEY_MODE] = "Mode",			[KEY_KEYBOARD] = "Keyboard",
-	[KEY_SCREEN] = "Screen",		[KEY_PC] = "PC",
+	[KEY_PC] = "PC",
 	[KEY_TV] = "TV",			[KEY_TV2] = "TV2",
 	[KEY_VCR] = "VCR",			[KEY_VCR2] = "VCR2",
 	[KEY_SAT] = "Sat",			[KEY_SAT2] = "Sat2",
@@ -3409,8 +3411,7 @@ static const char *keys[KEY_MAX + 1] = {
 	[BTN_TRIGGER_HAPPY35] = "TriggerHappy35", [BTN_TRIGGER_HAPPY36] = "TriggerHappy36",
 	[BTN_TRIGGER_HAPPY37] = "TriggerHappy37", [BTN_TRIGGER_HAPPY38] = "TriggerHappy38",
 	[BTN_TRIGGER_HAPPY39] = "TriggerHappy39", [BTN_TRIGGER_HAPPY40] = "TriggerHappy40",
-	[BTN_DIGI] = "Digi",			[BTN_STYLUS3] = "Stylus3",
-	[BTN_TOOL_QUINTTAP] = "ToolQuintTap",	[BTN_WHEEL] = "Wheel",
+	[BTN_STYLUS3] = "Stylus3",		 [BTN_TOOL_QUINTTAP] = "ToolQuintTap",
 	[KEY_10CHANNELSDOWN] = "10ChannelsDown",
 	[KEY_10CHANNELSUP] = "10ChannelsUp",
 	[KEY_3D_MODE] = "3DMode",		[KEY_ADDRESSBOOK] = "Addressbook",
@@ -3440,7 +3441,7 @@ static const char *keys[KEY_MAX + 1] = {
 	[KEY_FN_RIGHT_SHIFT] = "FnRightShift",	[KEY_FRAMEBACK] = "FrameBack",
 	[KEY_FRAMEFORWARD] = "FrameForward",	[KEY_FULL_SCREEN] = "FullScreen",
 	[KEY_GAMES] = "Games",			[KEY_GRAPHICSEDITOR] = "GraphicsEditor",
-	[KEY_HANGEUL] = "HanGeul",		[KEY_HANGUP_PHONE] = "HangUpPhone",
+	[KEY_HANGUP_PHONE] = "HangUpPhone",
 	[KEY_IMAGES] = "Images",		[KEY_KBD_LCD_MENU1] = "KbdLcdMenu1",
 	[KEY_KBD_LCD_MENU2] = "KbdLcdMenu2",	[KEY_KBD_LCD_MENU3] = "KbdLcdMenu3",
 	[KEY_KBD_LCD_MENU4] = "KbdLcdMenu4",	[KEY_KBD_LCD_MENU5] = "KbdLcdMenu5",
@@ -3451,7 +3452,7 @@ static const char *keys[KEY_MAX + 1] = {
 	[KEY_MACRO_RECORD_START] = "MacroRecordStart",
 	[KEY_MACRO_RECORD_STOP] = "MacroRecordStop",
 	[KEY_MARK_WAYPOINT] = "MarkWayPoint",	[KEY_MEDIA_REPEAT] = "MediaRepeat",
-	[KEY_MEDIA_TOP_MENU] = "MediaTopMenu",	[KEY_MESSENGER] = "Messanger",
+	[KEY_MEDIA_TOP_MENU] = "MediaTopMenu",	[KEY_MESSENGER] = "Messenger",
 	[KEY_NAV_CHART] = "NavChar",		[KEY_NAV_INFO] = "NavInfo",
 	[KEY_NEWS] = "News",			[KEY_NEXT_ELEMENT] = "NextElement",
 	[KEY_NEXT_FAVORITE] = "NextFavorite",	[KEY_NOTIFICATION_CENTER] = "NotificationCenter",
@@ -3727,7 +3728,7 @@ static ssize_t hid_debug_events_read(struct file *file, char __user *buffer,
 			 */
 			if (!list->hdev || !list->hdev->debug) {
 				ret = -EIO;
-				set_current_state(TASK_RUNNING);
+				__set_current_state(TASK_RUNNING);
 				goto out;
 			}
 

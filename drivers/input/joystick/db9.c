@@ -351,7 +351,7 @@ static int db9_saturn(int mode, struct parport *port, struct input_dev *devs[])
 
 static void db9_timer(struct timer_list *t)
 {
-	struct db9 *db9 = from_timer(db9, t, timer);
+	struct db9 *db9 = timer_container_of(db9, t, timer);
 	struct parport *port = db9->pd->port;
 	struct input_dev *dev = db9->dev[0];
 	struct input_dev *dev2 = db9->dev[1];
@@ -505,24 +505,22 @@ static int db9_open(struct input_dev *dev)
 {
 	struct db9 *db9 = input_get_drvdata(dev);
 	struct parport *port = db9->pd->port;
-	int err;
 
-	err = mutex_lock_interruptible(&db9->mutex);
-	if (err)
-		return err;
-
-	if (!db9->used++) {
-		parport_claim(db9->pd);
-		parport_write_data(port, 0xff);
-		if (db9_modes[db9->mode].reverse) {
-			parport_data_reverse(port);
-			parport_write_control(port, DB9_NORMAL);
+	scoped_guard(mutex_intr, &db9->mutex) {
+		if (!db9->used++) {
+			parport_claim(db9->pd);
+			parport_write_data(port, 0xff);
+			if (db9_modes[db9->mode].reverse) {
+				parport_data_reverse(port);
+				parport_write_control(port, DB9_NORMAL);
+			}
+			mod_timer(&db9->timer, jiffies + DB9_REFRESH_TIME);
 		}
-		mod_timer(&db9->timer, jiffies + DB9_REFRESH_TIME);
+
+		return 0;
 	}
 
-	mutex_unlock(&db9->mutex);
-	return 0;
+	return -EINTR;
 }
 
 static void db9_close(struct input_dev *dev)
@@ -530,14 +528,14 @@ static void db9_close(struct input_dev *dev)
 	struct db9 *db9 = input_get_drvdata(dev);
 	struct parport *port = db9->pd->port;
 
-	mutex_lock(&db9->mutex);
+	guard(mutex)(&db9->mutex);
+
 	if (!--db9->used) {
-		del_timer_sync(&db9->timer);
+		timer_delete_sync(&db9->timer);
 		parport_write_control(port, 0x00);
 		parport_data_forward(port);
 		parport_release(db9->pd);
 	}
-	mutex_unlock(&db9->mutex);
 }
 
 static void db9_attach(struct parport *pp)

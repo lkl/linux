@@ -291,7 +291,6 @@ _preset_ready_:
 	/* Mark Slave initialization complete */
 	rt1308->hw_init = true;
 
-	pm_runtime_mark_last_busy(&slave->dev);
 	pm_runtime_put_autosuspend(&slave->dev);
 
 	dev_dbg(&slave->dev, "%s hw_init complete\n", __func__);
@@ -753,7 +752,7 @@ static const struct sdw_device_id rt1308_id[] = {
 };
 MODULE_DEVICE_TABLE(sdw, rt1308_id);
 
-static int __maybe_unused rt1308_dev_suspend(struct device *dev)
+static int rt1308_dev_suspend(struct device *dev)
 {
 	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
 
@@ -767,7 +766,7 @@ static int __maybe_unused rt1308_dev_suspend(struct device *dev)
 
 #define RT1308_PROBE_TIMEOUT 5000
 
-static int __maybe_unused rt1308_dev_resume(struct device *dev)
+static int rt1308_dev_resume(struct device *dev)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct rt1308_sdw_priv *rt1308 = dev_get_drvdata(dev);
@@ -797,14 +796,14 @@ regmap_sync:
 }
 
 static const struct dev_pm_ops rt1308_pm = {
-	SET_SYSTEM_SLEEP_PM_OPS(rt1308_dev_suspend, rt1308_dev_resume)
-	SET_RUNTIME_PM_OPS(rt1308_dev_suspend, rt1308_dev_resume, NULL)
+	SYSTEM_SLEEP_PM_OPS(rt1308_dev_suspend, rt1308_dev_resume)
+	RUNTIME_PM_OPS(rt1308_dev_suspend, rt1308_dev_resume, NULL)
 };
 
 static struct sdw_driver rt1308_sdw_driver = {
 	.driver = {
 		.name = "rt1308",
-		.pm = &rt1308_pm,
+		.pm = pm_ptr(&rt1308_pm),
 	},
 	.probe = rt1308_sdw_probe,
 	.remove = rt1308_sdw_remove,

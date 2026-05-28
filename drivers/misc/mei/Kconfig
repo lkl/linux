@@ -3,7 +3,7 @@
 config INTEL_MEI
 	tristate "Intel Management Engine Interface"
 	depends on X86 && PCI
-	default GENERIC_CPU || MCORE2 || MATOM || X86_GENERIC
+	default X86_64 || MATOM
 	help
 	  The Intel Management Engine (Intel ME) provides Manageability,
 	  Security and Media services for system containing Intel chipsets.
@@ -80,6 +80,19 @@ config INTEL_MEI_VSC
 
 	  This driver can also be built as a module. If so, the module
 	  will be called mei-vsc.
+
+config INTEL_MEI_LB
+	tristate "Intel Late Binding (LB) support on ME Interface"
+	depends on INTEL_MEI_ME
+	depends on DRM_XE
+	help
+	  Enable support for Intel Late Binding (LB) via the MEI interface.
+
+	  Late Binding is a method for applying firmware updates at runtime,
+	  allowing the Intel Xe driver to load firmware payloads such as
+	  fan controller or voltage regulator. These firmware updates are
+	  authenticated and versioned, and do not require firmware flashing
+	  or system reboot.
 
 source "drivers/misc/mei/hdcp/Kconfig"
 source "drivers/misc/mei/pxp/Kconfig"

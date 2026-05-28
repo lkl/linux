@@ -15,7 +15,9 @@
 #include "regs/xe_reg_defs.h"
 #include "xe_hw_engine_types.h"
 
-#define XE_OA_BUFFER_SIZE SZ_16M
+struct drm_syncobj;
+
+#define DEFAULT_XE_OA_BUFFER_SIZE SZ_16M
 
 enum xe_oa_report_header {
 	HDR_32_BIT = 0,
@@ -95,6 +97,9 @@ struct xe_oa_unit {
 	/** @oa_unit_id: identifier for the OA unit */
 	u16 oa_unit_id;
 
+	/** @gt: gt associated with the OA unit */
+	struct xe_gt *gt;
+
 	/** @type: Type of OA unit - OAM, OAG etc. */
 	enum drm_xe_oa_unit_type type;
 
@@ -137,9 +142,6 @@ struct xe_oa {
 
 	/** @metrics_idr: List of dynamic configurations (struct xe_oa_config) */
 	struct idr metrics_idr;
-
-	/** @ctx_oactxctrl_offset: offset of OACTXCONTROL register in context image */
-	u32 ctx_oactxctrl_offset[XE_ENGINE_CLASS_MAX];
 
 	/** @oa_formats: tracks all OA formats across platforms */
 	const struct xe_oa_format *oa_formats;
@@ -185,6 +187,9 @@ struct xe_oa_stream {
 	/** @gt: gt associated with the oa stream */
 	struct xe_gt *gt;
 
+	/** @oa_unit: oa unit for this stream */
+	struct xe_oa_unit *oa_unit;
+
 	/** @hwe: hardware engine associated with this oa stream */
 	struct xe_hw_engine *hwe;
 
@@ -218,6 +223,9 @@ struct xe_oa_stream {
 	/** @pollin: Whether there is data available to read */
 	bool pollin;
 
+	/** @wait_num_reports: Number of reports to wait for before signalling pollin */
+	int wait_num_reports;
+
 	/** @periodic: Whether periodic sampling is currently enabled */
 	bool periodic;
 
@@ -238,5 +246,23 @@ struct xe_oa_stream {
 
 	/** @no_preempt: Whether preemption and timeslicing is disabled for stream exec_q */
 	u32 no_preempt;
+
+	/** @xef: xe_file with which the stream was opened */
+	struct xe_file *xef;
+
+	/** @ufence_syncobj: User fence syncobj */
+	struct drm_syncobj *ufence_syncobj;
+
+	/** @ufence_timeline_value: User fence timeline value */
+	u64 ufence_timeline_value;
+
+	/** @last_fence: fence to use in stream destroy when needed */
+	struct dma_fence *last_fence;
+
+	/** @num_syncs: size of @syncs array */
+	u32 num_syncs;
+
+	/** @syncs: syncs to wait on and to signal */
+	struct xe_sync_entry *syncs;
 };
 #endif

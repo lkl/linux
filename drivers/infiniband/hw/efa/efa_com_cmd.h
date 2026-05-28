@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause */
 /*
- * Copyright 2018-2024 Amazon.com, Inc. or its affiliates. All rights reserved.
+ * Copyright 2018-2025 Amazon.com, Inc. or its affiliates. All rights reserved.
  */
 
 #ifndef _EFA_COM_CMD_H_
@@ -27,6 +27,7 @@ struct efa_com_create_qp_params {
 	u16 pd;
 	u16 uarn;
 	u8 qp_type;
+	u8 sl;
 	u8 unsolicited_write_recv : 1;
 };
 
@@ -71,7 +72,7 @@ struct efa_com_create_cq_params {
 	/* cq physical base address in OS memory */
 	dma_addr_t dma_addr;
 	/* completion queue depth in # of entries */
-	u16 cq_depth;
+	u16 sub_cq_depth;
 	u16 num_sub_cqs;
 	u16 uarn;
 	u16 eqn;
@@ -141,6 +142,7 @@ struct efa_com_get_device_attr_result {
 	u16 max_wr_rdma_sge;
 	u16 max_tx_batch;
 	u16 min_sq_depth;
+	u16 max_link_speed_gbps;
 	u8 db_bar;
 };
 
@@ -281,11 +283,20 @@ struct efa_com_rdma_write_stats {
 	u64 write_recv_bytes;
 };
 
+struct efa_com_network_stats {
+	u64 retrans_bytes;
+	u64 retrans_pkts;
+	u64 retrans_timeout_events;
+	u64 unresponsive_remote_events;
+	u64 impaired_remote_conn_events;
+};
+
 union efa_com_get_stats_result {
 	struct efa_com_basic_stats basic_stats;
 	struct efa_com_messages_stats messages_stats;
 	struct efa_com_rdma_read_stats rdma_read_stats;
 	struct efa_com_rdma_write_stats rdma_write_stats;
+	struct efa_com_network_stats network_stats;
 };
 
 int efa_com_create_qp(struct efa_com_dev *edev,

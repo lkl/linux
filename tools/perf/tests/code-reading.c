@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <errno.h>
+#include <linux/kconfig.h>
 #include <linux/kernel.h>
+#include <linux/rbtree.h>
 #include <linux/types.h>
 #include <inttypes.h>
 #include <stdlib.h>
@@ -8,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/param.h>
+#include <sys/utsname.h>
 #include <perf/cpumap.h>
 #include <perf/evlist.h>
 #include <perf/mmap.h>
@@ -37,10 +40,63 @@
 #define BUFSZ	1024
 #define READLEN	128
 
-struct state {
-	u64 done[1024];
-	size_t done_cnt;
+struct tested_section {
+	struct rb_node rb_node;
+	u64 addr;
+	char path[PATH_MAX];
 };
+
+static bool tested_code_insert_or_exists(const char *path, u64 addr,
+					 struct rb_root *tested_sections)
+{
+	struct rb_node **node = &tested_sections->rb_node;
+	struct rb_node *parent = NULL;
+	struct tested_section *data;
+
+	while (*node) {
+		int cmp;
+
+		parent = *node;
+		data = rb_entry(*node, struct tested_section, rb_node);
+		cmp = strcmp(path, data->path);
+		if (!cmp) {
+			if (addr < data->addr)
+				cmp = -1;
+			else if (addr > data->addr)
+				cmp = 1;
+			else
+				return true; /* already tested */
+		}
+
+		if (cmp < 0)
+			node = &(*node)->rb_left;
+		else
+			node = &(*node)->rb_right;
+	}
+
+	data = zalloc(sizeof(*data));
+	if (!data)
+		return true;
+
+	data->addr = addr;
+	strlcpy(data->path, path, sizeof(data->path));
+	rb_link_node(&data->rb_node, parent, node);
+	rb_insert_color(&data->rb_node, tested_sections);
+	return false;
+}
+
+static void tested_sections__free(struct rb_root *root)
+{
+	while (!RB_EMPTY_ROOT(root)) {
+		struct rb_node *node = rb_first(root);
+		struct tested_section *ts = rb_entry(node,
+						     struct tested_section,
+						     rb_node);
+
+		rb_erase(node, root);
+		free(ts);
+	}
+}
 
 static size_t read_objdump_chunk(const char **line, unsigned char **buf,
 				 size_t *buf_len)
@@ -176,16 +232,104 @@ static int read_objdump_output(FILE *f, void *buf, size_t *len, u64 start_addr)
 	return err;
 }
 
+/*
+ * Only gets GNU objdump version. Returns 0 for llvm-objdump.
+ */
+static int objdump_version(void)
+{
+	size_t line_len;
+	char cmd[PATH_MAX * 2];
+	char *line = NULL;
+	const char *fmt;
+	FILE *f;
+	int ret;
+
+	int version_tmp, version_num = 0;
+	char *version = 0, *token;
+
+	fmt = "%s --version";
+	ret = snprintf(cmd, sizeof(cmd), fmt, test_objdump_path);
+	if (ret <= 0 || (size_t)ret >= sizeof(cmd))
+		return -1;
+	/* Ignore objdump errors */
+	strcat(cmd, " 2>/dev/null");
+	f = popen(cmd, "r");
+	if (!f) {
+		pr_debug("popen failed\n");
+		return -1;
+	}
+	/* Get first line of objdump --version output */
+	ret = getline(&line, &line_len, f);
+	pclose(f);
+	if (ret < 0) {
+		pr_debug("getline failed\n");
+		return -1;
+	}
+
+	token = strsep(&line, " ");
+	if (token != NULL && !strcmp(token, "GNU")) {
+		// version is last part of first line of objdump --version output.
+		while ((token = strsep(&line, " ")))
+			version = token;
+
+		// Convert version into a format we can compare with
+		token = strsep(&version, ".");
+		version_num = atoi(token);
+		if (version_num)
+			version_num *= 10000;
+
+		token = strsep(&version, ".");
+		version_tmp = atoi(token);
+		if (token)
+			version_num += version_tmp * 100;
+
+		token = strsep(&version, ".");
+		version_tmp = atoi(token);
+		if (token)
+			version_num += version_tmp;
+	}
+
+	return version_num;
+}
+
 static int read_via_objdump(const char *filename, u64 addr, void *buf,
 			    size_t len)
 {
+	u64 stop_address = addr + len;
+	struct utsname uname_buf;
 	char cmd[PATH_MAX * 2];
 	const char *fmt;
 	FILE *f;
 	int ret;
 
+	ret = uname(&uname_buf);
+	if (ret) {
+		pr_debug("uname failed\n");
+		return -1;
+	}
+
+	if (!strncmp(uname_buf.machine, "riscv", 5)) {
+		int version = objdump_version();
+
+		/* Default to this workaround if version parsing fails */
+		if (version < 0 || version > 24100) {
+			/*
+			 * Starting at riscv objdump version 2.41, dumping in
+			 * the middle of an instruction is not supported. riscv
+			 * instructions are aligned along 2-byte intervals and
+			 * can be either 2-bytes or 4-bytes. This makes it
+			 * possible that the stop-address lands in the middle of
+			 * a 4-byte instruction. Increase the stop_address by
+			 * two to ensure an instruction is not cut in half, but
+			 * leave the len as-is so only the expected number of
+			 * bytes are collected.
+			 */
+			stop_address += 2;
+		}
+	}
+
 	fmt = "%s -z -d --start-address=0x%"PRIx64" --stop-address=0x%"PRIx64" %s";
-	ret = snprintf(cmd, sizeof(cmd), fmt, test_objdump_path, addr, addr + len,
+	ret = snprintf(cmd, sizeof(cmd), fmt, test_objdump_path, addr, stop_address,
 		       filename);
 	if (ret <= 0 || (size_t)ret >= sizeof(cmd))
 		return -1;
@@ -226,13 +370,15 @@ static void dump_buf(unsigned char *buf, size_t len)
 }
 
 static int read_object_code(u64 addr, size_t len, u8 cpumode,
-			    struct thread *thread, struct state *state)
+			    struct thread *thread,
+			    struct rb_root *tested_sections)
 {
 	struct addr_location al;
 	unsigned char buf1[BUFSZ] = {0};
 	unsigned char buf2[BUFSZ] = {0};
 	size_t ret_len;
 	u64 objdump_addr;
+	u64 skip_addr;
 	const char *objdump_name;
 	char decomp_name[KMOD_DECOMP_LEN];
 	bool decomp = false;
@@ -257,6 +403,18 @@ static int read_object_code(u64 addr, size_t len, u8 cpumode,
 
 	if (dso__symtab_type(dso) == DSO_BINARY_TYPE__KALLSYMS && !dso__is_kcore(dso)) {
 		pr_debug("Unexpected kernel address - skipping\n");
+		goto out;
+	}
+
+	/*
+	 * Don't retest the same addresses. objdump struggles with kcore - try
+	 * each map only once even if the address is different.
+	 */
+	skip_addr = dso__is_kcore(dso) ? map__start(al.map) : al.addr;
+	if (tested_code_insert_or_exists(dso__long_name(dso), skip_addr,
+					 tested_sections)) {
+		pr_debug("Already tested %s @ %#"PRIx64" - skipping\n",
+			 dso__long_name(dso), skip_addr);
 		goto out;
 	}
 
@@ -295,24 +453,6 @@ static int read_object_code(u64 addr, size_t len, u8 cpumode,
 	if (map__load(al.map)) {
 		err = -1;
 		goto out;
-	}
-
-	/* objdump struggles with kcore - try each map only once */
-	if (dso__is_kcore(dso)) {
-		size_t d;
-
-		for (d = 0; d < state->done_cnt; d++) {
-			if (state->done[d] == map__start(al.map)) {
-				pr_debug("kcore map tested already");
-				pr_debug(" - skipping\n");
-				goto out;
-			}
-		}
-		if (state->done_cnt >= ARRAY_SIZE(state->done)) {
-			pr_debug("Too many kcore maps - skipping\n");
-			goto out;
-		}
-		state->done[state->done_cnt++] = map__start(al.map);
 	}
 
 	objdump_name = dso__long_name(dso);
@@ -381,35 +521,43 @@ out:
 	return err;
 }
 
-static int process_sample_event(struct machine *machine,
-				struct evlist *evlist,
-				union perf_event *event, struct state *state)
+static int process_sample_event(struct machine *machine, struct evlist *evlist,
+				union perf_event *event,
+				struct rb_root *tested_sections)
 {
 	struct perf_sample sample;
 	struct thread *thread;
 	int ret;
 
-	if (evlist__parse_sample(evlist, event, &sample)) {
+	perf_sample__init(&sample, /*all=*/false);
+	ret = evlist__parse_sample(evlist, event, &sample);
+	if (ret) {
 		pr_debug("evlist__parse_sample failed\n");
-		return -1;
+		ret = -1;
+		goto out;
 	}
 
 	thread = machine__findnew_thread(machine, sample.pid, sample.tid);
 	if (!thread) {
 		pr_debug("machine__findnew_thread failed\n");
-		return -1;
+		ret = -1;
+		goto out;
 	}
 
-	ret = read_object_code(sample.ip, READLEN, sample.cpumode, thread, state);
+	ret = read_object_code(sample.ip, READLEN, sample.cpumode, thread,
+			       tested_sections);
 	thread__put(thread);
+out:
+	perf_sample__exit(&sample);
 	return ret;
 }
 
 static int process_event(struct machine *machine, struct evlist *evlist,
-			 union perf_event *event, struct state *state)
+			 union perf_event *event, struct rb_root *tested_sections)
 {
 	if (event->header.type == PERF_RECORD_SAMPLE)
-		return process_sample_event(machine, evlist, event, state);
+		return process_sample_event(machine, evlist, event,
+					    tested_sections);
 
 	if (event->header.type == PERF_RECORD_THROTTLE ||
 	    event->header.type == PERF_RECORD_UNTHROTTLE)
@@ -429,7 +577,7 @@ static int process_event(struct machine *machine, struct evlist *evlist,
 }
 
 static int process_events(struct machine *machine, struct evlist *evlist,
-			  struct state *state)
+			  struct rb_root *tested_sections)
 {
 	union perf_event *event;
 	struct mmap *md;
@@ -441,7 +589,7 @@ static int process_events(struct machine *machine, struct evlist *evlist,
 			continue;
 
 		while ((event = perf_mmap__read_event(&md->core)) != NULL) {
-			ret = process_event(machine, evlist, event, state);
+			ret = process_event(machine, evlist, event, tested_sections);
 			perf_mmap__consume(&md->core);
 			if (ret < 0)
 				return ret;
@@ -541,9 +689,7 @@ static int do_test_code_reading(bool try_kcore)
 			.uses_mmap   = true,
 		},
 	};
-	struct state state = {
-		.done_cnt = 0,
-	};
+	struct rb_root tested_sections = RB_ROOT;
 	struct perf_thread_map *threads = NULL;
 	struct perf_cpu_map *cpus = NULL;
 	struct evlist *evlist = NULL;
@@ -555,11 +701,12 @@ static int do_test_code_reading(bool try_kcore)
 	struct dso *dso;
 	const char *events[] = { "cycles", "cycles:u", "cpu-clock", "cpu-clock:u", NULL };
 	int evidx = 0;
+	struct perf_env host_env;
 
 	pid = getpid();
 
-	machine = machine__new_host();
-	machine->env = &perf_env;
+	perf_env__init(&host_env);
+	machine = machine__new_host(&host_env);
 
 	ret = machine__create_kernel_maps(machine);
 	if (ret < 0) {
@@ -653,13 +800,6 @@ static int do_test_code_reading(bool try_kcore)
 				pr_debug("perf_evlist__open() failed!\n%s\n", errbuf);
 			}
 
-			/*
-			 * Both cpus and threads are now owned by evlist
-			 * and will be freed by following perf_evlist__set_maps
-			 * call. Getting reference to keep them alive.
-			 */
-			perf_cpu_map__get(cpus);
-			perf_thread_map__get(threads);
 			perf_evlist__set_maps(&evlist->core, NULL, NULL);
 			evlist__delete(evlist);
 			evlist = NULL;
@@ -683,7 +823,7 @@ static int do_test_code_reading(bool try_kcore)
 
 	evlist__disable(evlist);
 
-	ret = process_events(machine, evlist, &state);
+	ret = process_events(machine, evlist, &tested_sections);
 	if (ret < 0)
 		goto out_put;
 
@@ -702,6 +842,8 @@ out_err:
 	perf_cpu_map__put(cpus);
 	perf_thread_map__put(threads);
 	machine__delete(machine);
+	perf_env__exit(&host_env);
+	tested_sections__free(&tested_sections);
 
 	return err;
 }

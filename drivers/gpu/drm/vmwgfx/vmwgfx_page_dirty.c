@@ -1,27 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0 OR MIT
 /**************************************************************************
  *
- * Copyright 2019-2023 VMware, Inc., Palo Alto, CA., USA
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the
- * "Software"), to deal in the Software without restriction, including
- * without limitation the rights to use, copy, modify, merge, publish,
- * distribute, sub license, and/or sell copies of the Software, and to
- * permit persons to whom the Software is furnished to do so, subject to
- * the following conditions:
- *
- * The above copyright notice and this permission notice (including the
- * next paragraph) shall be included in all copies or substantial portions
- * of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL
- * THE COPYRIGHT HOLDERS, AUTHORS AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM,
- * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
- * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
- * USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * Copyright (c) 2019-2025 Broadcom. All Rights Reserved. The term
+ * “Broadcom” refers to Broadcom Inc. and/or its subsidiaries.
  *
  **************************************************************************/
 #include "vmwgfx_bo.h"
@@ -51,25 +32,30 @@ enum vmw_bo_dirty_method {
 
 /**
  * struct vmw_bo_dirty - Dirty information for buffer objects
+ * @ref_count: Reference count for this structure. Must be first member!
  * @start: First currently dirty bit
  * @end: Last currently dirty bit + 1
  * @method: The currently used dirty method
  * @change_count: Number of consecutive method change triggers
- * @ref_count: Reference count for this structure
  * @bitmap_size: The size of the bitmap in bits. Typically equal to the
  * nuber of pages in the bo.
  * @bitmap: A bitmap where each bit represents a page. A set bit means a
  * dirty page.
  */
 struct vmw_bo_dirty {
+	struct   kref ref_count;
 	unsigned long start;
 	unsigned long end;
 	enum vmw_bo_dirty_method method;
 	unsigned int change_count;
-	unsigned int ref_count;
 	unsigned long bitmap_size;
 	unsigned long bitmap[];
 };
+
+bool vmw_bo_is_dirty(struct vmw_bo *vbo)
+{
+	return vbo->dirty && (vbo->dirty->start < vbo->dirty->end);
+}
 
 /**
  * vmw_bo_dirty_scan_pagetable - Perform a pagetable scan for dirty bits
@@ -235,7 +221,7 @@ int vmw_bo_dirty_add(struct vmw_bo *vbo)
 	int ret;
 
 	if (dirty) {
-		dirty->ref_count++;
+		kref_get(&dirty->ref_count);
 		return 0;
 	}
 
@@ -249,7 +235,7 @@ int vmw_bo_dirty_add(struct vmw_bo *vbo)
 	dirty->bitmap_size = num_pages;
 	dirty->start = dirty->bitmap_size;
 	dirty->end = 0;
-	dirty->ref_count = 1;
+	kref_init(&dirty->ref_count);
 	if (num_pages < PAGE_SIZE / sizeof(pte_t)) {
 		dirty->method = VMW_BO_DIRTY_PAGETABLE;
 	} else {
@@ -288,10 +274,8 @@ void vmw_bo_dirty_release(struct vmw_bo *vbo)
 {
 	struct vmw_bo_dirty *dirty = vbo->dirty;
 
-	if (dirty && --dirty->ref_count == 0) {
-		kvfree(dirty);
+	if (dirty && kref_put(&dirty->ref_count, (void *)kvfree))
 		vbo->dirty = NULL;
-	}
 }
 
 /**
@@ -333,6 +317,41 @@ void vmw_bo_dirty_transfer_to_res(struct vmw_resource *res)
 		num = end - start;
 		bitmap_clear(&dirty->bitmap[0], start, num);
 		vmw_resource_dirty_update(res, start, end);
+	}
+
+	if (res_start <= dirty->start && res_end > dirty->start)
+		dirty->start = res_end;
+	if (res_start < dirty->end && res_end >= dirty->end)
+		dirty->end = res_start;
+}
+
+void vmw_bo_dirty_clear(struct vmw_bo *vbo)
+{
+	struct vmw_bo_dirty *dirty = vbo->dirty;
+	pgoff_t start, cur, end;
+	unsigned long res_start = 0;
+	unsigned long res_end = vbo->tbo.base.size;
+
+	WARN_ON_ONCE(res_start & ~PAGE_MASK);
+	res_start >>= PAGE_SHIFT;
+	res_end = DIV_ROUND_UP(res_end, PAGE_SIZE);
+
+	if (res_start >= dirty->end || res_end <= dirty->start)
+		return;
+
+	cur = max(res_start, dirty->start);
+	res_end = max(res_end, dirty->end);
+	while (cur < res_end) {
+		unsigned long num;
+
+		start = find_next_bit(&dirty->bitmap[0], res_end, cur);
+		if (start >= res_end)
+			break;
+
+		end = find_next_zero_bit(&dirty->bitmap[0], res_end, start + 1);
+		cur = end + 1;
+		num = end - start;
+		bitmap_clear(&dirty->bitmap[0], start, num);
 	}
 
 	if (res_start <= dirty->start && res_end > dirty->start)

@@ -1,4 +1,5 @@
 # -*- coding: utf-8; mode: python -*-
+# SPDX-License-Identifier: GPL-2.0
 # pylint: disable=R0903, C0330, R0914, R0912, E0401
 
 import os
@@ -9,7 +10,7 @@ from sphinx.util.osutil import fs_encoding
 def loadConfig(namespace):
 # ------------------------------------------------------------------------------
 
-    u"""Load an additional configuration file into *namespace*.
+    """Load an additional configuration file into *namespace*.
 
     The name of the configuration file is taken from the environment
     ``SPHINX_CONF``. The external configuration file extends (or overwrites) the

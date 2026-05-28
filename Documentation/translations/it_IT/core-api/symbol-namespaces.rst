@@ -10,8 +10,8 @@ Questo documento descrive come usare lo spazio dei nomi dei simboli
 per strutturare quello che viene esportato internamente al kernel
 grazie alle macro della famiglia EXPORT_SYMBOL().
 
-1. Introduzione
-===============
+Introduzione
+============
 
 Lo spazio dei nomi dei simboli è stato introdotto come mezzo per strutturare
 l'API esposta internamente al kernel. Permette ai manutentori di un
@@ -24,15 +24,15 @@ devono prima importare detto spazio. Altrimenti il kernel, a seconda
 della configurazione, potrebbe rifiutare di caricare il modulo o
 avvisare l'utente di un'importazione mancante.
 
-2. Come definire uno spazio dei nomi dei simboli
-================================================
+Come definire uno spazio dei nomi dei simboli
+=============================================
 
 I simboli possono essere esportati in spazi dei nomi usando diversi
 meccanismi.  Tutti questi meccanismi cambiano il modo in cui
 EXPORT_SYMBOL e simili vengono guidati verso la creazione di voci in ksymtab.
 
-2.1 Usare le macro EXPORT_SYMBOL
-================================
+Usare le macro EXPORT_SYMBOL
+----------------------------
 
 In aggiunta alle macro EXPORT_SYMBOL() e EXPORT_SYMBOL_GPL(), che permettono
 di esportare simboli del kernel nella rispettiva tabella, ci sono
@@ -43,7 +43,7 @@ Tenete presente che per via dell'espansione delle macro questo argomento deve
 essere un simbolo di preprocessore. Per esempio per esportare il
 simbolo ``usb_stor_suspend`` nello spazio dei nomi ``USB_STORAGE`` usate::
 
-	EXPORT_SYMBOL_NS(usb_stor_suspend, USB_STORAGE);
+	EXPORT_SYMBOL_NS(usb_stor_suspend, "USB_STORAGE");
 
 Di conseguenza, nella tabella dei simboli del kernel ci sarà una voce
 rappresentata dalla struttura ``kernel_symbol`` che avrà il campo
@@ -53,8 +53,8 @@ di base. Il programma ``modpost`` e il codice in kernel/module/main.c usano lo
 spazio dei nomi, rispettivamente, durante la compilazione e durante il
 caricamento di un modulo.
 
-2.2 Usare il simbolo di preprocessore DEFAULT_SYMBOL_NAMESPACE
-==============================================================
+Usare il simbolo di preprocessore DEFAULT_SYMBOL_NAMESPACE
+----------------------------------------------------------
 
 Definire lo spazio dei nomi per tutti i simboli di un sottosistema può essere
 logorante e di difficile manutenzione. Perciò è stato fornito un simbolo
@@ -69,7 +69,7 @@ Per esempio per esportare tutti i simboli definiti in usb-common nello spazio
 dei nomi USB_COMMON, si può aggiungere la seguente linea in
 drivers/usb/common/Makefile::
 
-	ccflags-y += -DDEFAULT_SYMBOL_NAMESPACE=USB_COMMON
+	ccflags-y += -DDEFAULT_SYMBOL_NAMESPACE='"USB_COMMON"'
 
 Questo cambierà tutte le macro EXPORT_SYMBOL() ed EXPORT_SYMBOL_GPL(). Invece,
 un simbolo esportato con EXPORT_SYMBOL_NS() non verrà cambiato e il simbolo
@@ -79,12 +79,12 @@ Una seconda possibilità è quella di definire il simbolo di preprocessore
 direttamente nei file da compilare. L'esempio precedente diventerebbe::
 
 	#undef  DEFAULT_SYMBOL_NAMESPACE
-	#define DEFAULT_SYMBOL_NAMESPACE USB_COMMON
+	#define DEFAULT_SYMBOL_NAMESPACE "USB_COMMON"
 
 Questo va messo prima di un qualsiasi uso di EXPORT_SYMBOL.
 
-3. Come usare i simboli esportati attraverso uno spazio dei nomi
-================================================================
+Come usare i simboli esportati attraverso uno spazio dei nomi
+=============================================================
 
 Per usare i simboli esportati da uno spazio dei nomi, i moduli del
 kernel devono esplicitamente importare il relativo spazio dei nomi; altrimenti
@@ -94,7 +94,7 @@ dei nomi che contiene i simboli desiderati. Per esempio un modulo che
 usa il simbolo usb_stor_suspend deve importare lo spazio dei nomi
 USB_STORAGE usando la seguente dichiarazione::
 
-	MODULE_IMPORT_NS(USB_STORAGE);
+	MODULE_IMPORT_NS("USB_STORAGE");
 
 Questo creerà un'etichetta ``modinfo`` per ogni spazio dei nomi
 importato. Un risvolto di questo fatto è che gli spazi dei
@@ -108,12 +108,10 @@ modinfo::
 
 
 Si consiglia di posizionare la dichiarazione MODULE_IMPORT_NS() vicino
-ai metadati del modulo come MODULE_AUTHOR() o MODULE_LICENSE(). Fate
-riferimento alla sezione 5. per creare automaticamente le importazioni
-mancanti.
+ai metadati del modulo come MODULE_AUTHOR() o MODULE_LICENSE().
 
-4. Caricare moduli che usano simboli provenienti da spazi dei nomi
-==================================================================
+Caricare moduli che usano simboli provenienti da spazi dei nomi
+===============================================================
 
 Quando un modulo viene caricato (per esempio usando ``insmod``), il kernel
 verificherà la disponibilità di ogni simbolo usato e se lo spazio dei nomi
@@ -125,8 +123,8 @@ un'opzione di configurazione: impostare
 MODULE_ALLOW_MISSING_NAMESPACE_IMPORTS=y caricherà i moduli comunque ma
 emetterà un avviso.
 
-5. Creare automaticamente la dichiarazione MODULE_IMPORT_NS
-===========================================================
+Creare automaticamente la dichiarazione MODULE_IMPORT_NS
+========================================================
 
 La mancanza di un'importazione può essere individuata facilmente al momento
 della compilazione. Infatti, modpost emetterà un avviso se il modulo usa

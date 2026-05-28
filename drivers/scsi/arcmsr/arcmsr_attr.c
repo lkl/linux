@@ -60,7 +60,7 @@
 
 static ssize_t arcmsr_sysfs_iop_message_read(struct file *filp,
 					     struct kobject *kobj,
-					     struct bin_attribute *bin,
+					     const struct bin_attribute *bin,
 					     char *buf, loff_t off,
 					     size_t count)
 {
@@ -107,7 +107,7 @@ static ssize_t arcmsr_sysfs_iop_message_read(struct file *filp,
 
 static ssize_t arcmsr_sysfs_iop_message_write(struct file *filp,
 					      struct kobject *kobj,
-					      struct bin_attribute *bin,
+					      const struct bin_attribute *bin,
 					      char *buf, loff_t off,
 					      size_t count)
 {
@@ -155,7 +155,7 @@ static ssize_t arcmsr_sysfs_iop_message_write(struct file *filp,
 
 static ssize_t arcmsr_sysfs_iop_message_clear(struct file *filp,
 					      struct kobject *kobj,
-					      struct bin_attribute *bin,
+					      const struct bin_attribute *bin,
 					      char *buf, loff_t off,
 					      size_t count)
 {

@@ -592,6 +592,7 @@ static const struct ptp_clock_info idtfc3_caps = {
 	.max_adj	= MAX_FFO_PPB,
 	.n_per_out	= 1,
 	.n_ext_ts	= 1,
+	.supported_extts_flags = PTP_STRICT_FLAGS | PTP_EXT_OFFSET,
 	.adjphase	= &idtfc3_adjphase,
 	.adjfine	= &idtfc3_adjfine,
 	.adjtime	= &idtfc3_adjtime,
@@ -986,11 +987,6 @@ static int idtfc3_probe(struct platform_device *pdev)
 
 	mutex_unlock(idtfc3->lock);
 
-	if (err) {
-		ptp_clock_unregister(idtfc3->ptp_clock);
-		return err;
-	}
-
 	platform_set_drvdata(pdev, idtfc3);
 
 	return 0;
@@ -1008,7 +1004,7 @@ static struct platform_driver idtfc3_driver = {
 		.name = "rc38xxx-phc",
 	},
 	.probe = idtfc3_probe,
-	.remove_new = idtfc3_remove,
+	.remove = idtfc3_remove,
 };
 
 module_platform_driver(idtfc3_driver);

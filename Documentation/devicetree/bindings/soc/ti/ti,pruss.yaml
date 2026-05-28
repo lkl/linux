@@ -92,6 +92,16 @@ properties:
     description: |
       This property is as per sci-pm-domain.txt.
 
+  clocks:
+    items:
+      - description: ICSSG_CORE Clock
+      - description: ICSSG_IEP Clock
+      - description: ICSSG_RGMII_MHZ_250 Clock
+      - description: ICSSG_RGMII_MHZ_50 Clock
+      - description: ICSSG_RGMII_MHZ_5 Clock
+      - description: ICSSG_UART Clock
+      - description: ICSSG_ICLK Clock
+
 patternProperties:
 
   memories@[a-f0-9]+$:
@@ -239,6 +249,15 @@ patternProperties:
       AM437x, AM57xx & 66AK2G SoCs) or 2 IEPs (on K3 AM65x, J721E & AM64x SoCs).
       IEP is used for creating PTP clocks and generating PPS signals.
 
+    type: object
+
+  ecap@[a-f0-9]+$:
+    description:
+      PRU-ICSS has a Enhanced Capture (eCAP) event module which can generate
+      and capture periodic timer based events which will be used for features
+      like RX Pacing to rise interrupt when the timer event has occurred.
+      Each PRU-ICSS instance has one eCAP module irrespective of SOCs.
+    $ref: /schemas/net/ti,pruss-ecap.yaml#
     type: object
 
   mii-rt@[a-f0-9]+$:

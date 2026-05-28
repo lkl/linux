@@ -45,6 +45,9 @@ static int int3402_thermal_probe(struct platform_device *pdev)
 	struct int3402_thermal_data *d;
 	int ret;
 
+	if (!adev)
+		return -ENODEV;
+
 	if (!acpi_has_method(adev->handle, "_TMP"))
 		return -ENODEV;
 
@@ -89,7 +92,7 @@ MODULE_DEVICE_TABLE(acpi, int3402_thermal_match);
 
 static struct platform_driver int3402_thermal_driver = {
 	.probe = int3402_thermal_probe,
-	.remove_new = int3402_thermal_remove,
+	.remove = int3402_thermal_remove,
 	.driver = {
 		   .name = "int3402 thermal",
 		   .acpi_match_table = int3402_thermal_match,

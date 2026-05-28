@@ -43,12 +43,20 @@ SECTIONS
 		*(.rodata.*)
 		_erodata = . ;
 	}
+#ifdef CONFIG_EFI_SBAT
+	.sbat : ALIGN(0x1000) {
+		_sbat = . ;
+		*(.sbat)
+		_esbat = ALIGN(0x1000);
+		. = _esbat;
+	}
+#endif
 	.data :	ALIGN(0x1000) {
 		_data = . ;
 		*(.data)
 		*(.data.*)
 
-		/* Add 4 bytes of extra space for a CRC-32 checksum */
+		/* Add 4 bytes of extra space for the obsolete CRC-32 checksum */
 		. = ALIGN(. + 4, 0x200);
 		_edata = . ;
 	}

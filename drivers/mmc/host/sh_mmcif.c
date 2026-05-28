@@ -439,13 +439,14 @@ static void sh_mmcif_request_dma(struct sh_mmcif_host *host)
 		if (IS_ERR(host->chan_rx))
 			host->chan_rx = NULL;
 	}
-	dev_dbg(dev, "%s: got channel TX %p RX %p\n", __func__, host->chan_tx,
-		host->chan_rx);
 
 	if (!host->chan_tx || !host->chan_rx ||
 	    sh_mmcif_dma_slave_config(host, host->chan_tx, DMA_MEM_TO_DEV) ||
 	    sh_mmcif_dma_slave_config(host, host->chan_rx, DMA_DEV_TO_MEM))
 		goto error;
+
+	dev_dbg(dev, "%s: got channel TX %p RX %p\n", __func__, host->chan_tx,
+		host->chan_rx);
 
 	return;
 
@@ -1443,13 +1444,13 @@ static int sh_mmcif_probe(struct platform_device *pdev)
 	if (IS_ERR(reg))
 		return PTR_ERR(reg);
 
-	mmc = mmc_alloc_host(sizeof(struct sh_mmcif_host), dev);
+	mmc = devm_mmc_alloc_host(dev, sizeof(*host));
 	if (!mmc)
 		return -ENOMEM;
 
 	ret = mmc_of_parse(mmc);
 	if (ret < 0)
-		goto err_host;
+		return ret;
 
 	host		= mmc_priv(mmc);
 	host->mmc	= mmc;
@@ -1480,15 +1481,13 @@ static int sh_mmcif_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, host);
 
 	host->clk = devm_clk_get(dev, NULL);
-	if (IS_ERR(host->clk)) {
-		ret = PTR_ERR(host->clk);
-		dev_err(dev, "cannot get clock: %d\n", ret);
-		goto err_host;
-	}
+	if (IS_ERR(host->clk))
+		return dev_err_probe(dev, PTR_ERR(host->clk),
+				     "cannot get clock\n");
 
 	ret = clk_prepare_enable(host->clk);
 	if (ret < 0)
-		goto err_host;
+		return ret;
 
 	sh_mmcif_clk_setup(host);
 
@@ -1541,8 +1540,6 @@ err_clk:
 	clk_disable_unprepare(host->clk);
 	pm_runtime_put_sync(dev);
 	pm_runtime_disable(dev);
-err_host:
-	mmc_free_host(mmc);
 	return ret;
 }
 
@@ -1567,12 +1564,10 @@ static void sh_mmcif_remove(struct platform_device *pdev)
 	cancel_delayed_work_sync(&host->timeout_work);
 
 	clk_disable_unprepare(host->clk);
-	mmc_free_host(host->mmc);
 	pm_runtime_put_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int sh_mmcif_suspend(struct device *dev)
 {
 	struct sh_mmcif_host *host = dev_get_drvdata(dev);
@@ -1584,23 +1579,15 @@ static int sh_mmcif_suspend(struct device *dev)
 	return 0;
 }
 
-static int sh_mmcif_resume(struct device *dev)
-{
-	return 0;
-}
-#endif
-
-static const struct dev_pm_ops sh_mmcif_dev_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(sh_mmcif_suspend, sh_mmcif_resume)
-};
+static DEFINE_SIMPLE_DEV_PM_OPS(sh_mmcif_dev_pm_ops, sh_mmcif_suspend, NULL);
 
 static struct platform_driver sh_mmcif_driver = {
 	.probe		= sh_mmcif_probe,
-	.remove_new	= sh_mmcif_remove,
+	.remove		= sh_mmcif_remove,
 	.driver		= {
 		.name	= DRIVER_NAME,
 		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
-		.pm	= &sh_mmcif_dev_pm_ops,
+		.pm	= pm_sleep_ptr(&sh_mmcif_dev_pm_ops),
 		.of_match_table = sh_mmcif_of_match,
 	},
 };

@@ -24,7 +24,8 @@ struct ufs_sb_info {
 	struct ufs_cg_private_info * s_ucpi[UFS_MAX_GROUP_LOADED];
 	unsigned s_cgno[UFS_MAX_GROUP_LOADED];
 	unsigned short s_cg_loaded;
-	unsigned s_mount_opt;
+	unsigned s_flavour;
+	unsigned s_on_err;
 	struct super_block *sb;
 	int work_queued; /* non-zero if the delayed work is queued */
 	struct delayed_work sync_work; /* FS sync delayed work */
@@ -52,13 +53,11 @@ struct ufs_inode_info {
 };
 
 /* mount options */
-#define UFS_MOUNT_ONERROR		0x0000000F
 #define UFS_MOUNT_ONERROR_PANIC		0x00000001
 #define UFS_MOUNT_ONERROR_LOCK		0x00000002
 #define UFS_MOUNT_ONERROR_UMOUNT	0x00000004
 #define UFS_MOUNT_ONERROR_REPAIR	0x00000008
 
-#define UFS_MOUNT_UFSTYPE		0x0000FFF0
 #define UFS_MOUNT_UFSTYPE_OLD		0x00000010
 #define UFS_MOUNT_UFSTYPE_44BSD		0x00000020
 #define UFS_MOUNT_UFSTYPE_SUN		0x00000040
@@ -69,10 +68,6 @@ struct ufs_inode_info {
 #define UFS_MOUNT_UFSTYPE_HP	        0x00000800
 #define UFS_MOUNT_UFSTYPE_UFS2		0x00001000
 #define UFS_MOUNT_UFSTYPE_SUNOS		0x00002000
-
-#define ufs_clear_opt(o,opt)	o &= ~UFS_MOUNT_##opt
-#define ufs_set_opt(o,opt)	o |= UFS_MOUNT_##opt
-#define ufs_test_opt(o,opt)	((o) & UFS_MOUNT_##opt)
 
 /*
  * Debug code
@@ -88,10 +83,10 @@ struct ufs_inode_info {
 #endif
 
 /* balloc.c */
-extern void ufs_free_fragments (struct inode *, u64, unsigned);
-extern void ufs_free_blocks (struct inode *, u64, unsigned);
-extern u64 ufs_new_fragments(struct inode *, void *, u64, u64,
-			     unsigned, int *, struct page *);
+void ufs_free_fragments (struct inode *, u64 fragment, unsigned count);
+void ufs_free_blocks (struct inode *, u64 fragment, unsigned count);
+u64 ufs_new_fragments(struct inode *, void *, u64 fragment, u64 goal,
+		unsigned count, int *err, struct folio *);
 
 /* cylinder.c */
 extern struct ufs_cg_private_info * ufs_load_cylinder (struct super_block *, unsigned);
@@ -108,8 +103,8 @@ struct ufs_dir_entry *ufs_find_entry(struct inode *, const struct qstr *,
 int ufs_delete_entry(struct inode *, struct ufs_dir_entry *, struct folio *);
 int ufs_empty_dir(struct inode *);
 struct ufs_dir_entry *ufs_dotdot(struct inode *, struct folio **);
-void ufs_set_link(struct inode *dir, struct ufs_dir_entry *de,
-		struct folio *folio, struct inode *inode, bool update_times);
+int ufs_set_link(struct inode *dir, struct ufs_dir_entry *de,
+		 struct folio *folio, struct inode *inode, bool update_times);
 
 /* file.c */
 extern const struct inode_operations ufs_file_inode_operations;

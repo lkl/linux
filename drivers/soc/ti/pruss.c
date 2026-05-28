@@ -449,7 +449,7 @@ static int pruss_of_setup_memories(struct device *dev, struct pruss *pruss)
 		pruss->mem_regions[i].pa = res.start;
 		pruss->mem_regions[i].size = resource_size(&res);
 
-		dev_dbg(dev, "memory %8s: pa %pa size 0x%zx va %pK\n",
+		dev_dbg(dev, "memory %8s: pa %pa size 0x%zx va %p\n",
 			mem_names[i], &pruss->mem_regions[i].pa,
 			pruss->mem_regions[i].size, pruss->mem_regions[i].va);
 	}
@@ -593,8 +593,8 @@ static struct platform_driver pruss_driver = {
 		.name = "pruss",
 		.of_match_table = pruss_of_match,
 	},
-	.probe  = pruss_probe,
-	.remove_new = pruss_remove,
+	.probe = pruss_probe,
+	.remove = pruss_remove,
 };
 module_platform_driver(pruss_driver);
 

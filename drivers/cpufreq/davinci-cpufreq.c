@@ -101,7 +101,6 @@ static struct cpufreq_driver davinci_driver = {
 	.get		= cpufreq_generic_get,
 	.init		= davinci_cpu_init,
 	.name		= "davinci",
-	.attr		= cpufreq_generic_attr,
 };
 
 static int __init davinci_cpufreq_probe(struct platform_device *pdev)
@@ -145,7 +144,7 @@ static struct platform_driver davinci_cpufreq_driver = {
 	.driver = {
 		.name	 = "cpufreq-davinci",
 	},
-	.remove_new = __exit_p(davinci_cpufreq_remove),
+	.remove = __exit_p(davinci_cpufreq_remove),
 };
 
 int __init davinci_cpufreq_init(void)

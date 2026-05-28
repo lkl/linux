@@ -50,13 +50,8 @@ notrace void __init early_ioremap_init(void)
 
 void __init *early_alloc_pgtable(unsigned long size)
 {
-	void *ptr = memblock_alloc(size, size);
+	return memblock_alloc_or_panic(size, size);
 
-	if (!ptr)
-		panic("%s: Failed to allocate %lu bytes align=0x%lx\n",
-		      __func__, size, size);
-
-	return ptr;
 }
 
 pte_t __init *early_pte_alloc_kernel(pmd_t *pmdp, unsigned long va)
@@ -109,7 +104,7 @@ static void __init __mapin_ram_chunk(unsigned long offset, unsigned long top)
 	p = memstart_addr + s;
 	for (; s < top; s += PAGE_SIZE) {
 		ktext = core_kernel_text(v);
-		map_kernel_page(v, p, ktext ? PAGE_KERNEL_TEXT : PAGE_KERNEL);
+		map_kernel_page(v, p, ktext ? PAGE_KERNEL_X : PAGE_KERNEL);
 		v += PAGE_SIZE;
 		p += PAGE_SIZE;
 	}

@@ -7,6 +7,12 @@
 #include <linux/hisi_acc_qm.h>
 #include "sec_crypto.h"
 
+#define SEC_PBUF_SZ		512
+#define SEC_MAX_MAC_LEN		64
+#define SEC_IV_SIZE		24
+#define SEC_SGE_NR_NUM		4
+#define SEC_SGL_ALIGN_SIZE	64
+
 /* Algorithm resource per hardware SEC queue */
 struct sec_alg_res {
 	u8 *pbuf;
@@ -20,6 +26,40 @@ struct sec_alg_res {
 	u16 depth;
 };
 
+struct sec_hw_sge {
+	dma_addr_t buf;
+	void *page_ctrl;
+	__le32 len;
+	__le32 pad;
+	__le32 pad0;
+	__le32 pad1;
+};
+
+struct sec_hw_sgl {
+	dma_addr_t next_dma;
+	__le16 entry_sum_in_chain;
+	__le16 entry_sum_in_sgl;
+	__le16 entry_length_in_sgl;
+	__le16 pad0;
+	__le64 pad1[5];
+	struct sec_hw_sgl *next;
+	struct sec_hw_sge sge_entries[SEC_SGE_NR_NUM];
+} __aligned(SEC_SGL_ALIGN_SIZE);
+
+struct sec_src_dst_buf {
+	struct sec_hw_sgl in;
+	struct sec_hw_sgl out;
+};
+
+struct sec_request_buf {
+	union {
+		struct sec_src_dst_buf data_buf;
+		__u8 pbuf[SEC_PBUF_SZ];
+	};
+	dma_addr_t in_dma;
+	dma_addr_t out_dma;
+};
+
 /* Cipher request of SEC private */
 struct sec_cipher_req {
 	struct hisi_acc_hw_sgl *c_out;
@@ -29,6 +69,7 @@ struct sec_cipher_req {
 	struct skcipher_request *sk_req;
 	u32 c_len;
 	bool encrypt;
+	__u8 c_ivin_buf[SEC_IV_SIZE];
 };
 
 struct sec_aead_req {
@@ -37,6 +78,13 @@ struct sec_aead_req {
 	u8 *a_ivin;
 	dma_addr_t a_ivin_dma;
 	struct aead_request *aead_req;
+	__u8 a_ivin_buf[SEC_IV_SIZE];
+	__u8 out_mac_buf[SEC_MAX_MAC_LEN];
+};
+
+struct sec_instance_backlog {
+	struct list_head list;
+	spinlock_t lock;
 };
 
 /* SEC request of Crypto */
@@ -55,15 +103,17 @@ struct sec_req {
 	dma_addr_t in_dma;
 	struct sec_cipher_req c_req;
 	struct sec_aead_req aead_req;
-	struct list_head backlog_head;
+	struct crypto_async_request *base;
 
 	int err_type;
 	int req_id;
 	u32 flag;
 
-	/* Status of the SEC request */
-	bool fake_busy;
 	bool use_pbuf;
+
+	struct list_head list;
+	struct sec_instance_backlog *backlog;
+	struct sec_request_buf buf;
 };
 
 /**
@@ -90,9 +140,7 @@ struct sec_auth_ctx {
 	dma_addr_t a_key_dma;
 	u8 *a_key;
 	u8 a_key_len;
-	u8 mac_len;
 	u8 a_alg;
-	bool fallback;
 	struct crypto_shash *hash_tfm;
 	struct crypto_aead *fallback_aead_tfm;
 };
@@ -121,9 +169,11 @@ struct sec_qp_ctx {
 	struct sec_alg_res *res;
 	struct sec_ctx *ctx;
 	spinlock_t req_lock;
-	struct list_head backlog;
+	spinlock_t id_lock;
 	struct hisi_acc_sgl_pool *c_in_pool;
 	struct hisi_acc_sgl_pool *c_out_pool;
+	struct sec_instance_backlog backlog;
+	u16 send_head;
 };
 
 enum sec_alg_type {
@@ -140,9 +190,6 @@ struct sec_ctx {
 
 	/* Half queues for encipher, and half for decipher */
 	u32 hlf_q_num;
-
-	/* Threshold for fake busy, trigger to return -EBUSY to user */
-	u32 fake_req_limit;
 
 	/* Current cyclic index to select a queue for encipher */
 	atomic_t enc_qcyclic;
@@ -220,11 +267,27 @@ enum sec_cap_type {
 	SEC_CORE4_ALG_BITMAP_HIGH,
 };
 
-enum sec_cap_reg_record_idx {
-	SEC_DRV_ALG_BITMAP_LOW_IDX = 0x0,
-	SEC_DRV_ALG_BITMAP_HIGH_IDX,
-	SEC_DEV_ALG_BITMAP_LOW_IDX,
-	SEC_DEV_ALG_BITMAP_HIGH_IDX,
+enum sec_cap_table_type {
+	QM_RAS_NFE_TYPE = 0x0,
+	QM_RAS_NFE_RESET,
+	QM_RAS_CE_TYPE,
+	SEC_RAS_NFE_TYPE,
+	SEC_RAS_NFE_RESET,
+	SEC_RAS_CE_TYPE,
+	SEC_CORE_INFO,
+	SEC_CORE_EN,
+	SEC_DRV_ALG_BITMAP_LOW_TB,
+	SEC_DRV_ALG_BITMAP_HIGH_TB,
+	SEC_ALG_BITMAP_LOW,
+	SEC_ALG_BITMAP_HIGH,
+	SEC_CORE1_BITMAP_LOW,
+	SEC_CORE1_BITMAP_HIGH,
+	SEC_CORE2_BITMAP_LOW,
+	SEC_CORE2_BITMAP_HIGH,
+	SEC_CORE3_BITMAP_LOW,
+	SEC_CORE3_BITMAP_HIGH,
+	SEC_CORE4_BITMAP_LOW,
+	SEC_CORE4_BITMAP_HIGH,
 };
 
 void sec_destroy_qps(struct hisi_qp **qps, int qp_num);

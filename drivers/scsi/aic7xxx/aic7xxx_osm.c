@@ -632,7 +632,7 @@ ahc_linux_target_destroy(struct scsi_target *starget)
 }
 
 static int
-ahc_linux_slave_alloc(struct scsi_device *sdev)
+ahc_linux_sdev_init(struct scsi_device *sdev)
 {
 	struct	ahc_softc *ahc =
 		*((struct ahc_softc **)sdev->host->hostdata);
@@ -664,7 +664,7 @@ ahc_linux_slave_alloc(struct scsi_device *sdev)
 }
 
 static int
-ahc_linux_slave_configure(struct scsi_device *sdev)
+ahc_linux_sdev_configure(struct scsi_device *sdev, struct queue_limits *lim)
 {
 	if (bootverbose)
 		sdev_printk(KERN_INFO, sdev, "Slave Configure\n");
@@ -683,7 +683,7 @@ ahc_linux_slave_configure(struct scsi_device *sdev)
  * Return the disk geometry for the given SCSI device.
  */
 static int
-ahc_linux_biosparam(struct scsi_device *sdev, struct block_device *bdev,
+ahc_linux_biosparam(struct scsi_device *sdev, struct gendisk *disk,
 		    sector_t capacity, int geom[])
 {
 	int	 heads;
@@ -696,7 +696,7 @@ ahc_linux_biosparam(struct scsi_device *sdev, struct block_device *bdev,
 	ahc = *((struct ahc_softc **)sdev->host->hostdata);
 	channel = sdev_channel(sdev);
 
-	if (scsi_partsize(bdev, capacity, geom))
+	if (scsi_partsize(disk, capacity, geom))
 		return 0;
 
 	heads = 64;
@@ -791,8 +791,8 @@ struct scsi_host_template aic7xxx_driver_template = {
 	.this_id		= -1,
 	.max_sectors		= 8192,
 	.cmd_per_lun		= 2,
-	.slave_alloc		= ahc_linux_slave_alloc,
-	.slave_configure	= ahc_linux_slave_configure,
+	.sdev_init		= ahc_linux_sdev_init,
+	.sdev_configure		= ahc_linux_sdev_configure,
 	.target_alloc		= ahc_linux_target_alloc,
 	.target_destroy		= ahc_linux_target_destroy,
 };

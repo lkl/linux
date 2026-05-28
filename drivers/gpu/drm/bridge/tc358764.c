@@ -295,11 +295,12 @@ static void tc358764_pre_enable(struct drm_bridge *bridge)
 }
 
 static int tc358764_attach(struct drm_bridge *bridge,
+			   struct drm_encoder *encoder,
 			   enum drm_bridge_attach_flags flags)
 {
 	struct tc358764 *ctx = bridge_to_tc358764(bridge);
 
-	return drm_bridge_attach(bridge->encoder, ctx->next_bridge, bridge, flags);
+	return drm_bridge_attach(encoder, ctx->next_bridge, bridge, flags);
 }
 
 static const struct drm_bridge_funcs tc358764_bridge_funcs = {
@@ -346,9 +347,10 @@ static int tc358764_probe(struct mipi_dsi_device *dsi)
 	struct tc358764 *ctx;
 	int ret;
 
-	ctx = devm_kzalloc(dev, sizeof(struct tc358764), GFP_KERNEL);
-	if (!ctx)
-		return -ENOMEM;
+	ctx = devm_drm_bridge_alloc(dev, struct tc358764, bridge,
+				    &tc358764_bridge_funcs);
+	if (IS_ERR(ctx))
+		return PTR_ERR(ctx);
 
 	mipi_dsi_set_drvdata(dsi, ctx);
 
@@ -367,7 +369,6 @@ static int tc358764_probe(struct mipi_dsi_device *dsi)
 	if (ret < 0)
 		return ret;
 
-	ctx->bridge.funcs = &tc358764_bridge_funcs;
 	ctx->bridge.of_node = dev->of_node;
 	ctx->bridge.pre_enable_prev_first = true;
 

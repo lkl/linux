@@ -4,19 +4,16 @@
  * Copyright (c) 2014, Intel Corporation.
  */
 
-#include <linux/module.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
+#include <linux/mod_devicetable.h>
+#include <linux/module.h>
 #include <linux/slab.h>
-#include <linux/acpi.h>
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
 #include <linux/iio/events.h>
 #include <linux/pm_runtime.h>
 #include "mma9551_core.h"
-
-#define MMA9553_DRV_NAME			"mma9553"
-#define MMA9553_IRQ_NAME			"mma9553_event"
 
 /* Pedometer configuration registers (R/W) */
 #define MMA9553_REG_CONF_SLEEPMIN		0x00
@@ -100,7 +97,7 @@ enum activity_level {
 	ACTIVITY_RUNNING,
 };
 
-static struct mma9553_event_info {
+static const struct mma9553_event_info {
 	enum iio_chan_type type;
 	enum iio_modifier mod;
 	enum iio_event_direction dir;
@@ -155,7 +152,7 @@ static struct mma9553_event_info {
 #define MMA9553_EVENTS_INFO_SIZE ARRAY_SIZE(mma9553_events_info)
 
 struct mma9553_event {
-	struct mma9553_event_info *info;
+	const struct mma9553_event_info *info;
 	bool enabled;
 };
 
@@ -725,7 +722,8 @@ static int mma9553_read_event_config(struct iio_dev *indio_dev,
 static int mma9553_write_event_config(struct iio_dev *indio_dev,
 				      const struct iio_chan_spec *chan,
 				      enum iio_event_type type,
-				      enum iio_event_direction dir, int state)
+				      enum iio_event_direction dir,
+				      bool state)
 {
 	struct mma9553_data *data = iio_priv(indio_dev);
 	struct mma9553_event *event;
@@ -918,7 +916,7 @@ static const struct iio_enum mma9553_calibgender_enum = {
 static const struct iio_chan_spec_ext_info mma9553_ext_info[] = {
 	IIO_ENUM("calibgender", IIO_SHARED_BY_TYPE, &mma9553_calibgender_enum),
 	IIO_ENUM_AVAILABLE("calibgender", IIO_SHARED_BY_TYPE, &mma9553_calibgender_enum),
-	{},
+	{ }
 };
 
 #define MMA9553_PEDOMETER_CHANNEL(_type, _mask) {		\
@@ -1030,9 +1028,9 @@ static irqreturn_t mma9553_event_handler(int irq, void *private)
 	if (ev_step_detect->enabled && (stepcnt != data->stepcnt)) {
 		data->stepcnt = stepcnt;
 		iio_push_event(indio_dev,
-			       IIO_EVENT_CODE(IIO_STEPS, 0, IIO_NO_MOD,
-					      IIO_EV_DIR_NONE,
-					      IIO_EV_TYPE_CHANGE, 0, 0, 0),
+			       IIO_UNMOD_EVENT_CODE(IIO_STEPS, 0,
+						    IIO_EV_TYPE_CHANGE,
+						    IIO_EV_DIR_NONE),
 			       data->timestamp);
 	}
 
@@ -1041,36 +1039,23 @@ static irqreturn_t mma9553_event_handler(int irq, void *private)
 		/* ev_activity can be NULL if activity == ACTIVITY_UNKNOWN */
 		if (ev_prev_activity && ev_prev_activity->enabled)
 			iio_push_event(indio_dev,
-				       IIO_EVENT_CODE(IIO_ACTIVITY, 0,
-						    ev_prev_activity->info->mod,
-						    IIO_EV_DIR_FALLING,
-						    IIO_EV_TYPE_THRESH, 0, 0,
-						    0),
+				       IIO_MOD_EVENT_CODE(IIO_ACTIVITY, 0,
+						ev_prev_activity->info->mod,
+						IIO_EV_TYPE_THRESH,
+						IIO_EV_DIR_FALLING),
 				       data->timestamp);
 
 		if (ev_activity && ev_activity->enabled)
 			iio_push_event(indio_dev,
-				       IIO_EVENT_CODE(IIO_ACTIVITY, 0,
-						      ev_activity->info->mod,
-						      IIO_EV_DIR_RISING,
-						      IIO_EV_TYPE_THRESH, 0, 0,
-						      0),
+				       IIO_MOD_EVENT_CODE(IIO_ACTIVITY, 0,
+							  ev_activity->info->mod,
+							  IIO_EV_TYPE_THRESH,
+							  IIO_EV_DIR_RISING),
 				       data->timestamp);
 	}
 	mutex_unlock(&data->mutex);
 
 	return IRQ_HANDLED;
-}
-
-static const char *mma9553_match_acpi_device(struct device *dev)
-{
-	const struct acpi_device_id *id;
-
-	id = acpi_match_device(dev->driver->acpi_match_table, dev);
-	if (!id)
-		return NULL;
-
-	return dev_name(dev);
 }
 
 static int mma9553_probe(struct i2c_client *client)
@@ -1091,9 +1076,9 @@ static int mma9553_probe(struct i2c_client *client)
 
 	if (id)
 		name = id->name;
-	else if (ACPI_HANDLE(&client->dev))
-		name = mma9553_match_acpi_device(&client->dev);
 	else
+		name = iio_get_acpi_device_name(&client->dev);
+	if (!name)
 		return -ENOSYS;
 
 	mutex_init(&data->mutex);
@@ -1114,7 +1099,7 @@ static int mma9553_probe(struct i2c_client *client)
 						mma9553_irq_handler,
 						mma9553_event_handler,
 						IRQF_TRIGGER_RISING,
-						MMA9553_IRQ_NAME, indio_dev);
+						"mma9553_event", indio_dev);
 		if (ret < 0) {
 			dev_err(&client->dev, "request irq %d failed\n",
 				client->irq);
@@ -1228,21 +1213,21 @@ static const struct dev_pm_ops mma9553_pm_ops = {
 
 static const struct acpi_device_id mma9553_acpi_match[] = {
 	{"MMA9553", 0},
-	{},
+	{ }
 };
 
 MODULE_DEVICE_TABLE(acpi, mma9553_acpi_match);
 
 static const struct i2c_device_id mma9553_id[] = {
 	{ "mma9553" },
-	{}
+	{ }
 };
 
 MODULE_DEVICE_TABLE(i2c, mma9553_id);
 
 static struct i2c_driver mma9553_driver = {
 	.driver = {
-		   .name = MMA9553_DRV_NAME,
+		   .name = "mma9553",
 		   .acpi_match_table = mma9553_acpi_match,
 		   .pm = pm_ptr(&mma9553_pm_ops),
 	},
@@ -1256,4 +1241,4 @@ module_i2c_driver(mma9553_driver);
 MODULE_AUTHOR("Irina Tirdea <irina.tirdea@intel.com>");
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("MMA9553L pedometer platform driver");
-MODULE_IMPORT_NS(IIO_MMA9551);
+MODULE_IMPORT_NS("IIO_MMA9551");

@@ -348,7 +348,7 @@ static int sbsm_probe(struct i2c_client *client)
 	data->muxc = i2c_mux_alloc(adapter, dev, SBSM_MAX_BATS, 0,
 				   I2C_MUX_LOCKED, &sbsm_select, NULL);
 	if (!data->muxc)
-		return dev_err_probe(dev, -ENOMEM, "failed to alloc i2c mux\n");
+		return -ENOMEM;
 	data->muxc->priv = data;
 
 	ret = devm_add_action_or_reset(dev, sbsm_del_mux_adapter, data);
@@ -379,7 +379,7 @@ static int sbsm_probe(struct i2c_client *client)
 		return ret;
 
 	psy_cfg.drv_data = data;
-	psy_cfg.of_node = dev->of_node;
+	psy_cfg.fwnode = dev_fwnode(dev);
 	data->psy = devm_power_supply_register(dev, psy_desc, &psy_cfg);
 	if (IS_ERR(data->psy))
 		return dev_err_probe(dev, PTR_ERR(data->psy),

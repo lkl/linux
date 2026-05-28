@@ -796,7 +796,7 @@ static const struct pinfunction sdx55_functions[] = {
 	MSM_PIN_FUNCTION(gcc_gp2),
 	MSM_PIN_FUNCTION(gcc_gp3),
 	MSM_PIN_FUNCTION(gcc_plltest),
-	MSM_PIN_FUNCTION(gpio),
+	MSM_GPIO_PIN_FUNCTION(gpio),
 	MSM_PIN_FUNCTION(i2s_mclk),
 	MSM_PIN_FUNCTION(jitter_bist),
 	MSM_PIN_FUNCTION(ldo_en),
@@ -990,7 +990,6 @@ static struct platform_driver sdx55_pinctrl_driver = {
 		.of_match_table = sdx55_pinctrl_of_match,
 	},
 	.probe = sdx55_pinctrl_probe,
-	.remove_new = msm_pinctrl_remove,
 };
 
 static int __init sdx55_pinctrl_init(void)

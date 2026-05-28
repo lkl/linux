@@ -3,7 +3,7 @@
 # -*- coding: utf-8; mode: python -*-
 # pylint: disable=R0903, C0330, R0914, R0912, E0401
 
-u"""
+"""
     maintainers-include
     ~~~~~~~~~~~~~~~~~~~
 
@@ -22,9 +22,11 @@ import re
 import os.path
 
 from docutils import statemachine
-from docutils.utils.error_reporting import ErrorString
 from docutils.parsers.rst import Directive
 from docutils.parsers.rst.directives.misc import Include
+
+def ErrorString(exc):  # Shamelessly stolen from docutils
+    return f'{exc.__class__.__name}: {exc}'
 
 __version__  = '1.0'
 
@@ -37,7 +39,7 @@ def setup(app):
     )
 
 class MaintainersInclude(Include):
-    u"""MaintainersInclude (``maintainers-include``) directive"""
+    """MaintainersInclude (``maintainers-include``) directive"""
     required_arguments = 0
 
     def parse_maintainers(self, path):

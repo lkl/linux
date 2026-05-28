@@ -8,6 +8,8 @@
 #ifndef SELFTEST_KVM_TEST_UTIL_H
 #define SELFTEST_KVM_TEST_UTIL_H
 
+#include <setjmp.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -22,7 +24,7 @@
 
 #define msecs_to_usecs(msec)    ((msec) * 1000ULL)
 
-static inline int _no_printf(const char *format, ...) { return 0; }
+static inline __printf(1, 2) int _no_printf(const char *format, ...) { return 0; }
 
 #ifdef DEBUG
 #define pr_debug(...) printf(__VA_ARGS__)
@@ -76,6 +78,23 @@ do {									\
 #define TEST_FAIL(fmt, ...) do { \
 	TEST_ASSERT(false, fmt, ##__VA_ARGS__); \
 	__builtin_unreachable(); \
+} while (0)
+
+extern sigjmp_buf expect_sigbus_jmpbuf;
+void expect_sigbus_handler(int signum);
+
+#define TEST_EXPECT_SIGBUS(action)						\
+do {										\
+	struct sigaction sa_old, sa_new = {					\
+		.sa_handler = expect_sigbus_handler,				\
+	};									\
+										\
+	sigaction(SIGBUS, &sa_new, &sa_old);					\
+	if (sigsetjmp(expect_sigbus_jmpbuf, 1) == 0) {				\
+		action;								\
+		TEST_FAIL("'%s' should have triggered SIGBUS", #action);	\
+	}									\
+	sigaction(SIGBUS, &sa_old, NULL);					\
 } while (0)
 
 size_t parse_size(const char *size);
@@ -153,6 +172,7 @@ bool is_backing_src_hugetlb(uint32_t i);
 void backing_src_help(const char *flag);
 enum vm_mem_backing_src_type parse_backing_src_type(const char *type_name);
 long get_run_delay(void);
+bool is_numa_balancing_enabled(void);
 
 /*
  * Whether or not the given source type is shared memory (as opposed to

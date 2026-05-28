@@ -5,19 +5,34 @@
 // Copyright (C) 2024 Cirrus Logic, Inc. and
 //                    Cirrus Logic International Semiconductor Ltd.
 
+#include <kunit/resource.h>
 #include <kunit/test.h>
+#include <kunit/test-bug.h>
 #include <kunit/static_stub.h>
+#include <linux/device/faux.h>
 #include <linux/firmware/cirrus/cs_dsp.h>
 #include <linux/firmware/cirrus/wmfw.h>
 #include <linux/gpio/driver.h>
 #include <linux/list.h>
 #include <linux/module.h>
+#include <linux/overflow.h>
 #include <linux/platform_device.h>
 #include <linux/random.h>
 #include <sound/cs-amp-lib.h>
 
+#define LENOVO_SPEAKER_ID_EFI_NAME L"SdwSpeaker"
+#define LENOVO_SPEAKER_ID_EFI_GUID \
+	EFI_GUID(0x48df970e, 0xe27f, 0x460a, 0xb5, 0x86, 0x77, 0x19, 0x80, 0x1d, 0x92, 0x82)
+
+#define HP_SPEAKER_ID_EFI_NAME L"HPSpeakerID"
+#define HP_SPEAKER_ID_EFI_GUID \
+	EFI_GUID(0xc49593a4, 0xd099, 0x419b, 0xa2, 0xc3, 0x67, 0xe9, 0x80, 0xe6, 0x1d, 0x1e)
+
+KUNIT_DEFINE_ACTION_WRAPPER(faux_device_destroy_wrapper, faux_device_destroy,
+			    struct faux_device *)
+
 struct cs_amp_lib_test_priv {
-	struct platform_device amp_pdev;
+	struct faux_device *amp_dev;
 
 	struct cirrus_amp_efi_data *cal_blob;
 	struct list_head ctl_write_list;
@@ -40,8 +55,7 @@ static void cs_amp_lib_test_init_dummy_cal_blob(struct kunit *test, int num_amps
 	unsigned int blob_size;
 	int i;
 
-	blob_size = offsetof(struct cirrus_amp_efi_data, data) +
-		    sizeof(struct cirrus_amp_cal_data) * num_amps;
+	blob_size = struct_size(priv->cal_blob, data, num_amps);
 
 	priv->cal_blob = kunit_kzalloc(test, blob_size, GFP_KERNEL);
 	KUNIT_ASSERT_NOT_NULL(test, priv->cal_blob);
@@ -49,7 +63,7 @@ static void cs_amp_lib_test_init_dummy_cal_blob(struct kunit *test, int num_amps
 	priv->cal_blob->size = blob_size;
 	priv->cal_blob->count = num_amps;
 
-	get_random_bytes(priv->cal_blob->data, sizeof(struct cirrus_amp_cal_data) * num_amps);
+	get_random_bytes(priv->cal_blob->data, flex_array_size(priv->cal_blob, data, num_amps));
 
 	/* Ensure all timestamps are non-zero to mark the entry valid. */
 	for (i = 0; i < num_amps; i++)
@@ -99,7 +113,7 @@ static void cs_amp_lib_test_cal_data_too_short_test(struct kunit *test)
 				   cs_amp_test_hooks->get_efi_variable,
 				   cs_amp_lib_test_get_efi_variable_nohead);
 
-	ret = cs_amp_get_efi_calibration_data(&priv->amp_pdev.dev, 0, 0, &result_data);
+	ret = cs_amp_get_efi_calibration_data(&priv->amp_dev->dev, 0, 0, &result_data);
 	KUNIT_EXPECT_EQ(test, ret, -EOVERFLOW);
 
 	kunit_deactivate_static_stub(test, cs_amp_test_hooks->get_efi_variable);
@@ -142,7 +156,7 @@ static void cs_amp_lib_test_cal_count_too_big_test(struct kunit *test)
 				   cs_amp_test_hooks->get_efi_variable,
 				   cs_amp_lib_test_get_efi_variable_bad_count);
 
-	ret = cs_amp_get_efi_calibration_data(&priv->amp_pdev.dev, 0, 0, &result_data);
+	ret = cs_amp_get_efi_calibration_data(&priv->amp_dev->dev, 0, 0, &result_data);
 	KUNIT_EXPECT_EQ(test, ret, -EOVERFLOW);
 
 	kunit_deactivate_static_stub(test, cs_amp_test_hooks->get_efi_variable);
@@ -169,7 +183,7 @@ static void cs_amp_lib_test_no_cal_data_test(struct kunit *test)
 				   cs_amp_test_hooks->get_efi_variable,
 				   cs_amp_lib_test_get_efi_variable_none);
 
-	ret = cs_amp_get_efi_calibration_data(&priv->amp_pdev.dev, 0, 0, &result_data);
+	ret = cs_amp_get_efi_calibration_data(&priv->amp_dev->dev, 0, 0, &result_data);
 	KUNIT_EXPECT_EQ(test, ret, -ENOENT);
 
 	kunit_deactivate_static_stub(test, cs_amp_test_hooks->get_efi_variable);
@@ -191,8 +205,9 @@ static efi_status_t cs_amp_lib_test_get_efi_variable(efi_char16_t *name,
 	KUNIT_EXPECT_NOT_ERR_OR_NULL(test, guid);
 	KUNIT_EXPECT_NOT_ERR_OR_NULL(test, size);
 
-	KUNIT_EXPECT_MEMEQ(test, name, expected_name, sizeof(expected_name));
-	KUNIT_EXPECT_MEMEQ(test, guid, &expected_guid, sizeof(expected_guid));
+	if (memcmp(name, expected_name, sizeof(expected_name)) ||
+	    efi_guidcmp(*guid, expected_guid))
+		return -EFI_NOT_FOUND;
 
 	if (!buf) {
 		*size = priv->cal_blob->size;
@@ -204,6 +219,56 @@ static efi_status_t cs_amp_lib_test_get_efi_variable(efi_char16_t *name,
 	memcpy(buf, priv->cal_blob, priv->cal_blob->size);
 
 	return EFI_SUCCESS;
+}
+
+static efi_status_t cs_amp_lib_test_get_hp_cal_efi_variable(efi_char16_t *name,
+							    efi_guid_t *guid,
+							    unsigned long *size,
+							    void *buf)
+{
+	static const efi_char16_t expected_name[] = L"SmartAmpCalibrationData";
+	static const efi_guid_t expected_guid =
+		EFI_GUID(0x53559579, 0x8753, 0x4f5c, 0x91, 0x30, 0xe8, 0x2a, 0xcf, 0xb8, 0xd8, 0x93);
+	struct kunit *test = kunit_get_current_test();
+	struct cs_amp_lib_test_priv *priv = test->priv;
+
+	KUNIT_EXPECT_NOT_ERR_OR_NULL(test, name);
+	KUNIT_EXPECT_NOT_ERR_OR_NULL(test, guid);
+	KUNIT_EXPECT_NOT_ERR_OR_NULL(test, size);
+
+	if (memcmp(name, expected_name, sizeof(expected_name)) ||
+	    efi_guidcmp(*guid, expected_guid))
+		return -EFI_NOT_FOUND;
+
+	if (!buf) {
+		*size = priv->cal_blob->size;
+		return EFI_BUFFER_TOO_SMALL;
+	}
+
+	KUNIT_ASSERT_GE_MSG(test, ksize(buf), priv->cal_blob->size, "Buffer to small");
+
+	memcpy(buf, priv->cal_blob, priv->cal_blob->size);
+
+	return EFI_SUCCESS;
+}
+
+/* Get cal data block from HP variable. */
+static void cs_amp_lib_test_get_hp_efi_cal(struct kunit *test)
+{
+	struct cs_amp_lib_test_priv *priv = test->priv;
+	struct cirrus_amp_cal_data result_data;
+	int ret;
+
+	cs_amp_lib_test_init_dummy_cal_blob(test, 2);
+
+	kunit_activate_static_stub(test,
+				   cs_amp_test_hooks->get_efi_variable,
+				   cs_amp_lib_test_get_hp_cal_efi_variable);
+
+	ret = cs_amp_get_efi_calibration_data(&priv->amp_dev->dev, 0, 0, &result_data);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+
+	KUNIT_EXPECT_MEMEQ(test, &result_data, &priv->cal_blob->data[0], sizeof(result_data));
 }
 
 /* Get cal data block for a given amp, matched by target UID. */
@@ -223,7 +288,7 @@ static void cs_amp_lib_test_get_efi_cal_by_uid_test(struct kunit *test)
 				   cs_amp_lib_test_get_efi_variable);
 
 	target_uid = cs_amp_lib_test_get_target_uid(test);
-	ret = cs_amp_get_efi_calibration_data(&priv->amp_pdev.dev, target_uid, -1, &result_data);
+	ret = cs_amp_get_efi_calibration_data(&priv->amp_dev->dev, target_uid, -1, &result_data);
 	KUNIT_EXPECT_EQ(test, ret, 0);
 
 	kunit_deactivate_static_stub(test, cs_amp_test_hooks->get_efi_variable);
@@ -257,7 +322,7 @@ static void cs_amp_lib_test_get_efi_cal_by_index_unchecked_test(struct kunit *te
 				   cs_amp_test_hooks->get_efi_variable,
 				   cs_amp_lib_test_get_efi_variable);
 
-	ret = cs_amp_get_efi_calibration_data(&priv->amp_pdev.dev, 0,
+	ret = cs_amp_get_efi_calibration_data(&priv->amp_dev->dev, 0,
 					      param->amp_index, &result_data);
 	KUNIT_EXPECT_EQ(test, ret, 0);
 
@@ -292,7 +357,7 @@ static void cs_amp_lib_test_get_efi_cal_by_index_checked_test(struct kunit *test
 				   cs_amp_lib_test_get_efi_variable);
 
 	target_uid = cs_amp_lib_test_get_target_uid(test);
-	ret = cs_amp_get_efi_calibration_data(&priv->amp_pdev.dev, target_uid,
+	ret = cs_amp_get_efi_calibration_data(&priv->amp_dev->dev, target_uid,
 					      param->amp_index, &result_data);
 	KUNIT_EXPECT_EQ(test, ret, 0);
 
@@ -331,7 +396,7 @@ static void cs_amp_lib_test_get_efi_cal_by_index_uid_mismatch_test(struct kunit 
 
 	/* Get a target UID that won't match the entry */
 	target_uid = ~cs_amp_lib_test_get_target_uid(test);
-	ret = cs_amp_get_efi_calibration_data(&priv->amp_pdev.dev, target_uid,
+	ret = cs_amp_get_efi_calibration_data(&priv->amp_dev->dev, target_uid,
 					      param->amp_index, &result_data);
 	KUNIT_EXPECT_EQ(test, ret, -ENOENT);
 
@@ -363,7 +428,7 @@ static void cs_amp_lib_test_get_efi_cal_by_index_fallback_test(struct kunit *tes
 				   cs_amp_test_hooks->get_efi_variable,
 				   cs_amp_lib_test_get_efi_variable);
 
-	ret = cs_amp_get_efi_calibration_data(&priv->amp_pdev.dev, bad_target_uid,
+	ret = cs_amp_get_efi_calibration_data(&priv->amp_dev->dev, bad_target_uid,
 					      param->amp_index, &result_data);
 	KUNIT_EXPECT_EQ(test, ret, 0);
 
@@ -405,7 +470,7 @@ static void cs_amp_lib_test_get_efi_cal_uid_not_found_noindex_test(struct kunit 
 				   cs_amp_test_hooks->get_efi_variable,
 				   cs_amp_lib_test_get_efi_variable);
 
-	ret = cs_amp_get_efi_calibration_data(&priv->amp_pdev.dev, bad_target_uid, -1,
+	ret = cs_amp_get_efi_calibration_data(&priv->amp_dev->dev, bad_target_uid, -1,
 					      &result_data);
 	KUNIT_EXPECT_EQ(test, ret, -ENOENT);
 
@@ -436,7 +501,7 @@ static void cs_amp_lib_test_get_efi_cal_uid_not_found_index_not_found_test(struc
 				   cs_amp_test_hooks->get_efi_variable,
 				   cs_amp_lib_test_get_efi_variable);
 
-	ret = cs_amp_get_efi_calibration_data(&priv->amp_pdev.dev, bad_target_uid, 99,
+	ret = cs_amp_get_efi_calibration_data(&priv->amp_dev->dev, bad_target_uid, 99,
 					      &result_data);
 	KUNIT_EXPECT_EQ(test, ret, -ENOENT);
 
@@ -460,7 +525,7 @@ static void cs_amp_lib_test_get_efi_cal_no_uid_index_not_found_test(struct kunit
 				   cs_amp_test_hooks->get_efi_variable,
 				   cs_amp_lib_test_get_efi_variable);
 
-	ret = cs_amp_get_efi_calibration_data(&priv->amp_pdev.dev, 0, 99, &result_data);
+	ret = cs_amp_get_efi_calibration_data(&priv->amp_dev->dev, 0, 99, &result_data);
 	KUNIT_EXPECT_EQ(test, ret, -ENOENT);
 
 	kunit_deactivate_static_stub(test, cs_amp_test_hooks->get_efi_variable);
@@ -480,7 +545,7 @@ static void cs_amp_lib_test_get_efi_cal_no_uid_no_index_test(struct kunit *test)
 				   cs_amp_test_hooks->get_efi_variable,
 				   cs_amp_lib_test_get_efi_variable);
 
-	ret = cs_amp_get_efi_calibration_data(&priv->amp_pdev.dev, 0, -1, &result_data);
+	ret = cs_amp_get_efi_calibration_data(&priv->amp_dev->dev, 0, -1, &result_data);
 	KUNIT_EXPECT_EQ(test, ret, -ENOENT);
 
 	kunit_deactivate_static_stub(test, cs_amp_test_hooks->get_efi_variable);
@@ -509,7 +574,7 @@ static void cs_amp_lib_test_get_efi_cal_zero_not_matched_test(struct kunit *test
 				   cs_amp_test_hooks->get_efi_variable,
 				   cs_amp_lib_test_get_efi_variable);
 
-	ret = cs_amp_get_efi_calibration_data(&priv->amp_pdev.dev, 0, -1, &result_data);
+	ret = cs_amp_get_efi_calibration_data(&priv->amp_dev->dev, 0, -1, &result_data);
 	KUNIT_EXPECT_EQ(test, ret, -ENOENT);
 
 	kunit_deactivate_static_stub(test, cs_amp_test_hooks->get_efi_variable);
@@ -543,14 +608,14 @@ static void cs_amp_lib_test_get_efi_cal_empty_entry_test(struct kunit *test)
 
 	/* Lookup by UID should not find it */
 	KUNIT_EXPECT_EQ(test,
-			cs_amp_get_efi_calibration_data(&priv->amp_pdev.dev,
+			cs_amp_get_efi_calibration_data(&priv->amp_dev->dev,
 							uid, -1,
 							&result_data),
 			-ENOENT);
 
 	/* Get by index should ignore it */
 	KUNIT_EXPECT_EQ(test,
-			cs_amp_get_efi_calibration_data(&priv->amp_pdev.dev,
+			cs_amp_get_efi_calibration_data(&priv->amp_dev->dev,
 							0, 2,
 							&result_data),
 			-ENOENT);
@@ -600,7 +665,7 @@ static void cs_amp_lib_test_write_cal_data_test(struct kunit *test)
 
 	dsp = kunit_kzalloc(test, sizeof(*dsp), GFP_KERNEL);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, dsp);
-	dsp->dev = &priv->amp_pdev.dev;
+	dsp->dev = &priv->amp_dev->dev;
 
 	get_random_bytes(&data, sizeof(data));
 
@@ -637,14 +702,188 @@ static void cs_amp_lib_test_write_cal_data_test(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, entry->value, data.calStatus);
 }
 
-static void cs_amp_lib_test_dev_release(struct device *dev)
+static void cs_amp_lib_test_spkid_lenovo_not_present(struct kunit *test)
 {
+	struct cs_amp_lib_test_priv *priv = test->priv;
+	struct device *dev = &priv->amp_dev->dev;
+
+	kunit_activate_static_stub(test,
+				   cs_amp_test_hooks->get_efi_variable,
+				   cs_amp_lib_test_get_efi_variable_none);
+
+	KUNIT_EXPECT_EQ(test, -ENOENT, cs_amp_get_vendor_spkid(dev));
+}
+
+static efi_status_t cs_amp_lib_test_get_efi_variable_lenovo_d0(efi_char16_t *name,
+							       efi_guid_t *guid,
+							       unsigned long *size,
+							       void *buf)
+{
+	struct kunit *test = kunit_get_current_test();
+
+	if (efi_guidcmp(*guid, LENOVO_SPEAKER_ID_EFI_GUID) ||
+	    memcmp(name, LENOVO_SPEAKER_ID_EFI_NAME, sizeof(LENOVO_SPEAKER_ID_EFI_NAME)))
+		return EFI_NOT_FOUND;
+
+	KUNIT_ASSERT_EQ(test, *size, 1);
+	*size = 1;
+	*(u8 *)buf = 0xd0;
+
+	return EFI_SUCCESS;
+}
+
+static efi_status_t cs_amp_lib_test_get_efi_variable_lenovo_d1(efi_char16_t *name,
+							       efi_guid_t *guid,
+							       unsigned long *size,
+							       void *buf)
+{
+	struct kunit *test = kunit_get_current_test();
+
+	if (efi_guidcmp(*guid, LENOVO_SPEAKER_ID_EFI_GUID) ||
+	    memcmp(name, LENOVO_SPEAKER_ID_EFI_NAME, sizeof(LENOVO_SPEAKER_ID_EFI_NAME)))
+		return EFI_NOT_FOUND;
+
+	KUNIT_ASSERT_EQ(test, *size, 1);
+	*size = 1;
+	*(u8 *)buf = 0xd1;
+
+	return EFI_SUCCESS;
+}
+
+static efi_status_t cs_amp_lib_test_get_efi_variable_lenovo_00(efi_char16_t *name,
+							       efi_guid_t *guid,
+							       unsigned long *size,
+							       void *buf)
+{
+	struct kunit *test = kunit_get_current_test();
+
+	KUNIT_ASSERT_EQ(test, 0, efi_guidcmp(*guid, LENOVO_SPEAKER_ID_EFI_GUID));
+	KUNIT_ASSERT_EQ(test, *size, 1);
+	*size = 1;
+	*(u8 *)buf = 0;
+
+	return EFI_SUCCESS;
+}
+
+static void cs_amp_lib_test_spkid_lenovo_d0(struct kunit *test)
+{
+	struct cs_amp_lib_test_priv *priv = test->priv;
+	struct device *dev = &priv->amp_dev->dev;
+
+	kunit_activate_static_stub(test,
+				   cs_amp_test_hooks->get_efi_variable,
+				   cs_amp_lib_test_get_efi_variable_lenovo_d0);
+
+	KUNIT_EXPECT_EQ(test, 0, cs_amp_get_vendor_spkid(dev));
+}
+
+static void cs_amp_lib_test_spkid_lenovo_d1(struct kunit *test)
+{
+	struct cs_amp_lib_test_priv *priv = test->priv;
+	struct device *dev = &priv->amp_dev->dev;
+
+	kunit_activate_static_stub(test,
+				   cs_amp_test_hooks->get_efi_variable,
+				   cs_amp_lib_test_get_efi_variable_lenovo_d1);
+
+	KUNIT_EXPECT_EQ(test, 1, cs_amp_get_vendor_spkid(dev));
+}
+
+static void cs_amp_lib_test_spkid_lenovo_illegal(struct kunit *test)
+{
+	struct cs_amp_lib_test_priv *priv = test->priv;
+	struct device *dev = &priv->amp_dev->dev;
+
+	kunit_activate_static_stub(test,
+				   cs_amp_test_hooks->get_efi_variable,
+				   cs_amp_lib_test_get_efi_variable_lenovo_00);
+
+	KUNIT_EXPECT_LT(test, cs_amp_get_vendor_spkid(dev), 0);
+}
+
+static efi_status_t cs_amp_lib_test_get_efi_variable_buf_too_small(efi_char16_t *name,
+								   efi_guid_t *guid,
+								   unsigned long *size,
+								   void *buf)
+{
+	return EFI_BUFFER_TOO_SMALL;
+}
+
+static void cs_amp_lib_test_spkid_lenovo_oversize(struct kunit *test)
+{
+	struct cs_amp_lib_test_priv *priv = test->priv;
+	struct device *dev = &priv->amp_dev->dev;
+
+	kunit_activate_static_stub(test,
+				   cs_amp_test_hooks->get_efi_variable,
+				   cs_amp_lib_test_get_efi_variable_buf_too_small);
+
+	KUNIT_EXPECT_LT(test, cs_amp_get_vendor_spkid(dev), 0);
+}
+
+static efi_status_t cs_amp_lib_test_get_efi_variable_hp_30(efi_char16_t *name,
+							   efi_guid_t *guid,
+							   unsigned long *size,
+							   void *buf)
+{
+	struct kunit *test = kunit_get_current_test();
+
+	if (efi_guidcmp(*guid, HP_SPEAKER_ID_EFI_GUID) ||
+	    memcmp(name, HP_SPEAKER_ID_EFI_NAME, sizeof(HP_SPEAKER_ID_EFI_NAME)))
+		return EFI_NOT_FOUND;
+
+	KUNIT_ASSERT_EQ(test, *size, 1);
+	*size = 1;
+	*(u8 *)buf = 0x30;
+
+	return EFI_SUCCESS;
+}
+
+static efi_status_t cs_amp_lib_test_get_efi_variable_hp_31(efi_char16_t *name,
+							   efi_guid_t *guid,
+							   unsigned long *size,
+							   void *buf)
+{
+	struct kunit *test = kunit_get_current_test();
+
+	if (efi_guidcmp(*guid, HP_SPEAKER_ID_EFI_GUID) ||
+	    memcmp(name, HP_SPEAKER_ID_EFI_NAME, sizeof(HP_SPEAKER_ID_EFI_NAME)))
+		return EFI_NOT_FOUND;
+
+	KUNIT_ASSERT_EQ(test, *size, 1);
+	*size = 1;
+	*(u8 *)buf = 0x31;
+
+	return EFI_SUCCESS;
+}
+
+static void cs_amp_lib_test_spkid_hp_30(struct kunit *test)
+{
+	struct cs_amp_lib_test_priv *priv = test->priv;
+	struct device *dev = &priv->amp_dev->dev;
+
+	kunit_activate_static_stub(test,
+				   cs_amp_test_hooks->get_efi_variable,
+				   cs_amp_lib_test_get_efi_variable_hp_30);
+
+	KUNIT_EXPECT_EQ(test, 0, cs_amp_get_vendor_spkid(dev));
+}
+
+static void cs_amp_lib_test_spkid_hp_31(struct kunit *test)
+{
+	struct cs_amp_lib_test_priv *priv = test->priv;
+	struct device *dev = &priv->amp_dev->dev;
+
+	kunit_activate_static_stub(test,
+				   cs_amp_test_hooks->get_efi_variable,
+				   cs_amp_lib_test_get_efi_variable_hp_31);
+
+	KUNIT_EXPECT_EQ(test, 1, cs_amp_get_vendor_spkid(dev));
 }
 
 static int cs_amp_lib_test_case_init(struct kunit *test)
 {
 	struct cs_amp_lib_test_priv *priv;
-	int ret;
 
 	KUNIT_ASSERT_NOT_NULL(test, cs_amp_test_hooks);
 
@@ -656,21 +895,14 @@ static int cs_amp_lib_test_case_init(struct kunit *test)
 	INIT_LIST_HEAD(&priv->ctl_write_list);
 
 	/* Create dummy amp driver dev */
-	priv->amp_pdev.name = "cs_amp_lib_test_drv";
-	priv->amp_pdev.id = -1;
-	priv->amp_pdev.dev.release = cs_amp_lib_test_dev_release;
-	ret = platform_device_register(&priv->amp_pdev);
-	KUNIT_ASSERT_GE_MSG(test, ret, 0, "Failed to register amp platform device\n");
+	priv->amp_dev = faux_device_create("cs_amp_lib_test_drv", NULL, NULL);
+	KUNIT_ASSERT_NOT_NULL(test, priv->amp_dev);
+	KUNIT_ASSERT_EQ(test, 0,
+			kunit_add_action_or_reset(test,
+						  faux_device_destroy_wrapper,
+						  priv->amp_dev));
 
 	return 0;
-}
-
-static void cs_amp_lib_test_case_exit(struct kunit *test)
-{
-	struct cs_amp_lib_test_priv *priv = test->priv;
-
-	if (priv->amp_pdev.name)
-		platform_device_unregister(&priv->amp_pdev);
 }
 
 static const struct cs_amp_lib_test_param cs_amp_lib_test_get_cal_param_cases[] = {
@@ -729,6 +961,7 @@ static struct kunit_case cs_amp_lib_test_cases[] = {
 	KUNIT_CASE(cs_amp_lib_test_get_efi_cal_no_uid_index_not_found_test),
 	KUNIT_CASE(cs_amp_lib_test_get_efi_cal_no_uid_no_index_test),
 	KUNIT_CASE(cs_amp_lib_test_get_efi_cal_zero_not_matched_test),
+	KUNIT_CASE(cs_amp_lib_test_get_hp_efi_cal),
 	KUNIT_CASE_PARAM(cs_amp_lib_test_get_efi_cal_by_uid_test,
 			 cs_amp_lib_test_get_cal_gen_params),
 	KUNIT_CASE_PARAM(cs_amp_lib_test_get_efi_cal_by_index_unchecked_test,
@@ -744,19 +977,27 @@ static struct kunit_case cs_amp_lib_test_cases[] = {
 	/* Tests for writing calibration data */
 	KUNIT_CASE(cs_amp_lib_test_write_cal_data_test),
 
+	/* Test cases for speaker ID */
+	KUNIT_CASE(cs_amp_lib_test_spkid_lenovo_not_present),
+	KUNIT_CASE(cs_amp_lib_test_spkid_lenovo_d0),
+	KUNIT_CASE(cs_amp_lib_test_spkid_lenovo_d1),
+	KUNIT_CASE(cs_amp_lib_test_spkid_lenovo_illegal),
+	KUNIT_CASE(cs_amp_lib_test_spkid_lenovo_oversize),
+	KUNIT_CASE(cs_amp_lib_test_spkid_hp_30),
+	KUNIT_CASE(cs_amp_lib_test_spkid_hp_31),
+
 	{ } /* terminator */
 };
 
 static struct kunit_suite cs_amp_lib_test_suite = {
 	.name = "snd-soc-cs-amp-lib-test",
 	.init = cs_amp_lib_test_case_init,
-	.exit = cs_amp_lib_test_case_exit,
 	.test_cases = cs_amp_lib_test_cases,
 };
 
 kunit_test_suite(cs_amp_lib_test_suite);
 
-MODULE_IMPORT_NS(SND_SOC_CS_AMP_LIB);
+MODULE_IMPORT_NS("SND_SOC_CS_AMP_LIB");
 MODULE_DESCRIPTION("KUnit test for Cirrus Logic amplifier library");
 MODULE_AUTHOR("Richard Fitzgerald <rf@opensource.cirrus.com>");
 MODULE_LICENSE("GPL");

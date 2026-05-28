@@ -37,6 +37,32 @@ config BLK_DEV_MD
 
 	  If unsure, say N.
 
+config MD_BITMAP
+	bool "MD RAID bitmap support"
+	default y
+	depends on BLK_DEV_MD
+	help
+	  If you say Y here, support for the write intent bitmap will be
+	  enabled. The bitmap can be used to optimize resync speed after power
+	  failure or readding a disk, limiting it to recorded dirty sectors in
+	  bitmap.
+
+	  This feature can be added to existing MD array or MD array can be
+	  created with bitmap via mdadm(8).
+
+	  If unsure, say Y.
+
+config MD_LLBITMAP
+	bool "MD RAID lockless bitmap support"
+	depends on BLK_DEV_MD
+	help
+	  If you say Y here, support for the lockless write intent bitmap will
+	  be enabled.
+
+	  Note, this is an experimental feature.
+
+	  If unsure, say N.
+
 config MD_AUTODETECT
 	bool "Autodetect RAID arrays during kernel boot"
 	depends on BLK_DEV_MD=y
@@ -54,12 +80,26 @@ config MD_AUTODETECT
 config MD_BITMAP_FILE
 	bool "MD bitmap file support (deprecated)"
 	default y
+	depends on MD_BITMAP
 	help
 	  If you say Y here, support for write intent bitmaps in files on an
 	  external file system is enabled.  This is an alternative to the internal
 	  bitmaps near the MD superblock, and very problematic code that abuses
 	  various kernel APIs and can only work with files on a file system not
 	  actually sitting on the MD device.
+
+config MD_LINEAR
+	tristate "Linear (append) mode"
+	depends on BLK_DEV_MD
+	help
+	  If you say Y here, then your multiple devices driver will be able to
+	  use the so-called linear mode, i.e. it will combine the hard disk
+	  partitions by simply appending one to the other.
+
+	  To compile this as a module, choose M here: the module
+	  will be called linear.
+
+	  If unsure, say Y.
 
 config MD_RAID0
 	tristate "RAID-0 (striping) mode"
@@ -126,7 +166,7 @@ config MD_RAID456
 	tristate "RAID-4/RAID-5/RAID-6 mode"
 	depends on BLK_DEV_MD
 	select RAID6_PQ
-	select LIBCRC32C
+	select CRC32
 	select ASYNC_MEMCPY
 	select ASYNC_XOR
 	select ASYNC_PQ
@@ -161,6 +201,7 @@ config MD_RAID456
 
 config MD_CLUSTER
 	tristate "Cluster Support for MD"
+	select MD_BITMAP
 	depends on BLK_DEV_MD
 	depends on DLM
 	default n
@@ -254,6 +295,7 @@ config DM_CRYPT
 	depends on BLK_DEV_DM
 	depends on (ENCRYPTED_KEYS || ENCRYPTED_KEYS=n)
 	depends on (TRUSTED_KEYS || TRUSTED_KEYS=n)
+	select CRC32
 	select CRYPTO
 	select CRYPTO_CBC
 	select CRYPTO_ESSIV
@@ -379,6 +421,7 @@ config DM_RAID
        select MD_RAID1
        select MD_RAID10
        select MD_RAID456
+       select MD_BITMAP
        select BLK_DEV_MD
 	help
 	 A dm target that supports RAID1, RAID10, RAID4, RAID5 and RAID6 mappings
@@ -644,5 +687,7 @@ config DM_AUDIT
 	  particular device-mapper targets, especially the integrity target.
 
 source "drivers/md/dm-vdo/Kconfig"
+
+source "drivers/md/dm-pcache/Kconfig"
 
 endif # MD

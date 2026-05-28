@@ -25,7 +25,7 @@
 #define EXT_IRQ_CP_SERVICE	0x2603
 #define EXT_IRQ_IUCV		0x4000
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #include <linux/hardirq.h>
 #include <linux/percpu.h>
@@ -54,7 +54,6 @@ enum interruption_class {
 	IRQIO_C70,
 	IRQIO_TAP,
 	IRQIO_VMR,
-	IRQIO_LCS,
 	IRQIO_CTC,
 	IRQIO_ADM,
 	IRQIO_CSC,
@@ -121,6 +120,6 @@ void irq_subclass_unregister(enum irq_subclass subclass);
 
 #define irq_canonicalize(irq)  (irq)
 
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 
 #endif /* _ASM_IRQ_H */

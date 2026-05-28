@@ -50,7 +50,7 @@
  * interrupt interval should be ~60us. Let's allow +/- 20us for frequency
  * deviations and interrupt latency.
  *
- * The data line must be samples after ~30us to 50us after the falling edge,
+ * The data line must be sampled after ~30us to 50us after the falling edge,
  * since the device updates the data line at the rising edge.
  *
  * ___            ______            ______            ______            ___
@@ -133,12 +133,12 @@ static int ps2_gpio_write(struct serio *serio, unsigned char val)
 	int ret = 0;
 
 	if (in_task()) {
-		mutex_lock(&drvdata->tx.mutex);
+		guard(mutex)(&drvdata->tx.mutex);
+
 		__ps2_gpio_write(serio, val);
 		if (!wait_for_completion_timeout(&drvdata->tx.complete,
 						 msecs_to_jiffies(10000)))
 			ret = SERIO_TIMEOUT;
-		mutex_unlock(&drvdata->tx.mutex);
 	} else {
 		__ps2_gpio_write(serio, val);
 	}
@@ -491,7 +491,7 @@ MODULE_DEVICE_TABLE(of, ps2_gpio_match);
 
 static struct platform_driver ps2_gpio_driver = {
 	.probe		= ps2_gpio_probe,
-	.remove_new	= ps2_gpio_remove,
+	.remove		= ps2_gpio_remove,
 	.driver = {
 		.name = DRIVER_NAME,
 		.of_match_table = of_match_ptr(ps2_gpio_match),

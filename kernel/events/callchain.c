@@ -22,6 +22,7 @@ struct callchain_cpus_entries {
 
 int sysctl_perf_event_max_stack __read_mostly = PERF_MAX_STACK_DEPTH;
 int sysctl_perf_event_max_contexts_per_stack __read_mostly = PERF_MAX_CONTEXTS_PER_STACK;
+static const int six_hundred_forty_kb = 640 * 1024;
 
 static inline size_t perf_callchain_entry__sizeof(void)
 {
@@ -216,22 +217,26 @@ static void fixup_uretprobe_trampoline_entries(struct perf_callchain_entry *entr
 }
 
 struct perf_callchain_entry *
-get_perf_callchain(struct pt_regs *regs, u32 init_nr, bool kernel, bool user,
+get_perf_callchain(struct pt_regs *regs, bool kernel, bool user,
 		   u32 max_stack, bool crosstask, bool add_mark)
 {
 	struct perf_callchain_entry *entry;
 	struct perf_callchain_entry_ctx ctx;
 	int rctx, start_entry_idx;
 
+	/* crosstask is not supported for user stacks */
+	if (crosstask && user && !kernel)
+		return NULL;
+
 	entry = get_callchain_entry(&rctx);
 	if (!entry)
 		return NULL;
 
-	ctx.entry     = entry;
-	ctx.max_stack = max_stack;
-	ctx.nr	      = entry->nr = init_nr;
-	ctx.contexts       = 0;
-	ctx.contexts_maxed = false;
+	ctx.entry		= entry;
+	ctx.max_stack		= max_stack;
+	ctx.nr			= entry->nr = 0;
+	ctx.contexts		= 0;
+	ctx.contexts_maxed	= false;
 
 	if (kernel && !user_mode(regs)) {
 		if (add_mark)
@@ -239,25 +244,19 @@ get_perf_callchain(struct pt_regs *regs, u32 init_nr, bool kernel, bool user,
 		perf_callchain_kernel(&ctx, regs);
 	}
 
-	if (user) {
+	if (user && !crosstask) {
 		if (!user_mode(regs)) {
-			if  (current->mm)
-				regs = task_pt_regs(current);
-			else
-				regs = NULL;
-		}
-
-		if (regs) {
-			if (crosstask)
+			if (current->flags & (PF_KTHREAD | PF_USER_WORKER))
 				goto exit_put;
-
-			if (add_mark)
-				perf_callchain_store_context(&ctx, PERF_CONTEXT_USER);
-
-			start_entry_idx = entry->nr;
-			perf_callchain_user(&ctx, regs);
-			fixup_uretprobe_trampoline_entries(entry, start_entry_idx);
+			regs = task_pt_regs(current);
 		}
+
+		if (add_mark)
+			perf_callchain_store_context(&ctx, PERF_CONTEXT_USER);
+
+		start_entry_idx = entry->nr;
+		perf_callchain_user(&ctx, regs);
+		fixup_uretprobe_trampoline_entries(entry, start_entry_idx);
 	}
 
 exit_put:
@@ -266,12 +265,8 @@ exit_put:
 	return entry;
 }
 
-/*
- * Used for sysctl_perf_event_max_stack and
- * sysctl_perf_event_max_contexts_per_stack.
- */
-int perf_event_max_stack_handler(const struct ctl_table *table, int write,
-				 void *buffer, size_t *lenp, loff_t *ppos)
+static int perf_event_max_stack_handler(const struct ctl_table *table, int write,
+					void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int *value = table->data;
 	int new_value = *value, ret;
@@ -292,3 +287,32 @@ int perf_event_max_stack_handler(const struct ctl_table *table, int write,
 
 	return ret;
 }
+
+static const struct ctl_table callchain_sysctl_table[] = {
+	{
+		.procname	= "perf_event_max_stack",
+		.data		= &sysctl_perf_event_max_stack,
+		.maxlen		= sizeof(sysctl_perf_event_max_stack),
+		.mode		= 0644,
+		.proc_handler	= perf_event_max_stack_handler,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= (void *)&six_hundred_forty_kb,
+	},
+	{
+		.procname	= "perf_event_max_contexts_per_stack",
+		.data		= &sysctl_perf_event_max_contexts_per_stack,
+		.maxlen		= sizeof(sysctl_perf_event_max_contexts_per_stack),
+		.mode		= 0644,
+		.proc_handler	= perf_event_max_stack_handler,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE_THOUSAND,
+	},
+};
+
+static int __init init_callchain_sysctls(void)
+{
+	register_sysctl_init("kernel", callchain_sysctl_table);
+	return 0;
+}
+core_initcall(init_callchain_sysctls);
+

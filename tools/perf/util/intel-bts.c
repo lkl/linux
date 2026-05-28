@@ -100,7 +100,7 @@ static void intel_bts_dump(struct intel_bts *bts __maybe_unused,
 		else
 			sz = len;
 		printf(".");
-		color_fprintf(stdout, color, "  %08x: ", pos);
+		color_fprintf(stdout, color, "  %08zx: ", pos);
 		for (i = 0; i < sz; i++)
 			color_fprintf(stdout, color, " %02x", buf[i]);
 		for (; i < br_sz; i++)
@@ -275,12 +275,13 @@ static int intel_bts_synth_branch_sample(struct intel_bts_queue *btsq,
 	int ret;
 	struct intel_bts *bts = btsq->bts;
 	union perf_event event;
-	struct perf_sample sample = { .ip = 0, };
+	struct perf_sample sample;
 
 	if (bts->synth_opts.initial_skip &&
 	    bts->num_events++ <= bts->synth_opts.initial_skip)
 		return 0;
 
+	perf_sample__init(&sample, /*all=*/true);
 	sample.ip = le64_to_cpu(branch->from);
 	sample.cpumode = intel_bts_cpumode(bts, sample.ip);
 	sample.pid = btsq->pid;
@@ -312,6 +313,7 @@ static int intel_bts_synth_branch_sample(struct intel_bts_queue *btsq,
 		pr_err("Intel BTS: failed to deliver branch event, error %d\n",
 		       ret);
 
+	perf_sample__exit(&sample);
 	return ret;
 }
 
@@ -808,7 +810,7 @@ static int intel_bts_synth_events(struct intel_bts *bts,
 static const char * const intel_bts_info_fmts[] = {
 	[INTEL_BTS_PMU_TYPE]		= "  PMU Type           %"PRId64"\n",
 	[INTEL_BTS_TIME_SHIFT]		= "  Time Shift         %"PRIu64"\n",
-	[INTEL_BTS_TIME_MULT]		= "  Time Muliplier     %"PRIu64"\n",
+	[INTEL_BTS_TIME_MULT]		= "  Time Multiplier    %"PRIu64"\n",
 	[INTEL_BTS_TIME_ZERO]		= "  Time Zero          %"PRIu64"\n",
 	[INTEL_BTS_CAP_USER_TIME_ZERO]	= "  Cap Time Zero      %"PRId64"\n",
 	[INTEL_BTS_SNAPSHOT_MODE]	= "  Snapshot mode      %"PRId64"\n",

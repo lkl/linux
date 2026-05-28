@@ -633,8 +633,8 @@ extern void console_conditional_schedule(void);
 extern void console_unblank(void);
 extern void console_flush_on_panic(enum con_flush_mode mode);
 extern struct tty_driver *console_device(int *);
-extern void console_stop(struct console *);
-extern void console_start(struct console *);
+extern void console_suspend(struct console *);
+extern void console_resume(struct console *);
 extern int is_console_locked(void);
 extern int braille_register_console(struct console *, int index,
 		char *console_options, char *braille_options);
@@ -648,8 +648,8 @@ static inline void console_sysfs_notify(void)
 extern bool console_suspend_enabled;
 
 /* Suspend and resume console messages over PM events */
-extern void suspend_console(void);
-extern void resume_console(void);
+extern void console_suspend_all(void);
+extern void console_resume_all(void);
 
 int mda_console_init(void);
 
@@ -665,6 +665,8 @@ void vcs_remove_sysfs(int index);
  * WARN_CONSOLE_UNLOCKED() for debugging purposes.
  */
 extern atomic_t ignore_console_lock_warning;
+
+DEFINE_LOCK_GUARD_0(console_lock, console_lock(), console_unlock());
 
 extern void console_init(void);
 
