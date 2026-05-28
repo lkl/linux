@@ -139,6 +139,19 @@ config LKL_PCI_KUNIT_TEST
 	  memory returned to callers is unmapped and released using the correct
 	  CPU address.
 
+config LKL_IRQ_KUNIT_TEST
+	bool "KUnit tests for LKL IRQ host-thread caller path"
+	depends on KUNIT
+	default n
+	help
+	  Enable KUnit tests for arch/lkl/kernel/irq.c.
+
+	  Exercises the contract documented on lkl_trigger_irq that it
+	  is callable from arbitrary host threads. A KUnit test spawns
+	  a real host pthread via lkl_ops->thread_create and asserts
+	  that the registered handler runs synchronously when the host
+	  thread calls lkl_trigger_irq from outside any kernel context.
+
 config RAID6_PQ_BENCHMARK
 	bool
 	default n
