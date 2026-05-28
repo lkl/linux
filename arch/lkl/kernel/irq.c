@@ -95,12 +95,31 @@ int lkl_trigger_irq(int irq)
 	/*
 	 * Since this can be called from Linux context (e.g. lkl_trigger_irq ->
 	 * IRQ -> softirq -> lkl_trigger_irq) make sure we are actually allowed
-	 * to run irqs at this point
+	 * to run irqs at this point.
+	 *
+	 * The per-thread irqs_enabled check only applies when the caller
+	 * actually OWNS current_thread_info — i.e. it is the kernel
+	 * thread (or host_task) whose context lkl_cpu_get most recently
+	 * switched to. Calls from a true host pthread (a libusb
+	 * completion thread, a glibc SIGEV_THREAD timer callback, etc.)
+	 * acquire the LKL CPU but never set _current_thread_info; it
+	 * still points at whichever kernel task last ran, often the idle
+	 * task. Honoring that stale flag for host callers silently pends
+	 * the IRQ (real drivers driven through host-pthread backends
+	 * trip this reliably). Detect host callers by comparing
+	 * thread_self() to the thread_info owner's tid and deliver
+	 * unconditionally in that case.
 	 */
-	if (!current_thread_info()->irqs_enabled) {
-		set_irq_pending(irq);
-		lkl_cpu_put();
-		return 0;
+	{
+		struct thread_info *ti = current_thread_info();
+		bool caller_is_kernel = lkl_ops->thread_equal(ti->tid,
+						lkl_ops->thread_self());
+
+		if (caller_is_kernel && !ti->irqs_enabled) {
+			set_irq_pending(irq);
+			lkl_cpu_put();
+			return 0;
+		}
 	}
 
 	run_irq(irq);
