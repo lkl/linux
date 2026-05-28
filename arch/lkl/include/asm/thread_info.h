@@ -18,6 +18,18 @@ struct thread_info {
 	lkl_thread_t tid;
 	struct task_struct *prev_sched;
 	unsigned long stackend;
+	/*
+	 * IRQ-enable state, accessed via current_thread_info() from
+	 * arch_local_save_flags / arch_local_irq_restore in
+	 * arch/lkl/kernel/irq.c. Living here (instead of as a single
+	 * global) means __switch_to moves the state with the thread
+	 * for free: the line
+	 *
+	 *   _current_thread_info = task_thread_info(next);
+	 *
+	 * in arch/lkl/kernel/threads.c is the whole save/restore.
+	 */
+	unsigned long irqs_enabled;
 };
 
 #define INIT_THREAD_INFO(tsk)				\
@@ -25,6 +37,7 @@ struct thread_info {
 	.task		= &tsk,				\
 	.preempt_count	= INIT_PREEMPT_COUNT,		\
 	.flags		= 0,				\
+	.irqs_enabled	= 1, /* ARCH_IRQ_ENABLED */	\
 }
 
 /* how to get the thread information struct from C */

@@ -4,6 +4,7 @@
 #include <linux/sched/signal.h>
 #include <asm/host_ops.h>
 #include <asm/cpu.h>
+#include <asm/irqflags.h>
 #include <asm/sched.h>
 #include <asm/switch_to.h>
 
@@ -16,6 +17,12 @@ static int init_ti(struct thread_info *ti)
 	ti->dead = false;
 	ti->prev_sched = NULL;
 	ti->tid = 0;
+	/*
+	 * New threads start with IRQs enabled. State moves with the
+	 * thread via _current_thread_info in __switch_to; see
+	 * arch/lkl/kernel/irq.c for the rationale.
+	 */
+	ti->irqs_enabled = ARCH_IRQ_ENABLED;
 
 	return 0;
 }

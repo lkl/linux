@@ -52,7 +52,13 @@ static struct irq_info {
 	const char *user;
 } irqs[NR_IRQS];
 
-static bool irqs_enabled;
+/*
+ * irqs_enabled lives in struct thread_info; see
+ * arch/lkl/include/asm/thread_info.h. Accessed via current_thread_info()
+ * in arch_local_save_flags / arch_local_irq_restore below. Switching
+ * _current_thread_info in __switch_to (arch/lkl/kernel/threads.c) is
+ * the entire save/restore: no explicit per-thread save/load is needed.
+ */
 
 static struct pt_regs dummy;
 
@@ -91,7 +97,7 @@ int lkl_trigger_irq(int irq)
 	 * IRQ -> softirq -> lkl_trigger_irq) make sure we are actually allowed
 	 * to run irqs at this point
 	 */
-	if (!irqs_enabled) {
+	if (!current_thread_info()->irqs_enabled) {
 		set_irq_pending(irq);
 		lkl_cpu_put();
 		return 0;
@@ -168,15 +174,17 @@ void lkl_put_irq(int i, const char *user)
 
 unsigned long arch_local_save_flags(void)
 {
-	return irqs_enabled;
+	return current_thread_info()->irqs_enabled;
 }
 
 void arch_local_irq_restore(unsigned long flags)
 {
-	if (flags == ARCH_IRQ_ENABLED && irqs_enabled == ARCH_IRQ_DISABLED &&
+	struct thread_info *ti = current_thread_info();
+
+	if (flags == ARCH_IRQ_ENABLED && ti->irqs_enabled == ARCH_IRQ_DISABLED &&
 	    !in_interrupt())
 		run_irqs();
-	irqs_enabled = flags;
+	ti->irqs_enabled = flags;
 }
 
 void init_IRQ(void)
