@@ -519,7 +519,10 @@ static const char *read_dir(DIR *dir, const char *path)
 	const char *err = NULL;
 
 	if (cptofs) {
-		struct dirent *de = readdir(dir);
+		struct dirent *de;
+		
+		errno = 0;
+		de = readdir(dir);
 
 		if (de)
 			name = de->d_name;
