@@ -22,9 +22,7 @@ progs-$(LKL_HOST_CONFIG_ARCHIVE) += fs2tar
 LDLIBS_fs2tar-y := -larchive
 LDLIBS_fs2tar-$(LKL_HOST_CONFIG_NEEDS_LARGP) += -largp
 
-
-progs-$(LKL_HOST_CONFIG_ARCHIVE) += cptofs
-LDLIBS_cptofs-y := -larchive
+progs-y += cptofs
 LDLIBS_cptofs-$(LKL_HOST_CONFIG_NEEDS_LARGP) += -largp
 
 # tools/build/Makefile.build does not support parallel builds when
