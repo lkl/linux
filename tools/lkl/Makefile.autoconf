@@ -85,6 +85,7 @@ define posix_host
   $(if $(filter yes,$(vde)),$(call virtio_net_vde))
   $(if $(strip $(call find_include,fuse3/fuse.h)),$(call set_autoconf_var,FUSE,y))
   $(if $(strip $(call find_include,archive.h)),$(call set_autoconf_var,ARCHIVE,y))
+  $(if $(strip $(call find_include,argp.h)),$(call set_autoconf_var,ARGP,y))
   $(if $(strip $(call find_include,linux/if_tun.h)),$(call set_autoconf_var,VIRTIO_NET_MACVTAP,y))
   $(if $(filter $(1),elf64-x86-64-freebsd),$(call set_autoconf_var,NEEDS_LARGP,y))
   $(if $(filter $(1),elf32-i386),$(call set_autoconf_var,I386,y))
