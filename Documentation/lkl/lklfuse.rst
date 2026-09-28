@@ -28,6 +28,10 @@ Udev rules and systemd service files are available for automatically mounting
 USB storage devices via an unprivileged lklfuse sandbox; see 61-lklfuse.rules
 and lklfuse-mount@.service.
 
+lklfuse-mount@.service uses the FUSE "allow_other" mount option by default to
+enable mountpoint access from all users. This mount option requires explicit
+permission via the "user_allow_other" FUSE configuration file parameter.
+
 OPTIONS
 =======
 
@@ -46,3 +50,8 @@ OPTIONS
 -o opts=options         Linux kernel mount <options> (use \\ to escape , and =).
 
 See `lklfuse --help` for additional FUSE specific options.
+
+SEE ALSO
+========
+
+fuse(8)
