@@ -179,9 +179,12 @@ static int open_dst(const char *path, int mode, uid_t owner, gid_t group)
 	if (cla.selinux && cptofs) {
 		ret = lkl_sys_fsetxattr(fd, "security.selinux", cla.selinux,
 					    strlen(cla.selinux), 0);
-		if (ret)
+		if (ret) {
 			fprintf(stderr, "unable to set selinux attribute on %s: %s\n",
 				path, lkl_strerror(ret));
+			close_dst(fd);
+			return -1;
+		}
 	}
 
 	return fd;
