@@ -111,6 +111,22 @@ static struct argp argp_cpfromfs = {
 
 static int searchdir(const char *fs_path, const char *path, const char *match, uid_t owner, gid_t group);
 
+static void close_src(int fd)
+{
+	if (cptofs)
+		close(fd);
+	else
+		lkl_sys_close(fd);
+}
+
+static void close_dst(int fd)
+{
+	if (cptofs)
+		lkl_sys_close(fd);
+	else
+		close(fd);
+}
+
 static int open_src(const char *path)
 {
 	int fd;
@@ -137,6 +153,12 @@ static int open_dst(const char *path, int mode, uid_t owner, gid_t group)
 	else
 		fd = open(path, O_RDWR | O_TRUNC | O_CREAT, mode);
 
+	if (fd < 0) {
+		fprintf(stderr, "unable to open file %s for writing: %s\n",
+			path, cptofs ? lkl_strerror(fd) : strerror(errno));
+		return -1;
+	}
+
 	if (owner != (uid_t)-1 && group != (gid_t)-1) {
 		if (cptofs)
 			ret = lkl_sys_fchown(fd, owner, group);
@@ -145,13 +167,10 @@ static int open_dst(const char *path, int mode, uid_t owner, gid_t group)
 		if (ret) {
 			fprintf(stderr, "unable to set owner/group on %s: %s\n",
 				path, cptofs ? lkl_strerror(ret) : strerror(errno));
+			close_dst(fd);
 			return -1;
 		}
 	}
-
-	if (fd < 0)
-		fprintf(stderr, "unable to open file %s for writing: %s\n",
-			path, cptofs ? lkl_strerror(fd) : strerror(errno));
 
 	if (cla.selinux && cptofs) {
 		ret = lkl_sys_fsetxattr(fd, "security.selinux", cla.selinux,
@@ -196,22 +215,6 @@ static int write_dst(int fd, char *buf, int len)
 	return ret;
 }
 
-static void close_src(int fd)
-{
-	if (cptofs)
-		close(fd);
-	else
-		lkl_sys_close(fd);
-}
-
-static void close_dst(int fd)
-{
-	if (cptofs)
-		lkl_sys_close(fd);
-	else
-		close(fd);
-}
-
 static int copy_file(const char *src, const char *dst, int mode, uid_t owner, gid_t group)
 {
 	long len, to_write, wrote;
@@ -224,8 +227,10 @@ static int copy_file(const char *src, const char *dst, int mode, uid_t owner, gi
 		return fd_src;
 
 	fd_dst = open_dst(dst, mode, owner, group);
-	if (fd_dst < 0)
+	if (fd_dst < 0) {
+		close_src(fd_src);
 		return fd_dst;
+	}
 
 	do {
 		len = read_src(fd_src, buf, sizeof(buf));
