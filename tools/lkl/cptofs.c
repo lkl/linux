@@ -30,7 +30,7 @@ static struct argp_option options[] = {
 	 "path to the filesystem image - mandatory"},
 	{"owner", 'o', "int", 0, "owner of the destination files"},
 	{"group", 'g', "int", 0, "group of the destination files"},
-	{"selinux", 's', "string", 0, "selinux attributes for destination"},
+	{"selinux", 's', "string", 0, "selinux attribute for LKL destinations"},
 	{"mb", 'm', "int", 0,
 	 "amount of memory to allocate in MB (default: 100)"},
 	{0},
@@ -69,6 +69,10 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		cla->fsimg_path = arg;
 		break;
 	case 's':
+		if (!cptofs) {
+			fprintf(stderr, "-s is only supported with an LKL destination\n");
+			return ARGP_ERR_UNKNOWN;
+		}
 		cla->selinux = arg;
 		break;
 	case 'o':
