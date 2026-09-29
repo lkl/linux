@@ -215,6 +215,22 @@ static int write_dst(int fd, char *buf, int len)
 	return ret;
 }
 
+static int fsync_dst(int fd)
+{
+	int ret;
+
+	if (cptofs)
+		ret = lkl_sys_fsync(fd);
+	else
+		ret = fsync(fd);
+
+	if (ret < 0)
+		fprintf(stderr, "error syncing file: %s\n",
+			cptofs ? lkl_strerror(ret) : strerror(errno));
+
+	return ret;
+}
+
 static int copy_file(const char *src, const char *dst, int mode, uid_t owner, gid_t group)
 {
 	long len, to_write, wrote;
@@ -234,6 +250,10 @@ static int copy_file(const char *src, const char *dst, int mode, uid_t owner, gi
 
 	do {
 		len = read_src(fd_src, buf, sizeof(buf));
+		if (len < 0) {
+			ret = len;
+			goto out;
+		}
 
 		if (len > 0) {
 			ptr = buf;
@@ -251,12 +271,9 @@ static int copy_file(const char *src, const char *dst, int mode, uid_t owner, gi
 
 			} while (to_write > 0);
 		}
-
-		if (len < 0)
-			ret = len;
-
 	} while (len > 0);
 
+	ret = fsync_dst(fd_dst);
 out:
 	close_src(fd_src);
 	close_dst(fd_dst);
