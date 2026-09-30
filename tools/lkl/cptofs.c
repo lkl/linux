@@ -357,21 +357,22 @@ static int mkdir_dst(const char *path, unsigned int mode, uid_t owner, gid_t gro
 		if (ret < 0 && errno == EEXIST)
 			ret = 0;
 	}
+
+	if (ret) {
+		fprintf(stderr, "unable to create directory %s: %s\n",
+			path, cptofs ? lkl_strerror(ret) : strerror(errno));
+		return ret;
+	}
+
 	if (owner != (uid_t)-1 || group != (gid_t)-1) {
 		if (cptofs)
 			ret = lkl_sys_chown(path, owner, group);
 		else
 			ret = chown(path, owner, group);
-		if (ret) {
+		if (ret)
 			fprintf(stderr, "unable to chown directory %s: %s\n",
 				path, cptofs ? lkl_strerror(ret) : strerror(errno));
-			return ret;
-		}
 	}
-
-	if (ret)
-		fprintf(stderr, "unable to create directory %s: %s\n",
-			path, cptofs ? lkl_strerror(ret) : strerror(errno));
 
 	return ret;
 }
@@ -401,22 +402,22 @@ static int symlink_dst(const char *path, const char *target, uid_t owner, gid_t 
 	else
 		ret = symlink(target, path);
 
+	if (ret) {
+		fprintf(stderr, "unable to symlink '%s' with target '%s': %s\n",
+			path, target, cptofs ? lkl_strerror(ret) :
+			strerror(errno));
+		return ret;
+	}
+
 	if (owner != (uid_t)-1 || group != (gid_t)-1) {
 		if (cptofs)
 			ret = lkl_sys_fchownat(AT_FDCWD, path, owner, group, AT_SYMLINK_NOFOLLOW);
 		else
 			ret = lchown(path, owner, group);
-		if (ret) {
+		if (ret)
 			fprintf(stderr, "unable to chown symlink %s: %s\n",
 				path, cptofs ? lkl_strerror(ret) : strerror(errno));
-			return ret;
-		}
 	}
-
-	if (ret)
-		fprintf(stderr, "unable to symlink '%s' with target '%s': %s\n",
-			path, target, cptofs ? lkl_strerror(ret) :
-			strerror(errno));
 
 	return ret;
 }
