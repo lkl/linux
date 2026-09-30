@@ -30,7 +30,7 @@ static struct argp_option options[] = {
 	 "path to the filesystem image - mandatory"},
 	{"owner", 'o', "int", 0, "owner of the destination files"},
 	{"group", 'g', "int", 0, "group of the destination files"},
-	{"selinux", 's', "string", 0, "selinux attributes for destination"},
+	{"selinux", 's', "string", 0, "selinux attribute for LKL destinations"},
 	{"mb", 'm', "int", 0,
 	 "amount of memory to allocate in MB (default: 100)"},
 	{0},
@@ -69,6 +69,10 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		cla->fsimg_path = arg;
 		break;
 	case 's':
+		if (!cptofs) {
+			fprintf(stderr, "-s is only supported with an LKL destination\n");
+			return ARGP_ERR_UNKNOWN;
+		}
 		cla->selinux = arg;
 		break;
 	case 'o':
@@ -111,6 +115,22 @@ static struct argp argp_cpfromfs = {
 
 static int searchdir(const char *fs_path, const char *path, const char *match, uid_t owner, gid_t group);
 
+static void close_src(int fd)
+{
+	if (cptofs)
+		close(fd);
+	else
+		lkl_sys_close(fd);
+}
+
+static void close_dst(int fd)
+{
+	if (cptofs)
+		lkl_sys_close(fd);
+	else
+		close(fd);
+}
+
 static int open_src(const char *path)
 {
 	int fd;
@@ -137,6 +157,12 @@ static int open_dst(const char *path, int mode, uid_t owner, gid_t group)
 	else
 		fd = open(path, O_RDWR | O_TRUNC | O_CREAT, mode);
 
+	if (fd < 0) {
+		fprintf(stderr, "unable to open file %s for writing: %s\n",
+			path, cptofs ? lkl_strerror(fd) : strerror(errno));
+		return -1;
+	}
+
 	if (owner != (uid_t)-1 && group != (gid_t)-1) {
 		if (cptofs)
 			ret = lkl_sys_fchown(fd, owner, group);
@@ -145,20 +171,20 @@ static int open_dst(const char *path, int mode, uid_t owner, gid_t group)
 		if (ret) {
 			fprintf(stderr, "unable to set owner/group on %s: %s\n",
 				path, cptofs ? lkl_strerror(ret) : strerror(errno));
+			close_dst(fd);
 			return -1;
 		}
 	}
 
-	if (fd < 0)
-		fprintf(stderr, "unable to open file %s for writing: %s\n",
-			path, cptofs ? lkl_strerror(fd) : strerror(errno));
-
 	if (cla.selinux && cptofs) {
 		ret = lkl_sys_fsetxattr(fd, "security.selinux", cla.selinux,
 					    strlen(cla.selinux), 0);
-		if (ret)
+		if (ret) {
 			fprintf(stderr, "unable to set selinux attribute on %s: %s\n",
 				path, lkl_strerror(ret));
+			close_dst(fd);
+			return -1;
+		}
 	}
 
 	return fd;
@@ -196,20 +222,20 @@ static int write_dst(int fd, char *buf, int len)
 	return ret;
 }
 
-static void close_src(int fd)
+static int fsync_dst(int fd)
 {
-	if (cptofs)
-		close(fd);
-	else
-		lkl_sys_close(fd);
-}
+	int ret;
 
-static void close_dst(int fd)
-{
 	if (cptofs)
-		lkl_sys_close(fd);
+		ret = lkl_sys_fsync(fd);
 	else
-		close(fd);
+		ret = fsync(fd);
+
+	if (ret < 0)
+		fprintf(stderr, "error syncing file: %s\n",
+			cptofs ? lkl_strerror(ret) : strerror(errno));
+
+	return ret;
 }
 
 static int copy_file(const char *src, const char *dst, int mode, uid_t owner, gid_t group)
@@ -224,11 +250,17 @@ static int copy_file(const char *src, const char *dst, int mode, uid_t owner, gi
 		return fd_src;
 
 	fd_dst = open_dst(dst, mode, owner, group);
-	if (fd_dst < 0)
+	if (fd_dst < 0) {
+		close_src(fd_src);
 		return fd_dst;
+	}
 
 	do {
 		len = read_src(fd_src, buf, sizeof(buf));
+		if (len < 0) {
+			ret = len;
+			goto out;
+		}
 
 		if (len > 0) {
 			ptr = buf;
@@ -242,16 +274,13 @@ static int copy_file(const char *src, const char *dst, int mode, uid_t owner, gi
 				}
 
 				to_write -= wrote;
-				ptr += len;
+				ptr += wrote;
 
 			} while (to_write > 0);
 		}
-
-		if (len < 0)
-			ret = len;
-
 	} while (len > 0);
 
+	ret = fsync_dst(fd_dst);
 out:
 	close_src(fd_src);
 	close_dst(fd_dst);
@@ -328,21 +357,22 @@ static int mkdir_dst(const char *path, unsigned int mode, uid_t owner, gid_t gro
 		if (ret < 0 && errno == EEXIST)
 			ret = 0;
 	}
+
+	if (ret) {
+		fprintf(stderr, "unable to create directory %s: %s\n",
+			path, cptofs ? lkl_strerror(ret) : strerror(errno));
+		return ret;
+	}
+
 	if (owner != (uid_t)-1 || group != (gid_t)-1) {
 		if (cptofs)
 			ret = lkl_sys_chown(path, owner, group);
 		else
 			ret = chown(path, owner, group);
-		if (ret) {
+		if (ret)
 			fprintf(stderr, "unable to chown directory %s: %s\n",
-				path, cptofs ? strerror(errno) : lkl_strerror(ret));
-			return ret;
-		}
+				path, cptofs ? lkl_strerror(ret) : strerror(errno));
 	}
-
-	if (ret)
-		fprintf(stderr, "unable to create directory %s: %s\n",
-			path, cptofs ? strerror(errno) : lkl_strerror(ret));
 
 	return ret;
 }
@@ -372,22 +402,22 @@ static int symlink_dst(const char *path, const char *target, uid_t owner, gid_t 
 	else
 		ret = symlink(target, path);
 
+	if (ret) {
+		fprintf(stderr, "unable to symlink '%s' with target '%s': %s\n",
+			path, target, cptofs ? lkl_strerror(ret) :
+			strerror(errno));
+		return ret;
+	}
+
 	if (owner != (uid_t)-1 || group != (gid_t)-1) {
 		if (cptofs)
 			ret = lkl_sys_fchownat(AT_FDCWD, path, owner, group, AT_SYMLINK_NOFOLLOW);
 		else
 			ret = lchown(path, owner, group);
-		if (ret) {
+		if (ret)
 			fprintf(stderr, "unable to chown symlink %s: %s\n",
-				path, cptofs ? strerror(errno) : lkl_strerror(ret));
-			return ret;
-		}
+				path, cptofs ? lkl_strerror(ret) : strerror(errno));
 	}
-
-	if (ret)
-		fprintf(stderr, "unable to symlink '%s' with target '%s': %s\n",
-			path, target, cptofs ? lkl_strerror(ret) :
-			strerror(errno));
 
 	return ret;
 }

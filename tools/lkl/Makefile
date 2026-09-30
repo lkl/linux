@@ -183,10 +183,14 @@ libraries_install: $(libs-y:%=$(OUTPUT)%$(SOSUF)) $(OUTPUT)liblkl.a
 	    install -d $(DESTDIR)$(LIBDIR) ; \
 	    install -m 644 $^ $(DESTDIR)$(LIBDIR)
 
+# install symlink for cptofs; argv[0] switches copy direction
 programs_install: $(progs-y:%=$(OUTPUT)%$(EXESUF))
 	$(call QUIET_INSTALL, programs) \
 	    install -d $(DESTDIR)$(BINDIR) ; \
 	    install -m 755 $^ $(DESTDIR)$(BINDIR)
+	$(Q)if [ -f $(DESTDIR)$(BINDIR)/cptofs$(EXESUF) ]; then \
+	    [ -e $(DESTDIR)$(BINDIR)/cpfromfs$(EXESUF) ] || ln -s cptofs$(EXESUF) $(DESTDIR)$(BINDIR)/cpfromfs$(EXESUF); \
+	fi
 
 install: headers_install libraries_install programs_install
 
