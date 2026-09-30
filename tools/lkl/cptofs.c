@@ -364,14 +364,14 @@ static int mkdir_dst(const char *path, unsigned int mode, uid_t owner, gid_t gro
 			ret = chown(path, owner, group);
 		if (ret) {
 			fprintf(stderr, "unable to chown directory %s: %s\n",
-				path, cptofs ? strerror(errno) : lkl_strerror(ret));
+				path, cptofs ? lkl_strerror(ret) : strerror(errno));
 			return ret;
 		}
 	}
 
 	if (ret)
 		fprintf(stderr, "unable to create directory %s: %s\n",
-			path, cptofs ? strerror(errno) : lkl_strerror(ret));
+			path, cptofs ? lkl_strerror(ret) : strerror(errno));
 
 	return ret;
 }
@@ -408,7 +408,7 @@ static int symlink_dst(const char *path, const char *target, uid_t owner, gid_t 
 			ret = lchown(path, owner, group);
 		if (ret) {
 			fprintf(stderr, "unable to chown symlink %s: %s\n",
-				path, cptofs ? strerror(errno) : lkl_strerror(ret));
+				path, cptofs ? lkl_strerror(ret) : strerror(errno));
 			return ret;
 		}
 	}
