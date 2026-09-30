@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; version 2 of the License
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Author: Octavian Purdila <tavi@cs.pub.ro>
 #
@@ -63,6 +60,13 @@ tests = [
     'lklfuse.sh -t btrfs',
     'lklfuse.sh -t vfat',
     'lklfuse.sh -t xfs',
+    'cptofs.sh -t ext4',
+    'cptofs.sh -t btrfs',
+    'cptofs.sh -t vfat',
+    # FIXME: seeing virtio-blk I/O errors with xfs
+    # I/O error, dev vda, sector 307246 op 0x1:(WRITE) flags 0x5800 phys_seg 1 prio class 0
+    # I/O error, dev vda, sector 309806 op 0x1:(WRITE) flags 0x1800 phys_seg 1 prio class 0
+    'cptofs.sh -t xfs',
     'config',
     'hijack-test.sh',
     'LKL_HIJACK_ZPOLINE=1 hijack-test.sh',
