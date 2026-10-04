@@ -6,7 +6,9 @@
 #include <lkl.h>
 #include <lkl_host.h>
 #include <sys/stat.h>
+#ifndef __MINGW32__
 #include <sys/resource.h>
+#endif
 #include <fcntl.h>
 #include <inttypes.h>
 
@@ -120,7 +122,7 @@ static int lkl_test_blkdev(void)
 		return TEST_FAILURE;
 	}
 
-	err = lkl_sys_ioctl(fd, LKL_BLKGETSIZE64, (unsigned long)&size);
+	err = lkl_sys_ioctl(fd, LKL_BLKGETSIZE64, (lkl_ulong_t)&size);
 	if (err < 0) {
 		lkl_test_logf("BLKGETSIZE64 failed: %s\n", lkl_strerror(fd));
 		lkl_sys_close(fd);

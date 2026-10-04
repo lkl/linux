@@ -208,7 +208,7 @@ static void CALLBACK timer_callback(void *arg, BOOLEAN TimerOrWaitFired)
 		t->callback();
 }
 
-static int timer_set_oneshot(void *timer, unsigned long ns)
+static int timer_set_oneshot(void *timer, lkl_ulong_t ns)
 {
 	struct timer *t = (struct timer *)timer;
 	HANDLE tmp;
@@ -241,13 +241,31 @@ static void print(const char *str, int len)
 	write(1, str, len);
 }
 
-static void *mem_alloc(unsigned long size)
+static void *mem_alloc(lkl_ulong_t size)
 {
 	return malloc(size);
 }
 
+static void *nt_memcpy(void *dest, const void *src, lkl_ulong_t n)
+{
+	return memcpy(dest, src, (size_t)n);
+}
+
+static void *nt_memset(void *s, int c, lkl_ulong_t n)
+{
+	return memset(s, c, (size_t)n);
+}
+
+static void *nt_memmove(void *dest, const void *src, lkl_ulong_t n)
+{
+	return memmove(dest, src, (size_t)n);
+}
+
 struct lkl_host_operations lkl_host_ops = {
 	.panic = panic,
+	.memcpy = nt_memcpy,
+	.memset = nt_memset,
+	.memmove = nt_memmove,
 	.thread_create = thread_create,
 	.thread_detach = thread_detach,
 	.thread_exit = thread_exit,

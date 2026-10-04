@@ -41,6 +41,13 @@ jobs:
             build_options: "LLVM=1 CROSS_COMPILE=x86_64-unknown-freebsd SYSROOT=~/freebsd-sysroot"
             make_sysroot: "./tools/lkl/scripts/freebsd-make-sysroot.sh"
             run_qemu: true
+          - displayTargetName: win64
+            os: unix
+            runs_on: ubuntu-24.04
+            pip_option: --break-system-packages
+            shell: bash
+            build_options: "CROSS_COMPILE=x86_64-w64-mingw32-"
+            make_sysroot: "./tools/lkl/scripts/win64-toolchain.sh"
           - displayTargetName: fuzzers
             os: unix
             runs_on: ubuntu-22.04
@@ -122,6 +129,15 @@ jobs:
           sudo apt install -y ccache libjsmn-dev libfuse3-dev clang lld llvm qemu-system-x86 \
             qemu-utils sshpass cloud-image-utils binutils cmake ninja-build liblzma-dev libz-dev \
             pkg-config autoconf libtool
+
+      - name: Install wine
+        if: matrix.displayTargetName == 'win64'
+        run: |
+          sudo apt install -y wine wine64
+          echo "WINEDEBUG=-all" >> $GITHUB_ENV
+          # skip the Mono and Gecko installers, they hang without a display
+          echo "WINEDLLOVERRIDES=mscoree=;mshtml=" >> $GITHUB_ENV
+          WINEDEBUG=-all WINEDLLOVERRIDES="mscoree=;mshtml=" wineboot -i
 
       - name: Install patched binutils for Windows
         if: runner.os == 'Windows'
