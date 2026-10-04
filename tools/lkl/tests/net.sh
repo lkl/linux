@@ -82,6 +82,9 @@ setup_backend()
         export_vars work_dir fifo1 fifo2
         ;;
     "tap")
+        if [ -n "$LKL_HOST_CONFIG_NT" ]; then
+            return $TEST_SKIP
+        fi
         tap_prepare
         if ! lkl_test_cmd test -c /dev/net/tun; then
             if [ -z "$LKL_HOST_CONFIG_BSD" ]; then
@@ -119,6 +122,10 @@ setup_backend()
     "wintap")
         if [ -z $LKL_HOST_CONFIG_NT64 ]; then
             echo "skipping on non-windows 64-bits host"
+            return $TEST_SKIP
+        fi
+        if ! command -v netsh > /dev/null; then
+            echo "no netsh command (running under wine?)"
             return $TEST_SKIP
         fi
         netsh interface ip set address \
