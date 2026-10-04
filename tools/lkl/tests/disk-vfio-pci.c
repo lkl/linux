@@ -120,7 +120,7 @@ static int lkl_test_blkdev(void)
 		return TEST_FAILURE;
 	}
 
-	err = lkl_sys_ioctl(fd, LKL_BLKGETSIZE64, (unsigned long)&size);
+	err = lkl_sys_ioctl(fd, LKL_BLKGETSIZE64, (lkl_ulong_t)&size);
 	if (err < 0) {
 		lkl_test_logf("BLKGETSIZE64 failed: %s\n", lkl_strerror(fd));
 		lkl_sys_close(fd);
