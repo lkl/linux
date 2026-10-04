@@ -63,6 +63,12 @@ define virtio_net_vde
   LDLIBS += $(shell pkg-config --libs vdeplug)
 endef
 
+define virtio_net_slirp
+  $(call set_autoconf_var,VIRTIO_NET_SLIRP,y)
+  export SLIRP_CFLAGS := $(shell $(1) --cflags slirp)
+  LDLIBS += $(shell $(1) --libs slirp)
+endef
+
 define zpoline_conf
   $(eval zpoline_dir=$(abspath $(srctree)/$(1)))
   $(if $(strip $(foreach f, $(zpoline_dir), $(wildcard $(f)/libzpoline.so))),$(call set_autoconf_var,ZPOLINE_DIR,$(zpoline_dir)))
@@ -83,6 +89,9 @@ define posix_host
   $(if $(filter $(1),elf64-littleriscv),$(call riscv64_host))
   $(if $(filter yes,$(dpdk)),$(call virtio_net_dpdk))
   $(if $(filter yes,$(vde)),$(call virtio_net_vde))
+  $(if $(and $(strip $(call find_include,slirp/libslirp.h)),\
+    $(shell pkg-config --exists slirp 2>/dev/null && echo y)),\
+    $(call virtio_net_slirp,pkg-config))
   $(if $(strip $(call find_include,fuse3/fuse.h)),$(call set_autoconf_var,FUSE,y))
   $(if $(strip $(call find_include,archive.h)),$(call set_autoconf_var,ARCHIVE,y))
   $(if $(strip $(call find_include,argp.h)),$(call set_autoconf_var,ARGP,y))
@@ -97,6 +106,8 @@ define nt64_host
   $(call set_autoconf_var,NEEDS_LARGP,y)
   $(call set_autoconf_var,VIRTIO_NET,y)
   $(call set_autoconf_var,NT64,y)
+  $(if $(shell $(CROSS_COMPILE)pkg-config --exists slirp 2>/dev/null && echo y),\
+    $(call virtio_net_slirp,$(CROSS_COMPILE)pkg-config))
   CFLAGS += -Wl,--enable-auto-image-base -Wl,--image-base -Wl,0x10000000 \
 	 -Wl,--out-implib=$(OUTPUT)liblkl.dll.a -Wl,--export-all-symbols \
 	 -Wl,--enable-auto-import
