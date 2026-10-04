@@ -30,10 +30,11 @@ enum {
 	BACKEND_PIPE,
 	BACKEND_NONE,
 	BACKEND_WINTAP,
+	BACKEND_SLIRP,
 };
 
 const char *backends[] = { "tap", "macvtap", "raw", "dpdk", "pipe", "loopback",
-	"wintap", NULL };
+	"wintap", "slirp", NULL };
 static struct {
 	int backend;
 	const char *ifname;
@@ -202,6 +203,11 @@ static int lkl_test_nd_create(void)
 	case BACKEND_WINTAP:
 		nd = lkl_netdev_wintap_create(cla.ifname);
 		break;
+#ifdef LKL_HOST_CONFIG_VIRTIO_NET_SLIRP
+	case BACKEND_SLIRP:
+		nd = lkl_netdev_slirp_create();
+		break;
+#endif
 	}
 
 	if (!nd) {

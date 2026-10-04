@@ -25,6 +25,8 @@ cleanup_backend()
         ;;
     "wintap")
         ;;
+    "slirp")
+        ;;
     esac
 }
 
@@ -125,6 +127,12 @@ setup_backend()
 	      "OpenVPN TAP-Windows6" static $(ip_host) 255.255.255.0 0.0.0.0
         netsh advfirewall set allprofiles state off
         ;;
+    "slirp")
+        if [ -z "$LKL_HOST_CONFIG_VIRTIO_NET_SLIRP" ]; then
+            echo "slirp not configured"
+            return $TEST_SKIP
+        fi
+        ;;
     *)
         echo "don't know how to setup backend $1"
         return $TEST_FAILURE
@@ -180,6 +188,11 @@ run_tests()
                       --ifname tap0 \
                       --ip $(ip_lkl) --netmask-len $TEST_IP_NETMASK \
                       --dst $(ip_host) --sleep 10
+        ;;
+    "slirp")
+        lkl_test_exec $script_dir/net-test --backend slirp \
+                      --ip 10.0.2.15 --netmask-len 24 \
+                      --gateway 10.0.2.2 --dst 10.0.2.2
         ;;
     esac
 }
