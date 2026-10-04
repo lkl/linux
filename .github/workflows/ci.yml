@@ -121,7 +121,7 @@ jobs:
           sudo apt update -y
           sudo apt install -y ccache libjsmn-dev libfuse3-dev clang lld llvm qemu-system-x86 \
             qemu-utils sshpass cloud-image-utils binutils cmake ninja-build liblzma-dev libz-dev \
-            pkg-config autoconf libtool
+            pkg-config autoconf libtool libslirp-dev libglib2.0-dev
 
       - name: Install patched binutils for Windows
         if: runner.os == 'Windows'
