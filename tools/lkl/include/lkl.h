@@ -376,6 +376,18 @@ struct lkl_disk {
 int lkl_disk_add(struct lkl_disk *disk);
 
 /**
+ * lkl_disk_add_feature - add a new disk with feature bits provided
+ *
+ * This is the same as lkl_disk_add() except that it allows for virtio_blk
+ * feature bits to provided by the caller.
+ *
+ * @disk - the host disk handle
+ * @virtio_blk_features - VIRTIO_BLK_F_ flags
+ * @returns a disk id (0 is valid) or a strictly negative value in case of error
+ */
+int lkl_disk_add_feature(struct lkl_disk *disk, uint64_t virtio_blk_features);
+
+/**
  * lkl_disk_remove - remove a disk
  *
  * This function makes a cleanup of the @disk's virtio_dev structure

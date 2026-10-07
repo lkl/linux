@@ -67,8 +67,7 @@ static struct virtio_dev_ops blk_ops = {
 	.enqueue = blk_enqueue,
 };
 
-
-int lkl_disk_add(struct lkl_disk *disk)
+int lkl_disk_add_feature(struct lkl_disk *disk, uint64_t virtio_blk_features)
 {
 	struct virtio_blk_dev *dev;
 	unsigned long long capacity;
@@ -82,7 +81,7 @@ int lkl_disk_add(struct lkl_disk *disk)
 
 	dev->dev.device_id = LKL_VIRTIO_ID_BLOCK;
 	dev->dev.vendor_id = 0;
-	dev->dev.device_features = 0;
+	dev->dev.device_features = virtio_blk_features;
 	dev->dev.config_gen = 0;
 	dev->dev.config_data = &dev->config;
 	dev->dev.config_len = sizeof(dev->config);
@@ -110,6 +109,11 @@ out_free:
 	lkl_host_ops.mem_free(dev);
 
 	return ret;
+}
+
+int lkl_disk_add(struct lkl_disk *disk)
+{
+	return lkl_disk_add_feature(disk, 0);
 }
 
 int lkl_disk_remove(struct lkl_disk disk)
