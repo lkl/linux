@@ -71,6 +71,10 @@ SECTIONS
 	STABS_DEBUG
 	DWARF_DEBUG
 
+	/DISCARD/ : {
+		*(.export_symbol)
+	}
+
 	// Don't include DISCARDS section to build the target with code coverage.
 #if !defined(CONFIG_LKL_FUZZING)
 	DISCARDS
