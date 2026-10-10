@@ -78,4 +78,8 @@ void free_mem(void)
 		lkl_ops->page_free(_memory_start, mem_size);
 	else
 		lkl_ops->mem_free(_memory_start);
+#ifdef CONFIG_MMU
+	if (lkl_ops->shmem_cleanup)
+		lkl_ops->shmem_cleanup();
+#endif
 }

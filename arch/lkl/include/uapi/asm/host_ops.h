@@ -140,6 +140,10 @@ enum lkl_prot {
  * protection
  * @munmap - unmap previously mapped memory
  *
+ * @shmem_init - initialize host shared memory for MMU physical memory
+ * @shmem_mmap - map host shared memory into address space
+ * @shmem_cleanup - cleanup host shared memory resources
+ *
  * @pci_ops - pointer to PCI host operations
  */
 struct lkl_host_operations {
@@ -199,6 +203,7 @@ struct lkl_host_operations {
 	void (*shmem_init)(unsigned long size);
 	void *(*shmem_mmap)(void *addr, unsigned long pg_off, unsigned long size,
 				enum lkl_prot prot);
+	void (*shmem_cleanup)(void);
 
 	struct lkl_dev_pci_ops *pci_ops;
 };

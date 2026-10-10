@@ -531,6 +531,7 @@ static void shmem_init(unsigned long size)
 	snprintf(lkl_shmem_id, sizeof(lkl_shmem_id), "/lkl_phys_mem_%d", getpid());
 	shared_mem_fd = shm_open(lkl_shmem_id, O_RDWR | O_CREAT, rwx);
 	assert(shared_mem_fd >= 0);
+	assert(shm_unlink(lkl_shmem_id) == 0);
 	shared_mem_size = size;
 	assert(ftruncate(shared_mem_fd, shared_mem_size) == 0);
 }
@@ -545,6 +546,14 @@ static void *lkl_shmem_mmap(void *addr, unsigned long pg_off,
 	if (ret == MAP_FAILED)
 		return NULL;
 	return ret;
+}
+
+static void shmem_cleanup(void)
+{
+	if (shared_mem_fd >= 0) {
+		close(shared_mem_fd);
+		shared_mem_fd = -1;
+	}
 }
 #endif // LKL_HOST_CONFIG_MMU
 
@@ -611,6 +620,7 @@ struct lkl_host_operations lkl_host_ops = {
 #ifdef LKL_HOST_CONFIG_MMU
 	.shmem_init = shmem_init,
 	.shmem_mmap = lkl_shmem_mmap,
+	.shmem_cleanup = shmem_cleanup,
 #endif
 #ifdef LKL_HOST_CONFIG_VFIO_PCI
 	.pci_ops = &vfio_pci_ops,
