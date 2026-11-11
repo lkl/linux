@@ -242,7 +242,7 @@ static int copy_file(const char *src, const char *dst, int mode, uid_t owner, gi
 				}
 
 				to_write -= wrote;
-				ptr += len;
+				ptr += wrote;
 
 			} while (to_write > 0);
 		}
